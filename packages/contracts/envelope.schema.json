@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/envelope.schema.json",
+  "title": "TermRelay message envelope",
+  "type": "object",
+  "required": ["type", "protocolVersion", "messageId", "deviceId", "sentAt", "payload"],
+  "properties": {
+    "type": { "type": "string", "minLength": 1 },
+    "protocolVersion": { "const": "1" },
+    "messageId": { "type": "string", "format": "uuid" },
+    "deviceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "commandId": { "type": "string", "format": "uuid" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "sentAt": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}
+

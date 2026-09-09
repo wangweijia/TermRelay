@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/terminal-output.schema.json",
+  "title": "terminal.output payload",
+  "type": "object",
+  "required": ["encoding", "data"],
+  "properties": {
+    "encoding": { "const": "base64" },
+    "data": { "type": "string", "contentEncoding": "base64" }
+  },
+  "additionalProperties": false
+}
+

@@ -1,0 +1,7 @@
+packages:
+  - apps/server
+  - apps/web
+  - packages/contracts
+
+allowBuilds:
+  esbuild: true

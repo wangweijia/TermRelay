@@ -21,9 +21,9 @@
 | 产品 | TermRelay |
 | macOS App | TermRelay.app |
 | Git 仓库 | termrelay |
-| Mac 工程/目录 | termrelay-mac |
+| Mac 工程/源码目录 | TermRelay.app / apps/mac |
 | Server 工程/镜像 | termrelay-server / termrelay/server |
-| 协议模块 | termrelay-contracts |
+| 协议模块/源码目录 | @termrelay/contracts / packages/contracts |
 
 ## 1. 开发范围
 
@@ -522,43 +522,42 @@ session.failed
 ~~~text
 termrelay/
 ├── apps/
-│   ├── termrelay-mac/
-│   │   ├── TermRelay.xcodeproj
+│   ├── mac/
+│   │   ├── Package.swift
 │   │   ├── Sources/AppShell/
 │   │   ├── Sources/Terminal/
 │   │   ├── Sources/Session/
 │   │   ├── Sources/Remote/
 │   │   ├── Sources/Tools/
 │   │   └── Tests/
-│   └── termrelay-server/
-│       ├── server/
-│       │   ├── src/auth/
-│       │   ├── src/devices/
-│       │   ├── src/workspaces/
-│       │   ├── src/sessions/
-│       │   ├── src/events/
-│       │   └── src/web-ui/
-│       ├── web/
-│       │   ├── src/pages/
-│       │   ├── src/components/
-│       │   ├── src/stores/
-│       │   └── src/router/
-│       └── dist/public/
-├── termrelay-contracts/
-│   ├── envelope.schema.json
-│   ├── commands/
-│   ├── events/
-│   └── generated/
-│       ├── swift/
-│       └── typescript/
+│   ├── server/
+│   │   ├── src/auth/
+│   │   ├── src/devices/
+│   │   ├── src/workspaces/
+│   │   ├── src/sessions/
+│   │   ├── src/events/
+│   │   └── dist/public/
+│   └── web/
+│       ├── src/pages/
+│       ├── src/components/
+│       ├── src/stores/
+│       └── src/router/
+├── packages/
+│   └── contracts/
+│       ├── envelope.schema.json
+│       ├── commands/
+│       ├── events/
+│       └── generated/
+│           ├── swift/
+│           └── typescript/
 ├── deploy/
-│   ├── termrelay-server/Dockerfile
-│   ├── termrelay-server/docker-compose.yml
+│   ├── server/Dockerfile
+│   ├── server/compose.yaml
 │   └── cloudflare/
 └── docs/
 ~~~
 
-Swift App 不进入 pnpm workspace。Server 的 NestJS 与 Vue 3 工程使用同一个 pnpm workspace 和同一套构建命令。termrelay-contracts 是 Mac App、Server 和 Web UI 的共同协议源。
+Swift App 不进入 pnpm workspace。NestJS、Vue 3 与 `packages/contracts` 使用同一个 pnpm workspace 和同一套构建命令。`packages/contracts` 是 Mac App、Server 和 Web UI 的共同协议源；Web 的生产产物仍输出到 `apps/server/dist/public`，因此部署形态保持单镜像、单容器和单端口。
 
 ## 7. MVP 开发顺序
 

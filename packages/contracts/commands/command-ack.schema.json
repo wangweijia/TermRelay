@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/command-ack.schema.json",
+  "title": "command.ack payload",
+  "type": "object",
+  "required": ["commandId", "status"],
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["accepted", "completed", "rejected", "failed"] },
+    "errorCode": { "type": "string" },
+    "message": { "type": "string", "maxLength": 2048 }
+  },
+  "additionalProperties": false
+}
+

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/protocol-error.schema.json",
+  "title": "protocol.error payload",
+  "type": "object",
+  "required": ["code", "message"],
+  "properties": {
+    "code": { "enum": ["invalid_message", "unsupported_version", "unknown_device", "unknown_session", "unauthorized_workspace", "conflict", "internal_error"] },
+    "message": { "type": "string", "maxLength": 2048 },
+    "relatedMessageId": { "type": "string", "format": "uuid" }
+  },
+  "additionalProperties": false
+}
+
