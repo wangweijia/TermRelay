@@ -1,0 +1,12 @@
+.git
+.gitignore
+.DS_Store
+.env
+.env.*
+node_modules
+**/node_modules
+**/dist
+**/.build
+**/.swiftpm
+docs
+apps/mac

@@ -5,6 +5,8 @@
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
+    "migration:run": "typeorm migration:run -d dist/database/data-source.js",
+    "migration:revert": "typeorm migration:revert -d dist/database/data-source.js",
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -14,11 +16,14 @@
     "@nestjs/core": "^11.1.6",
     "@nestjs/platform-fastify": "^11.1.6",
     "@nestjs/platform-ws": "^11.1.6",
+    "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.1.6",
     "@termrelay/contracts": "workspace:*",
     "fastify": "5.11.3",
+    "mysql2": "^3.14.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "typeorm": "^0.3.26",
     "ws": "^8.18.3"
   },
   "devDependencies": {

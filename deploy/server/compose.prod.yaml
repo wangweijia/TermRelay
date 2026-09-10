@@ -1,0 +1,38 @@
+services:
+  server:
+    image: termrelay/server:${TERMRELAY_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_ENABLED: "true"
+      DB_HOST: ${DB_HOST:-192.168.8.134}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-termrelay_prod}
+      DB_USER: ${DB_USER:-appuser}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    profiles: ["migration"]
+    image: termrelay/server:${TERMRELAY_VERSION:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    command: ["node_modules/.bin/typeorm", "migration:run", "-d", "dist/database/data-source.js"]
+    environment:
+      DB_HOST: ${DB_HOST:-192.168.8.134}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-termrelay_prod}
+      DB_USER: ${DB_MIGRATION_USER:-root}
+      DB_PASSWORD: ${DB_MIGRATION_PASSWORD:-}

@@ -1,0 +1,58 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    environment:
+      NODE_ENV: development
+      DB_ENABLED: "true"
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: termrelay_dev
+      DB_USER: termrelay_dev
+      DB_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    command: ["node_modules/.bin/typeorm", "migration:run", "-d", "dist/database/data-source.js"]
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: termrelay_dev
+      DB_USER: termrelay_dev
+      DB_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: termrelay_dev
+      MYSQL_USER: termrelay_dev
+      MYSQL_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mysql-data:

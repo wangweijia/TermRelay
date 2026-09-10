@@ -63,7 +63,7 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 
 ## 状态与持久化原则
 
-- MySQL 保存设备、会话状态、命令幂等键、审批、审计和有限事件元数据。
+- MySQL 保存设备、会话状态、命令幂等键、审批、审计和有限事件元数据；本地使用 `termrelay_dev`，最终部署使用独立的 `termrelay_prod`。
 - 高频终端字节流默认只做短期环形缓冲；如需回放，采用压缩分块、TTL 和每会话配额。
 - `command_id` 在 Server 和 Mac 两侧去重；`session_id + seq` 在 Server 唯一。
 - 重连顺序为：注册 → 汇报每会话最后 ACK → 补传缺口 → 获取状态快照 → 恢复实时流。

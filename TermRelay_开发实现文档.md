@@ -426,20 +426,30 @@ Web UI 使用响应式状态管理处理实时交互：
 
 ### 4.4 MySQL
 
-Server 连接部署环境中已经存在的 Docker MySQL：
+数据库按环境完全隔离：
+
+| 环境 | 地址 | 数据库 | 运行用户 |
+| --- | --- | --- | --- |
+| 本地开发 | Docker `mysql:3306`；宿主机 `127.0.0.1:3307` | `termrelay_dev` | `termrelay_dev` |
+| 最终部署 | `192.168.8.134:3306` | `termrelay_prod` | `appuser` |
+
+生产配置示例：
 
 ~~~env
-DB_HOST=mysql
+DB_ENABLED=true
+DB_HOST=192.168.8.134
 DB_PORT=3306
-DB_NAME=ai_cli_remote
-DB_USER=ai_cli_remote
+DB_NAME=termrelay_prod
+DB_USER=appuser
 DB_PASSWORD=通过环境变量或 Docker Secret 注入
 ~~~
 
 要求：
 
-- 使用独立数据库和最小权限用户。
-- 不复用 root。
+- 开发和生产使用独立数据库，不复用现有 `shared` 数据库。
+- 长期运行的生产容器使用最小权限用户，只拥有 `termrelay_prod` 的 CRUD 权限。
+- root 只用于显式的一次性 migration，不进入长期运行容器。
+- 应用运行时不使用 root。
 - 生产环境使用 TypeORM migration。
 - 生产环境禁止 synchronize。
 - events 对 session_id + seq 建立唯一索引。
