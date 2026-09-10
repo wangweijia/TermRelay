@@ -29,6 +29,7 @@
 - 本地开发库与 Jetson 最终部署库隔离。
 - 本地 Docker Compose 开发栈已启动并通过健康检查。
 - 本地与 Jetson 数据库迁移和数据库健康检查均已实测。
+- 已提供 `pnpm release:server` 离线发布流程：构建 Jetson ARM64 镜像并打包镜像、Compose、生产环境模板和一键部署/健康检查脚本。
 
 环境与运行命令见 `docs/ENVIRONMENTS.md`。
 

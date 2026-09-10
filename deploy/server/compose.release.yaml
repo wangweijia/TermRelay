@@ -1,0 +1,36 @@
+services:
+  server:
+    image: ${TERMRELAY_IMAGE:?set TERMRELAY_IMAGE}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_ENABLED: "true"
+      DB_HOST: ${DB_HOST:?set DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-termrelay_prod}
+      DB_USER: ${DB_USER:?set DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      TERMINAL_EVENT_TTL_HOURS: ${TERMINAL_EVENT_TTL_HOURS:-24}
+      WEB_MAX_SESSION_SUBSCRIPTIONS: ${WEB_MAX_SESSION_SUBSCRIPTIONS:-16}
+      WEB_MAX_REPLAY_EVENTS: ${WEB_MAX_REPLAY_EVENTS:-10000}
+      COMMAND_ACK_TIMEOUT_MS: ${COMMAND_ACK_TIMEOUT_MS:-15000}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+    ports:
+      - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    profiles: ["migration"]
+    image: ${TERMRELAY_IMAGE:?set TERMRELAY_IMAGE}
+    command: ["node_modules/.bin/typeorm", "migration:run", "-d", "dist/database/data-source.js"]
+    environment:
+      DB_HOST: ${DB_HOST:?set DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${DB_NAME:-termrelay_prod}
+      DB_USER: ${DB_MIGRATION_USER:?set DB_MIGRATION_USER}
+      DB_PASSWORD: ${DB_MIGRATION_PASSWORD:?set DB_MIGRATION_PASSWORD}

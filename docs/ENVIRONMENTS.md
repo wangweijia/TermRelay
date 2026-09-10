@@ -35,6 +35,8 @@ Mac App 可以在设置中填写开发 Server 地址。同机运行时使用 `ws
 
 ## 最终部署
 
+需要在开发机生成离线 Docker 发布包、再手动上传 Jetson 时，使用 `pnpm release:server`；完整步骤见 `docs/SERVER_RELEASE.md`。
+
 生产数据库使用 Jetson 上的 MySQL 8.4：
 
 | 配置 | 值 |
