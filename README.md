@@ -17,7 +17,7 @@ docs/                      架构、可行性与开发决策
 scripts/                   仓库级校验脚本
 ```
 
-完整边界见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，可行性结论见 [docs/FEASIBILITY.md](docs/FEASIBILITY.md)，开发/生产数据库见 [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)。原始实现说明保留在 [TermRelay_开发实现文档.md](TermRelay_开发实现文档.md)。
+完整边界见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，Codex 结构化接入与后续实施顺序见 [docs/ADR-001-CODEX-APP-SERVER.md](docs/ADR-001-CODEX-APP-SERVER.md)，可行性结论见 [docs/FEASIBILITY.md](docs/FEASIBILITY.md)，开发/生产数据库见 [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)。原始实现说明保留在 [TermRelay_开发实现文档.md](TermRelay_开发实现文档.md)。
 
 ## 开始开发
 

@@ -333,7 +333,7 @@ enum IntegrationType: String, Codable {
 | 工具调用与审批语义 | 不保证 | 适配器提供 |
 | 精确任务完成事件 | 不保证 | 适配器提供 |
 
-阶段 0 验证时，Codex 0.151.0 没有 ACP CLI 入口，但提供 `codex app-server` 结构化协议以及连接它的 `codex --remote` TUI 模式。App Server 是 CodexAdapter 的可选增强，不是 App 核心协议。MVP 先使用已经验证的 PTY 完成远程镜像和输入；后续若接入 App Server，应将其实现为独立适配器并保留 PTY 回退。
+阶段 0 验证时，Codex 0.151.0 没有 ACP CLI 入口，但提供 `codex app-server` 结构化协议以及连接它的 `codex --remote` TUI 模式。项目已决定直接使用官方 App Server Protocol 实现 Codex 结构化增强，不通过 `codex-acp`；完整决策见 [`docs/ADR-001-CODEX-APP-SERVER.md`](docs/ADR-001-CODEX-APP-SERVER.md)。App Server 是 CodexAdapter 的可选增强，不是 App 核心协议。MVP 先使用已经验证的 PTY 完成远程镜像和输入；之后以 Mac 本地 stdio 子进程实现 App Server Adapter，将原生事件转换成 TermRelay Contract，并保留 PTY 回退。
 
 ### 3.12 环境管理
 
@@ -596,6 +596,10 @@ Swift App 不进入 pnpm workspace。NestJS、Vue 3 与 `packages/contracts` 使
 - 会话注册、心跳和状态。
 - 终端输出、远程输入和停止。
 - command_id、seq、ACK 和断线补传。
+
+阶段 2 先完成与 CLI 类型无关的 PTY 纵向闭环。Codex App Server 不阻塞该阶段；闭环通过后，
+按 ADR-001 的 A～E 清单增加 Codex 结构化模式。禁止让 Server/Web 直接依赖 App Server 原始
+JSON-RPC，也不在此阶段引入 `codex-acp`。
 
 ### 阶段 3：管理页面
 

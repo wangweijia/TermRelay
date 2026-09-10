@@ -50,6 +50,16 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 4. Web 不直接连接 Mac，不持有工作区真实路径，也不单独部署。
 5. Server 只保存工作区不透明 ID；Mac 是本地路径授权的最终裁决者。
 
+## Codex 集成决策
+
+Codex 的结构化增强直接使用官方 App Server Protocol，不通过 `codex-acp`。Mac App 在本机
+通过 stdio JSONL 管理 `codex app-server` 子进程，将原生事件转换成 TermRelay Contract；
+Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Codex）继续保留 PTY 基础
+模式，App Server 不可用或版本不兼容时在 turn 启动前回退到 PTY。
+
+完整组件边界、通信流程、版本策略、实施清单和验收标准见
+[`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md)。
+
 ## 运行时端口与信任边界
 
 | 入口 | 调用方 | 身份要求 | 能力 |
@@ -76,4 +86,4 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 - SwiftTerm 对中文、组合字符、全屏 TUI、鼠标和 resize 的表现。
 - PTY 子进程组的 Ctrl-C、退出和 App 崩溃清理。
 - 输出双路分发的延迟、背压和内存上限。
-- Codex App Server 协议的版本兼容性；任何失败都回退到已验证的纯 PTY。
+- Codex App Server 协议的版本兼容性；按 ADR-001 实施，任何启动前失败都回退到已验证的纯 PTY。

@@ -226,6 +226,11 @@ Mac 端原有代码来自项目初始化提交：
 
 阶段 0 已关闭；完成第 4～5 项后，才具备首个可演示的 TermRelay 纵向闭环。
 
+Codex 结构化能力不阻塞上述 PTY 闭环。PTY 闭环通过后，按照
+[`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md) 的 A～E 顺序实现：Mac 本地
+stdio App Server 探针、内部 `StructuredToolAdapter`/`ToolEvent`、TermRelay Contract、
+Server/Web UI，最后完成版本矩阵与安全加固。`codex-acp` 当前不在开发依赖中。
+
 ## 维护方式
 
 后续每次推进 Mac 端任务时，应同步更新：
@@ -234,3 +239,4 @@ Mac 端原有代码来自项目初始化提交：
 - 对应任务表中的状态及备注。
 - 已通过的构建、测试和实机探针结果。
 - 新发现的阻塞项和下一步优先级。
+- ADR-001 开发清单、受测 Codex 版本和 App Server Schema fixture。
