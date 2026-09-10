@@ -83,6 +83,7 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 - `command_id` 在 Server 和 Mac 两侧去重；`session_id + seq` 在 Server 唯一。
 - 重连顺序为：注册 → 汇报每会话最后 ACK → 补传缺口 → 获取状态快照 → 恢复实时流。
 - `session.state_version` 使用乐观锁，避免断线补传覆盖新状态。
+- Browser 只订阅目标 Session：先通过 HTTP 加载历史，再携带最后 seq 建立 `/ws/web` 订阅；Server 在快照期间缓冲实时事件，浏览器按 seq 去重。
 
 ## M0 与阶段 0 的分界
 

@@ -54,3 +54,9 @@ public struct TerminalOutputPayload: Codable, Sendable {
     public let encoding: String
     public let data: String
 }
+
+public struct SessionSubscribePayload: Codable, Sendable {
+    public let afterSeq: Int64?
+}
+
+public struct SessionUnsubscribePayload: Codable, Sendable {}

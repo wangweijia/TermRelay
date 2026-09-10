@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/web/session-unsubscribe.schema.json",
+  "title": "session.unsubscribe payload",
+  "type": "object",
+  "maxProperties": 0,
+  "additionalProperties": false
+}

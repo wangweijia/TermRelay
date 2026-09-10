@@ -21,9 +21,18 @@ export type ClientEventResult =
       detail: string;
     };
 
+export interface SessionEventNotification {
+  deviceId: string;
+  sessionId: string;
+  event: SessionEventRecord;
+}
+
+export type SessionEventListener = (notification: SessionEventNotification) => void;
+
 @Injectable()
 export class SessionsService implements OnModuleDestroy {
   private readonly queues = new Map<string, Promise<void>>();
+  private readonly listeners = new Set<SessionEventListener>();
 
   constructor(
     private readonly devices: DevicesService,
@@ -70,9 +79,13 @@ export class SessionsService implements OnModuleDestroy {
           'Session workspace is not registered and available for this device.',
         );
       }
-      return mapSessionWrite(
-        await this.sessions.registerStarted(deviceId, sessionId, payload),
+      const result = await this.sessions.registerStarted(
+        deviceId,
+        sessionId,
+        payload,
       );
+      this.publishAccepted(deviceId, sessionId, result);
+      return mapSessionWrite(result);
     });
   }
 
@@ -83,14 +96,14 @@ export class SessionsService implements OnModuleDestroy {
     payload: TerminalOutputPayload,
   ): Promise<ClientEventResult> {
     return this.serialize(deviceId, async () => {
-      return mapSessionWrite(
-        await this.sessions.appendTerminalOutput(
-          deviceId,
-          sessionId,
-          seq,
-          payload,
-        ),
+      const result = await this.sessions.appendTerminalOutput(
+        deviceId,
+        sessionId,
+        seq,
+        payload,
       );
+      this.publishAccepted(deviceId, sessionId, result);
+      return mapSessionWrite(result);
     });
   }
 
@@ -114,6 +127,11 @@ export class SessionsService implements OnModuleDestroy {
     return this.sessions.listEvents(sessionId, afterSeq, limit);
   }
 
+  subscribe(listener: SessionEventListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   private serialize<T>(key: string, work: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(key) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(work);
@@ -129,18 +147,39 @@ export class SessionsService implements OnModuleDestroy {
   private async waitForWrites(): Promise<void> {
     await Promise.all(this.queues.values());
   }
+
+  private publishAccepted(
+    deviceId: string,
+    sessionId: string,
+    result: SessionWriteResult,
+  ): void {
+    if (result.status !== 'accepted') return;
+    const notification: SessionEventNotification = {
+      deviceId,
+      sessionId,
+      event: cloneEvent(result.event),
+    };
+    for (const listener of this.listeners) listener(notification);
+  }
 }
 
 function mapSessionWrite(result: SessionWriteResult): ClientEventResult {
   switch (result.status) {
     case 'accepted':
     case 'duplicate':
-      return result;
+      return { status: result.status };
     case 'unknown_session':
       return error('unknown_session', 'Session does not exist for this device.');
     case 'conflict':
       return error('conflict', result.detail);
   }
+}
+
+function cloneEvent(event: SessionEventRecord): SessionEventRecord {
+  return {
+    ...event,
+    payload: structuredClone(event.payload),
+  };
 }
 
 function error(

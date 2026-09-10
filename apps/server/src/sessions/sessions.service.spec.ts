@@ -69,6 +69,24 @@ test('maps sequence conflicts from terminal output persistence', async () => {
   if (result.status === 'error') assert.equal(result.code, 'conflict');
 });
 
+test('publishes accepted terminal events to realtime listeners', async () => {
+  const workspaces = new FakeWorkspaceRepository();
+  const sessions = new FakeSessionRepository();
+  const service = makeService(workspaces, sessions);
+  const received: number[] = [];
+  const unsubscribe = service.subscribe((notification) => {
+    received.push(notification.event.seq);
+  });
+
+  await service.appendTerminalOutput('device-a', 'session-a', 1, {
+    encoding: 'base64',
+    data: 'dGVzdA==',
+  });
+  unsubscribe();
+
+  assert.deepEqual(received, [1]);
+});
+
 function makeService(
   workspaces: FakeWorkspaceRepository,
   sessions: FakeSessionRepository,
@@ -116,15 +134,23 @@ class FakeSessionRepository {
   readonly enabled = true;
   readonly registrations: string[] = [];
   outputResult:
-    | { status: 'accepted' }
-    | { status: 'conflict'; detail: string } = { status: 'accepted' };
+    | {
+        status: 'accepted';
+        event: {
+          seq: number;
+          type: string;
+          payload: Record<string, unknown>;
+          createdAt: string;
+        };
+      }
+    | { status: 'conflict'; detail: string } = acceptedEvent(1);
 
   async registerStarted(
     _deviceId: string,
     sessionId: string,
-  ): Promise<{ status: 'accepted' }> {
+  ) {
     this.registrations.push(sessionId);
-    return { status: 'accepted' };
+    return acceptedEvent(0, 'session.started');
   }
 
   async appendTerminalOutput() {
@@ -142,4 +168,16 @@ class FakeSessionRepository {
   async listEvents() {
     return [];
   }
+}
+
+function acceptedEvent(seq: number, type = 'terminal.output') {
+  return {
+    status: 'accepted' as const,
+    event: {
+      seq,
+      type,
+      payload: {},
+      createdAt: new Date(1_000 + seq).toISOString(),
+    },
+  };
 }

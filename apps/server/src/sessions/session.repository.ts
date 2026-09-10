@@ -30,7 +30,8 @@ export interface SessionEventRecord {
 }
 
 export type SessionWriteResult =
-  | { status: 'accepted' | 'duplicate' }
+  | { status: 'accepted'; event: SessionEventRecord }
+  | { status: 'duplicate' }
   | { status: 'conflict'; detail: string }
   | { status: 'unknown_session' };
 
@@ -80,6 +81,7 @@ export class SessionRepository {
             };
       }
 
+      const createdAt = new Date();
       await sessions.insert({
         id: sessionId,
         deviceId,
@@ -96,9 +98,18 @@ export class SessionRepository {
         seq: '0',
         type: 'session.started',
         payload: { ...payload },
+        createdAt,
         expiresAt: null,
       });
-      return { status: 'accepted' };
+      return {
+        status: 'accepted',
+        event: {
+          seq: 0,
+          type: 'session.started',
+          payload: { ...payload },
+          createdAt: createdAt.toISOString(),
+        },
+      };
     });
   }
 
@@ -142,18 +153,28 @@ export class SessionRepository {
         };
       }
 
+      const createdAt = new Date();
       await events.insert({
         sessionId,
         seq: String(seq),
         type: 'terminal.output',
         payload: { ...payload },
+        createdAt,
         expiresAt: new Date(Date.now() + this.terminalEventTtlMs),
       });
       await sessions.update(
         { id: sessionId },
         { stateVersion: String(seq), status: 'running' },
       );
-      return { status: 'accepted' };
+      return {
+        status: 'accepted',
+        event: {
+          seq,
+          type: 'terminal.output',
+          payload: { ...payload },
+          createdAt: createdAt.toISOString(),
+        },
+      };
     });
   }
 

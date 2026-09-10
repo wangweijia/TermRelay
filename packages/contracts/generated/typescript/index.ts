@@ -150,6 +150,12 @@ export interface TerminalOutputPayload {
   data: string;
 }
 
+export interface SessionSubscribePayload {
+  afterSeq?: number;
+}
+
+export type SessionUnsubscribePayload = Record<string, never>;
+
 export const terminalOutputSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://termrelay.local/contracts/events/terminal-output.schema.json',
@@ -167,6 +173,30 @@ export const terminalOutputSchema = {
         '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
     },
   },
+  additionalProperties: false,
+} as const;
+
+export const sessionSubscribeSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/web/session-subscribe.schema.json',
+  title: 'session.subscribe payload',
+  type: 'object',
+  properties: {
+    afterSeq: {
+      type: 'integer',
+      minimum: -1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const sessionUnsubscribeSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/web/session-unsubscribe.schema.json',
+  title: 'session.unsubscribe payload',
+  type: 'object',
+  maxProperties: 0,
   additionalProperties: false,
 } as const;
 
