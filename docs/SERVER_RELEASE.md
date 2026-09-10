@@ -16,7 +16,7 @@ pnpm release:server
 - 目标平台为 Jetson 使用的 `linux/arm64`。
 - 构建前执行全仓检查、Server 构建和测试。
 - 工作区存在未提交修改时拒绝发布，避免镜像内容与版本号不一致。
-- 输出到 `dist/releases/`。
+- 输出到 `dist/termrelay-server/`。
 
 指定正式版本：
 
@@ -37,7 +37,7 @@ pnpm release:server -- --version 0.1.0
 生成文件示例：
 
 ```text
-dist/releases/
+dist/termrelay-server/
 ├── termrelay-server-0.1.0-linux-arm64.tar.gz
 └── termrelay-server-0.1.0-linux-arm64.tar.gz.sha256
 ```

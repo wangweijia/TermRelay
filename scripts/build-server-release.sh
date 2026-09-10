@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 version="$(git -C "$repo_root" rev-parse --short HEAD)"
 platform="linux/arm64"
-output_dir="$repo_root/dist/releases"
+output_dir="$repo_root/dist/termrelay-server"
 run_checks=true
 allow_dirty=false
 
@@ -15,7 +15,7 @@ Usage: scripts/build-server-release.sh [options]
 Options:
   --version VERSION     Image/release version (default: current Git SHA)
   --platform PLATFORM   Docker platform (default: linux/arm64 for Jetson)
-  --output-dir PATH     Artifact directory (default: dist/releases)
+  --output-dir PATH     Artifact directory (default: dist/termrelay-server)
   --skip-check          Skip pnpm check before building
   --allow-dirty         Allow packaging uncommitted workspace changes
   -h, --help            Show this help
