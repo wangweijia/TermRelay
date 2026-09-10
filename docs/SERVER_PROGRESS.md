@@ -2,20 +2,20 @@
 
 > 评估日期：2026-09-10
 >
-> 当前阶段：M0/M1——可运行工程骨架与数据库基线
+> 当前阶段：Server S1——连接与注册内存闭环已实现，真实 WebSocket 探针待补验
 >
 > 评估范围：`apps/server`、`packages/contracts`、`deploy/server`、Web 静态托管链路及 Git 提交记录
 
 ## 总体结论
 
-Server 目前处于工程骨架阶段。NestJS 服务、数据库结构、WebSocket 入口、健康检查和部署配置已经建立，但设备注册、会话管理、终端中继和远程控制等核心业务尚未实现。
+Server 已从纯工程骨架进入 S1 连接管理阶段。NestJS 服务现在能够校验 Client 消息、在内存中注册设备、维护 `device_id` 与 WebSocket 的唯一映射，并根据心跳、断开和超时更新在线状态。设备持久化、会话管理、终端中继和远程控制仍未实现。
 
-- 工程基础完成度：约 35%。
-- Server MVP 功能完成度：约 10%～15%。
-- 阶段 2“Server 与 Mac 闭环”完成度：约 15%～20%。
+- 工程基础完成度：约 45%。
+- Server MVP 功能完成度：约 20%～25%。
+- 阶段 2“Server 与 Mac 闭环”完成度：约 25%～30%。
 - 当前端到端可使用程度：0%。
-- 当前可以完成：启动 Server、查看健康状态、加载 Web 占位页、建立 WebSocket 连接。
-- 当前无法完成：注册 Mac、创建会话、传输终端输出、远程输入或恢复断线会话。
+- 当前可以完成：启动 Server、查看健康状态、加载 Web 占位页、建立 WebSocket 连接、校验并在内存中注册设备、接收心跳和维护在线状态。
+- 当前无法完成：持久化设备、从 API/Web 展示设备、创建会话、传输终端输出、远程输入或恢复断线会话。
 
 以上比例是基于规划任务数量和关键路径权重的工程估算，不是正式验收数据。
 
@@ -71,7 +71,7 @@ GET /health
 
 | 入口 | 当前能力 |
 | --- | --- |
-| `/ws/client` | 握手、记录连接、处理断开、检查协议版本 |
+| `/ws/client` | Envelope/payload 校验、设备注册确认、唯一连接映射、心跳及超时离线 |
 | `/ws/web` | 握手、记录连接、处理断开 |
 
 实测两个入口均能建立连接：
@@ -87,7 +87,18 @@ GET /health
 /ws/client close 1002 unsupported protocol version
 ```
 
-当前只有进程内连接集合，没有设备映射、消息路由、持久化或 Gateway 之间的事件转发。
+Server S1 已新增：
+
+- AJV Draft 2020-12 运行时 Envelope 和 payload 校验。
+- `connected -> registered` 连接状态。
+- 内存 `DeviceConnectionRegistry`。
+- `device_id -> WebSocket` 唯一映射；同一设备的新连接替换旧连接。
+- `device.registered` 注册确认消息和对应 JSON Schema。
+- `device.heartbeat` 状态及活动会话数更新。
+- 未注册连接超时、心跳超时、主动断开和离线快照。
+- 可配置的 heartbeat interval/timeout、registration timeout 和 sweep interval。
+
+当前状态仍只存在于进程内存，Server 重启后会清空。真实网络层 S1 探针脚本已经加入，但本次因本机 localhost 网络权限确认被中止，尚不能标记为实测通过。
 
 相关文件：
 
@@ -209,10 +220,10 @@ Web 构建成功，但主 JavaScript 包约 1.02 MB，Vite 报出大于 500 KB �
 | --- | --- | --- |
 | Server 单体项目 | 完成 | 可以构建、启动和托管页面 |
 | MySQL migration | 开发完成、未实机验证 | 当前机器没有 Docker/MySQL |
-| `/ws/client` WebSocket | 基础完成 | 只能握手和检查协议版本 |
-| `device.register` | 未实现 | 没有验证、写库或更新设备 |
-| 设备在线/离线管理 | 未实现 | 连接没有映射到 Device ID |
-| 心跳与超时 | 未实现 | 没有 stale/offline 判定 |
+| `/ws/client` WebSocket | S1 完成、真实探针待补验 | 已接入运行时校验、注册和心跳路由 |
+| `device.register` | 内存版完成 | 校验、更新设备、返回 `device.registered`；尚未写库 |
+| 设备在线/离线管理 | 内存版完成 | 唯一连接映射、替换连接、断开离线；重启丢失 |
+| 心跳与超时 | 完成 | heartbeat、注册超时、stale/offline 和关闭码已有自动化测试 |
 | 会话注册与状态同步 | 未实现 | 没有 Session Service |
 | 终端输出接收 | 未实现 | `terminal.output` 不会被处理 |
 | 输出转发到 Web | 未实现 | 两个 Gateway 没有连接 |
@@ -224,7 +235,7 @@ Web 构建成功，但主 JavaScript 包约 1.02 MB，Vite 报出大于 500 KB �
 | 断线补传 | 未实现 | 没有 Journal 协商 |
 | 状态快照恢复 | 未实现 | 没有连接恢复流程 |
 
-阶段 2 当前最准确的描述是：入口和数据模型存在，但纵向业务链路尚未开始。
+阶段 2 当前最准确的描述是：设备连接纵向切片已经实现并通过类级自动化测试，但 Session、终端数据和浏览器路由尚未开始。
 
 ## HTTP API 状态
 
@@ -301,9 +312,14 @@ CF_ACCESS_TEAM_DOMAIN
 - `/ws/client` 握手。
 - `/ws/web` 握手。
 - 错误协议版本以 1002 关闭。
+- Server S1 TypeScript 类型检查和 NestJS 构建。
+- ProtocolValidator、DeviceConnectionRegistry 和 ClientGateway 共 11 个自动化测试。
+- 有效注册/心跳、非法 payload、未注册心跳、重复设备替换、注册超时和心跳超时测试。
 
 ### 尚未验证
 
+- `pnpm --filter @termrelay/server probe:s1` 真实 WebSocket 网络探针。
+- 真实计时器驱动的 registration/heartbeat timeout；当前为确定性单元测试。
 - MySQL migration 正向执行。
 - Migration 回滚。
 - 数据库健康检查。
@@ -325,13 +341,17 @@ CF_ACCESS_TEAM_DOMAIN
 2. 查看健康状态。
 3. 加载 Vue 占位页面。
 4. 连接两个 WebSocket 入口。
-5. 拒绝协议版本不为 `1` 的 Client 消息。
-6. 准备 MySQL 初始表结构。
+5. 校验 Envelope、`device.register` 和 `device.heartbeat` payload。
+6. 在内存中注册设备并返回心跳配置。
+7. 维护每个设备的唯一连接和在线/离线快照。
+8. 拒绝未注册心跳及协议版本不为 `1` 的 Client 消息。
+9. 清理注册超时和心跳超时连接。
+10. 准备 MySQL 初始表结构。
 
 当前不能：
 
-1. 注册或展示一台 Mac。
-2. 保存设备状态。
+1. 使用真实 TermRelay Mac App 注册或在 Web 展示设备。
+2. 将设备状态持久化到 MySQL；当前仅保存于内存。
 3. 创建会话。
 4. 接收终端输出。
 5. 把终端输出推送给浏览器。
@@ -345,10 +365,10 @@ CF_ACCESS_TEAM_DOMAIN
 
 建议先打通最小纵向闭环，再扩充管理页面：
 
-1. 增加运行时 Envelope 和 payload Schema 校验。
-2. 实现 Device Repository 和 `device.register`。
-3. 建立 WebSocket 连接与 `device_id` 的映射。
-4. 实现心跳、断开和超时离线状态。
+1. 在可访问 localhost 的环境运行 `probe:s1`，关闭 S1 真实网络验证。
+2. 将运行时 Schema 常量接入正式代码生成，消除手工生成 bootstrap。
+3. 实现 Device Repository，把内存设备快照持久化到 MySQL。
+4. 增加只读 Device API 或内部查询，用于后续 Web 展示。
 5. 实现 Session Repository 和会话注册。
 6. 接收 `terminal.output`，校验 `session_id + seq`。
 7. 把终端输出实时广播到 `/ws/web`。
@@ -358,6 +378,47 @@ CF_ACCESS_TEAM_DOMAIN
 11. 最后接入 Cloudflare Access 和生产网络限制。
 
 完成第 1～8 项后，Server 才算拥有第一个真正可演示的 TermRelay 闭环。
+
+## 下次开发交接
+
+本次提交范围是 **Server S1：连接与注册内存闭环**。回家继续时先执行：
+
+```bash
+pnpm install
+pnpm contracts:check
+pnpm --filter @termrelay/server test
+```
+
+终端 A 启动无数据库 Server：
+
+```bash
+cd apps/server
+DB_ENABLED=false HOST=127.0.0.1 PORT=3100 node dist/main.js
+```
+
+终端 B 执行真实 WebSocket 探针：
+
+```bash
+pnpm --filter @termrelay/server probe:s1
+```
+
+探针应依次输出：
+
+```text
+✓ registration acknowledgement and heartbeat
+✓ unregistered heartbeat rejected
+✓ unsupported protocol version rejected
+Server S1 WebSocket probe passed.
+```
+
+如果探针通过，先在本表把 `/ws/client` 更新为“已实测”，然后从“正式 Schema 代码生成”或 Device Repository 继续。当前明确未完成：
+
+- S1 真实 WebSocket 网络探针。
+- MySQL Device Repository 和重启后状态恢复。
+- 真实 Mac App 的 register/heartbeat Client。
+- Device HTTP API 和 Web 展示。
+- Session、terminal output、Web 广播、远程输入、ACK 和补传。
+- Cloudflare Access、Mac 身份认证、速率限制和生产网络加固。
 
 ## 维护方式
 

@@ -45,5 +45,6 @@ swift run TermRelay
 - 已建立 Server、Web、Mac 和 Contracts 的工程边界。
 - 已定义协议 envelope、注册、心跳、终端输出、命令 ACK 和错误 Schema。
 - 已提供 Server 健康检查、两类 WebSocket 网关和 Web 页面骨架。
+- Server S1 已实现运行时协议校验、内存设备注册、唯一连接映射、心跳和超时离线；真实 WebSocket 探针待补验。
 - Mac App 已接入 SwiftTerm、本地 PTY、登录 Shell/Codex 启动、目录选择、Ctrl-C、停止和有界输出批处理探针。
 - Server 仍未与 Mac 建立 WebSocket 闭环；Cloudflare Access、应用签名和生产分发尚未完成。
