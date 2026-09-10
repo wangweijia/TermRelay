@@ -58,7 +58,9 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 模式，App Server 不可用或版本不兼容时在 turn 启动前回退到 PTY。
 
 完整组件边界、通信流程、版本策略、实施清单和验收标准见
-[`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md)。
+[`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md)；通用接口、能力模型、事件、
+生命周期和新智能体接入规范见
+[`STRUCTURED_AGENT_ADAPTER_DESIGN.md`](STRUCTURED_AGENT_ADAPTER_DESIGN.md)。
 
 ## 运行时端口与信任边界
 

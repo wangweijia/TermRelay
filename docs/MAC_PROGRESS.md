@@ -228,8 +228,10 @@ Mac 端原有代码来自项目初始化提交：
 
 Codex 结构化能力不阻塞上述 PTY 闭环。PTY 闭环通过后，按照
 [`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md) 的 A～E 顺序实现：Mac 本地
-stdio App Server 探针、内部 `StructuredToolAdapter`/`ToolEvent`、TermRelay Contract、
+stdio App Server 探针、内部 `StructuredAgentAdapter`/`ToolEvent`、TermRelay Contract、
 Server/Web UI，最后完成版本矩阵与安全加固。`codex-acp` 当前不在开发依赖中。
+适配层接口和新智能体接入流程以
+[`STRUCTURED_AGENT_ADAPTER_DESIGN.md`](STRUCTURED_AGENT_ADAPTER_DESIGN.md) 为准。
 
 ## 维护方式
 

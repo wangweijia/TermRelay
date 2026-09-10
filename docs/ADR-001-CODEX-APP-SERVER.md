@@ -7,6 +7,8 @@
 > 适用范围：TermRelay macOS App 的 Codex 结构化能力
 >
 > 官方参考：[Codex App Server](https://developers.openai.com/codex/app-server)
+>
+> 适配层详细设计：[TermRelay 结构化智能体适配层设计](STRUCTURED_AGENT_ADAPTER_DESIGN.md)
 
 ## 决策摘要
 
@@ -255,7 +257,7 @@ App Server 集成不阻塞当前最小 PTY 纵向闭环，按以下顺序实施�
 
 ### C. 建立稳定的内部边界
 
-- [ ] 定义 `StructuredToolAdapter` 与 `ToolEvent`，保持 Session 层与 Codex 解耦。
+- [ ] 按适配层详细设计定义 `StructuredAgentAdapter` 与 `ToolEvent`，保持 Session 层与 Codex 解耦。
 - [ ] 将最小 `tool.*` 事件和动作加入 `packages/contracts`。
 - [ ] 生成 Swift/TypeScript DTO，并增加兼容性检查。
 - [ ] 实现 `session_id`、`thread_id`、`turn_id`、审批 ID 的关联与恢复。
@@ -300,7 +302,7 @@ App Server Adapter 达到可用状态必须同时满足：
 - ACP 的 Swift SDK、会话恢复、审批和扩展能力达到项目生产要求。
 - 某个目标 Agent 只提供 ACP，而没有质量相当的官方结构化接口。
 
-即使以后引入 ACP，也应把它实现为新的 `StructuredToolAdapter`，而不是替换 PTY、
+即使以后引入 ACP，也应把它实现为新的 `StructuredAgentAdapter`，而不是替换 PTY、
 TermRelay Contract 或现有 Codex App Server Adapter。
 
 ## 后续维护规则
