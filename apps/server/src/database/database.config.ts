@@ -1,4 +1,5 @@
 import type { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
+import { DeviceEntity } from '../devices/device.entity';
 import { InitialSchema1788966000000 } from './migrations/1788966000000-initial-schema';
 
 export function databaseOptions(): MysqlConnectionOptions {
@@ -16,6 +17,7 @@ export function databaseOptions(): MysqlConnectionOptions {
     migrationsTransactionMode: 'none',
     migrationsTableName: 'typeorm_migrations',
     migrations: [InitialSchema1788966000000],
+    entities: [DeviceEntity],
   };
 }
 

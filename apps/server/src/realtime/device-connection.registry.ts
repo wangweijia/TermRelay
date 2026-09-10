@@ -32,6 +32,8 @@ export interface ExpiredConnection {
   deviceId?: string;
 }
 
+export type DeviceSnapshotListener = (snapshot: DeviceSnapshot) => void;
+
 @Injectable()
 export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
   readonly heartbeatIntervalMs = readPositiveInteger(
@@ -54,6 +56,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
   private readonly connections = new Map<WebSocket, ClientConnection>();
   private readonly clientsByDeviceId = new Map<string, WebSocket>();
   private readonly devices = new Map<string, DeviceSnapshot>();
+  private readonly listeners = new Set<DeviceSnapshotListener>();
   private sweepTimer?: NodeJS.Timeout;
 
   onModuleInit(): void {
@@ -114,6 +117,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     connection.lastSeenAtMs = nowMs;
     this.clientsByDeviceId.set(deviceId, client);
     this.devices.set(deviceId, snapshot);
+    this.publish(snapshot);
     return cloneSnapshot(snapshot);
   }
 
@@ -142,6 +146,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     device.activeSessionCount = payload.activeSessionCount ?? 0;
     device.lastSeenAt = new Date(nowMs).toISOString();
     delete device.disconnectedAt;
+    this.publish(device);
     return cloneSnapshot(device);
   }
 
@@ -208,11 +213,22 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     return [...this.devices.values()].map(cloneSnapshot);
   }
 
+  subscribe(listener: DeviceSnapshotListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   private markOffline(deviceId: string, nowMs: number): void {
     const device = this.devices.get(deviceId);
     if (!device) return;
     device.presence = 'offline';
     device.disconnectedAt = new Date(nowMs).toISOString();
+    this.publish(device);
+  }
+
+  private publish(device: DeviceSnapshot): void {
+    const snapshot = cloneSnapshot(device);
+    for (const listener of this.listeners) listener(snapshot);
   }
 }
 

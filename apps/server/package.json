@@ -9,8 +9,9 @@
     "migration:run": "typeorm migration:run -d dist/database/data-source.js",
     "migration:revert": "typeorm migration:revert -d dist/database/data-source.js",
     "probe:s1": "node scripts/probe-s1.mjs",
+    "probe:s2": "node scripts/probe-s2.mjs",
     "start": "node dist/main.js",
-    "test": "pnpm build && node --test dist/realtime/protocol-validator.spec.js dist/realtime/device-connection.registry.spec.js dist/realtime/client.gateway.spec.js",
+    "test": "pnpm build && node --test dist/app.module.spec.js dist/realtime/protocol-validator.spec.js dist/realtime/device-connection.registry.spec.js dist/realtime/client.gateway.spec.js dist/devices/devices.controller.spec.js dist/devices/devices.service.spec.js",
     "pretypecheck": "pnpm --filter @termrelay/contracts build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

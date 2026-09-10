@@ -1,7 +1,8 @@
-import { DynamicModule, Module } from '@nestjs/common';
+import { DynamicModule, Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseOptions } from './database.config';
 
+@Global()
 @Module({})
 export class DatabaseModule {
   static forRoot(): DynamicModule {
@@ -16,4 +17,3 @@ export class DatabaseModule {
     };
   }
 }
-

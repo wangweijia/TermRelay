@@ -2,7 +2,7 @@
 
 Your terminals, within reach.
 
-TermRelay 是一个把真实 Mac 上的 AI CLI 会话安全地中继到 Web 管理端的实验性平台。macOS 端已完成 **阶段 0：本地终端与协议探针实现**，Server 闭环仍处于工程骨架阶段。
+TermRelay 是一个把真实 Mac 上的 AI CLI 会话安全地中继到 Web 管理端的实验性平台。macOS 端已完成 **阶段 0：本地终端与协议探针实现**；Server 已完成设备连接、持久化和只读查询闭环。
 
 ## 仓库布局
 
@@ -45,6 +45,7 @@ swift run TermRelay
 - 已建立 Server、Web、Mac 和 Contracts 的工程边界。
 - 已定义协议 envelope、注册、心跳、终端输出、命令 ACK 和错误 Schema。
 - 已提供 Server 健康检查、两类 WebSocket 网关和 Web 页面骨架。
-- Server S1 已实现运行时协议校验、内存设备注册、唯一连接映射、心跳和超时离线；真实 WebSocket 探针待补验。
+- Server S1 已通过真实 WebSocket 探测：运行时协议校验、设备注册、唯一连接映射、心跳和超时离线均可用。
+- Server S2 已实现设备状态按序持久化，以及 `GET /api/devices` 和 `GET /api/devices/:id`；真实 MySQL 端到端探测已通过。
 - Mac App 已接入 SwiftTerm、本地 PTY、登录 Shell/Codex 启动、目录选择、Ctrl-C、停止和有界输出批处理探针。
-- Server 仍未与 Mac 建立 WebSocket 闭环；Cloudflare Access、应用签名和生产分发尚未完成。
+- Session、终端数据转发、真实 Mac 网络客户端、Cloudflare Access、应用签名和生产分发尚未完成。
