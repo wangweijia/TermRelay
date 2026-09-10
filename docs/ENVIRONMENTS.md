@@ -31,6 +31,8 @@ pnpm dev:server
 
 开发环境的默认密码只用于绑定在 `127.0.0.1` 的本机数据库，可以在 `deploy/server/.env.development` 中覆盖。
 
+Mac App 可以在设置中填写开发 Server 地址。同机运行时使用 `ws://127.0.0.1:3000/ws/client`；从另一台 Mac 连接时将主机替换为 Server 的局域网地址，并确保 Server 监听 LAN 地址。当前尚无设备认证，只能用于受控局域网。
+
 ## 最终部署
 
 生产数据库使用 Jetson 上的 MySQL 8.4：

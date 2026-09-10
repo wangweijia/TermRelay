@@ -84,6 +84,8 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 - 重连顺序为：注册 → 汇报每会话最后 ACK → 补传缺口 → 获取状态快照 → 恢复实时流。
 - `session.state_version` 使用乐观锁，避免断线补传覆盖新状态。
 - Browser 只订阅目标 Session：先通过 HTTP 加载历史，再携带最后 seq 建立 `/ws/web` 订阅；Server 在快照期间缓冲实时事件，浏览器按 seq 去重。
+- Web 的 input、resize、interrupt 和 stop 必须携带 `command_id`；Server 验证 Session/Device 归属与在线连接后定向转发，Mac 执行 PTY 操作并以 `command.ack` 返回结果。
+- Mac 网络层使用系统 `URLSessionWebSocketTask`，注册成功后才同步工作区/Session；尚未发送的终端批次最多在内存保留 16 MiB，重连并重新声明 Session 后按 seq 发送。
 
 ## M0 与阶段 0 的分界
 

@@ -31,6 +31,23 @@ test('accepts a valid heartbeat', () => {
   if (result.ok) assert.equal(result.message.type, 'device.heartbeat');
 });
 
+test('accepts command acknowledgements with matching command context', () => {
+  const commandId = randomUUID();
+  const result = validator.validate({
+    ...envelope('command.ack', { commandId, status: 'completed' }),
+    sessionId: 'session-a',
+    commandId,
+  });
+  assert.equal(result.ok, true);
+
+  const mismatch = validator.validate({
+    ...envelope('command.ack', { commandId: randomUUID(), status: 'completed' }),
+    sessionId: 'session-a',
+    commandId,
+  });
+  assert.equal(mismatch.ok, false);
+});
+
 test('accepts workspace, session, and terminal events with required context', () => {
   const workspace = validator.validate(
     envelope('workspace.registered', {

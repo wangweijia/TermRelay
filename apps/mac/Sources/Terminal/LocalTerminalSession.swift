@@ -17,6 +17,7 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     let directory: URL
     let tool: BuiltInTool
     let terminalView: CapturingTerminalView
+    let startedAt: String
 
     @Published private(set) var state: SessionState = .starting
     @Published private(set) var title: String
@@ -27,7 +28,11 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     private var outputBatcher: TerminalOutputBatcher!
     private var hasStarted = false
 
-    init(directory: URL, tool: BuiltInTool) throws {
+    init(
+        directory: URL,
+        tool: BuiltInTool,
+        outputHandler relayOutputHandler: @escaping @Sendable (TerminalOutputBatch) -> Void = { _ in }
+    ) throws {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
@@ -37,6 +42,7 @@ final class LocalTerminalSession: NSObject, ObservableObject {
         id = UUID()
         self.directory = directory
         self.tool = tool
+        startedAt = RelayDate.now()
         launchConfiguration = try tool.adapter.makeLaunchConfiguration(directory: directory)
         title = "\(tool.displayName) — \(directory.lastPathComponent)"
         currentDirectory = directory.path
@@ -67,7 +73,8 @@ final class LocalTerminalSession: NSObject, ObservableObject {
         )
         terminalView.caretColor = .systemGreen
 
-        outputBatcher = TerminalOutputBatcher(sessionID: id) { [weak self] _, snapshot in
+        outputBatcher = TerminalOutputBatcher(sessionID: id) { [weak self] batch, snapshot in
+            relayOutputHandler(batch)
             DispatchQueue.main.async { [weak self] in
                 self?.probeSnapshot = snapshot
             }
@@ -96,6 +103,17 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     func sendInterrupt() {
         let interrupt: [UInt8] = [0x03]
         terminalView.send(source: terminalView, data: interrupt[...])
+    }
+
+    func sendRemoteInput(_ data: Data) {
+        guard state == .running else { return }
+        let bytes = [UInt8](data)
+        terminalView.send(source: terminalView, data: bytes[...])
+    }
+
+    func resize(columns: Int, rows: Int) {
+        guard state == .running else { return }
+        terminalView.resize(cols: columns, rows: rows)
     }
 
     func runVisualProbe() {

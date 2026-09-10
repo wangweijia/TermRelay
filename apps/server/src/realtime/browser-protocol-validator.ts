@@ -3,11 +3,19 @@ import type {
   Envelope,
   SessionSubscribePayload,
   SessionUnsubscribePayload,
+  SessionInterruptPayload,
+  SessionStopPayload,
+  TerminalInputPayload,
+  TerminalResizePayload,
 } from '@termrelay/contracts';
 import {
   envelopeSchema,
+  sessionInterruptSchema,
+  sessionStopSchema,
   sessionSubscribeSchema,
   sessionUnsubscribeSchema,
+  terminalInputSchema,
+  terminalResizeSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
@@ -16,7 +24,11 @@ export type ValidBrowserMessage =
   | {
       type: 'session.unsubscribe';
       envelope: Envelope<SessionUnsubscribePayload>;
-    };
+    }
+  | { type: 'terminal.input'; envelope: Envelope<TerminalInputPayload> }
+  | { type: 'terminal.resize'; envelope: Envelope<TerminalResizePayload> }
+  | { type: 'session.interrupt'; envelope: Envelope<SessionInterruptPayload> }
+  | { type: 'session.stop'; envelope: Envelope<SessionStopPayload> };
 
 export type BrowserValidationResult =
   | { ok: true; message: ValidBrowserMessage }
@@ -42,6 +54,10 @@ export class BrowserProtocolValidator {
     this.payloadValidators = new Map([
       ['session.subscribe', ajv.compile(sessionSubscribeSchema)],
       ['session.unsubscribe', ajv.compile(sessionUnsubscribeSchema)],
+      ['terminal.input', ajv.compile(terminalInputSchema)],
+      ['terminal.resize', ajv.compile(terminalResizeSchema)],
+      ['session.interrupt', ajv.compile(sessionInterruptSchema)],
+      ['session.stop', ajv.compile(sessionStopSchema)],
     ]);
   }
 
@@ -79,22 +95,42 @@ export class BrowserProtocolValidator {
       return invalid(`${envelope.type} requires sessionId.`, envelope.messageId);
     }
 
-    return envelope.type === 'session.subscribe'
-      ? {
-          ok: true,
-          message: {
-            type: envelope.type,
-            envelope: envelope as unknown as Envelope<SessionSubscribePayload>,
-          },
-        }
-      : {
-          ok: true,
-          message: {
-            type: 'session.unsubscribe',
-            envelope: envelope as unknown as Envelope<SessionUnsubscribePayload>,
-          },
-        };
+    if (isRemoteCommand(envelope.type) && !envelope.commandId) {
+      return invalid(`${envelope.type} requires commandId.`, envelope.messageId);
+    }
+
+    return asValidBrowserMessage(envelope);
   }
+}
+
+function asValidBrowserMessage(envelope: Envelope): BrowserValidationResult {
+  switch (envelope.type) {
+    case 'session.subscribe':
+      return valid(envelope.type, envelope as unknown as Envelope<SessionSubscribePayload>);
+    case 'session.unsubscribe':
+      return valid(envelope.type, envelope as unknown as Envelope<SessionUnsubscribePayload>);
+    case 'terminal.input':
+      return valid(envelope.type, envelope as unknown as Envelope<TerminalInputPayload>);
+    case 'terminal.resize':
+      return valid(envelope.type, envelope as unknown as Envelope<TerminalResizePayload>);
+    case 'session.interrupt':
+      return valid(envelope.type, envelope as unknown as Envelope<SessionInterruptPayload>);
+    case 'session.stop':
+      return valid(envelope.type, envelope as unknown as Envelope<SessionStopPayload>);
+    default:
+      throw new Error(`Payload validator missing for ${envelope.type}.`);
+  }
+}
+
+function valid<TType extends ValidBrowserMessage['type']>(
+  type: TType,
+  envelope: Envelope<unknown>,
+): BrowserValidationResult {
+  return { ok: true, message: { type, envelope } as ValidBrowserMessage };
+}
+
+function isRemoteCommand(type: string): boolean {
+  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop'].includes(type);
 }
 
 function invalid(

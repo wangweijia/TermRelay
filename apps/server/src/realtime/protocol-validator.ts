@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  CommandAckPayload,
   DeviceHeartbeatPayload,
   DeviceRegisterPayload,
   Envelope,
@@ -8,6 +9,7 @@ import type {
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
 import {
+  commandAckSchema,
   deviceHeartbeatSchema,
   deviceRegisterSchema,
   envelopeSchema,
@@ -25,7 +27,8 @@ export type ValidClientMessage =
       envelope: Envelope<WorkspaceRegisteredPayload>;
     }
   | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
-  | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> };
+  | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
+  | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
 
 export type ProtocolValidationResult =
   | { ok: true; message: ValidClientMessage }
@@ -54,6 +57,7 @@ export class ProtocolValidator {
       ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
       ['session.started', ajv.compile(sessionStartedSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
+      ['command.ack', ajv.compile(commandAckSchema)],
     ]);
   }
 
@@ -111,6 +115,14 @@ export class ProtocolValidator {
         return invalidContext(
           envelope,
           'terminal.output requires sessionId and seq.',
+        );
+      }
+    } else if (envelope.type === 'command.ack') {
+      const payload = envelope.payload as unknown as CommandAckPayload;
+      if (!envelope.sessionId || !envelope.commandId || envelope.commandId !== payload.commandId) {
+        return invalidContext(
+          envelope,
+          'command.ack requires sessionId and matching commandId.',
         );
       }
     }
@@ -171,6 +183,14 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
         message: {
           type: envelope.type,
           envelope: envelope as unknown as Envelope<TerminalOutputPayload>,
+        },
+      };
+    case 'command.ack':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<CommandAckPayload>,
         },
       };
     default:

@@ -55,6 +55,33 @@ public struct TerminalOutputPayload: Codable, Sendable {
     public let data: String
 }
 
+public struct TerminalInputPayload: Codable, Sendable {
+    public let encoding: String
+    public let data: String
+}
+
+public struct TerminalResizePayload: Codable, Sendable {
+    public let columns: Int
+    public let rows: Int
+}
+
+public struct SessionInterruptPayload: Codable, Sendable {}
+public struct SessionStopPayload: Codable, Sendable {}
+
+public enum CommandStatus: String, Codable, Sendable {
+    case accepted
+    case completed
+    case rejected
+    case failed
+}
+
+public struct CommandAckPayload: Codable, Sendable {
+    public let commandId: UUID
+    public let status: CommandStatus
+    public let errorCode: String?
+    public let message: String?
+}
+
 public struct SessionSubscribePayload: Codable, Sendable {
     public let afterSeq: Int64?
 }

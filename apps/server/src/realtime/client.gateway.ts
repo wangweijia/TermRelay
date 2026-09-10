@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
 import { SessionsService } from '../sessions/sessions.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
+import { CommandRelayService } from './command-relay.service';
 import {
   ProtocolValidator,
   type ValidClientMessage,
@@ -30,6 +31,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly validator: ProtocolValidator,
     private readonly registry: DeviceConnectionRegistry,
     private readonly sessions: SessionsService,
+    @Optional() private readonly commands?: CommandRelayService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -105,6 +107,18 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'command.ack') {
+      if (!this.commands?.acknowledge(client, result.message.envelope)) {
+        this.sendProtocolError(
+          client,
+          'conflict',
+          'Command acknowledgement is unknown, expired, or belongs to another connection.',
+          result.message.envelope.messageId,
+        );
+      }
+      return;
+    }
+
     return this.handleSessionEvent(client, result.message);
   }
 
@@ -112,7 +126,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' }
     >,
   ): Promise<void> {
     const { envelope } = message;

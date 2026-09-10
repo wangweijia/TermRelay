@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import type {
+  CommandAckPayload,
   SessionEventRecord,
   SessionRecord,
   SessionSubscribedPayload,
@@ -27,6 +28,7 @@ export const useRelayStore = defineStore('relay', {
     reconnectAttempt: 0,
     selectionVersion: 0,
     stopped: false,
+    commandStatus: undefined as string | undefined,
   }),
 
   getters: {
@@ -165,6 +167,49 @@ export const useRelayStore = defineStore('relay', {
       this.socket.send(JSON.stringify({ event: 'message', data: envelope }));
     },
 
+    sendCommand(
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop',
+      payload: Record<string, unknown>,
+    ): void {
+      const session = this.selectedSession;
+      if (!session || this.socket?.readyState !== WebSocket.OPEN) {
+        this.error = 'Mac 命令无法发送：实时连接尚未建立。';
+        return;
+      }
+      const commandId = crypto.randomUUID();
+      const envelope: WireEnvelope = {
+        type,
+        protocolVersion: '1',
+        messageId: crypto.randomUUID(),
+        deviceId: session.deviceId,
+        sessionId: session.id,
+        commandId,
+        sentAt: new Date().toISOString(),
+        payload,
+      };
+      this.socket.send(JSON.stringify({ event: 'message', data: envelope }));
+      this.commandStatus = `命令 ${shortId(commandId)} 已发送`;
+    },
+
+    sendTerminalInput(data: Uint8Array): void {
+      this.sendCommand('terminal.input', {
+        encoding: 'base64',
+        data: encodeBase64(data),
+      });
+    },
+
+    resizeTerminal(columns: number, rows: number): void {
+      this.sendCommand('terminal.resize', { columns, rows });
+    },
+
+    interruptSession(): void {
+      this.sendCommand('session.interrupt', {});
+    },
+
+    stopSession(): void {
+      this.sendCommand('session.stop', {});
+    },
+
     handleSocketMessage(message: MessageEvent): void {
       try {
         const wire = JSON.parse(String(message.data)) as {
@@ -176,6 +221,14 @@ export const useRelayStore = defineStore('relay', {
         if (envelope.type === 'protocol.error') {
           const payload = envelope.payload as { message?: string };
           this.error = payload.message ?? '实时订阅被 Server 拒绝。';
+          return;
+        }
+        if (envelope.type === 'command.ack') {
+          const payload = envelope.payload as unknown as CommandAckPayload;
+          this.commandStatus = `命令 ${shortId(payload.commandId)}：${payload.status}`;
+          if (payload.status === 'failed' || payload.status === 'rejected') {
+            this.error = payload.message ?? `命令执行失败 (${payload.errorCode ?? payload.status})`;
+          }
           return;
         }
         if (envelope.type === 'session.subscribed') {
@@ -269,4 +322,14 @@ function mergeEvents(
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function encodeBase64(data: Uint8Array): string {
+  let binary = '';
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return window.btoa(binary);
+}
+
+function shortId(value: string): string {
+  return value.slice(0, 8);
 }

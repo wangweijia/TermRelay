@@ -25,9 +25,17 @@ export interface WireEnvelope<TPayload = Record<string, unknown>> {
   messageId: string;
   deviceId: string;
   sessionId?: string;
+  commandId?: string;
   seq?: number;
   sentAt: string;
   payload: TPayload;
+}
+
+export interface CommandAckPayload {
+  commandId: string;
+  status: 'accepted' | 'completed' | 'rejected' | 'failed';
+  errorCode?: string;
+  message?: string;
 }
 
 export interface SessionSubscribedPayload {

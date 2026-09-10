@@ -26,6 +26,7 @@ struct TermRelayApp: App {
             ContentView()
                 .environmentObject(appModel)
                 .onAppear { appDelegate.appModel = appModel }
+                .task { appModel.connectToServer() }
         }
         Settings {
             ServerSettingsView()

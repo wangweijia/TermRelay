@@ -15,6 +15,8 @@ final class AppModel: ObservableObject {
 
     let deviceID: UUID
     private let defaults: UserDefaults
+    private var remoteClient: RemoteClient?
+    private var connectionStarted = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -27,11 +29,41 @@ final class AppModel: ObservableObject {
             deviceID = id
             defaults.set(id.uuidString, forKey: Keys.deviceID)
         }
+        remoteClient = RemoteClient(
+            deviceID: deviceID,
+            stateHandler: { [weak self] state, message in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    connectionState = state
+                    if let message { errorMessage = message }
+                    else if state == .connected { errorMessage = nil }
+                    if state == .connected { syncRemoteState() }
+                }
+            },
+            commandHandler: { [weak self] command in
+                await self?.handleRemoteCommand(command)
+                    ?? .rejected("app_unavailable", "Mac App is shutting down.")
+            }
+        )
     }
 
     func beginConnecting() { connectionState = .connecting }
     func markConnected() { connectionState = .connected }
     func markOffline() { connectionState = .offline }
+
+    func connectToServer() {
+        guard !connectionStarted else { return }
+        connectionStarted = true
+        reconnectToServer()
+    }
+
+    func reconnectToServer() {
+        connectionStarted = true
+        connectionState = .connecting
+        guard let remoteClient else { return }
+        let url = serverURL
+        Task { await remoteClient.connect(to: url) }
+    }
 
     func addSession(directory: URL, toolID: String) {
         sessions.append(ManagedSession(directory: directory, toolID: toolID))
@@ -55,14 +87,31 @@ final class AppModel: ObservableObject {
     func startLocalTerminal() {
         activeTerminalSession?.terminate()
         do {
+            guard let remoteClient else { return }
             let terminalSession = try LocalTerminalSession(
                 directory: workingDirectory,
-                tool: selectedTool
+                tool: selectedTool,
+                outputHandler: { batch in
+                    Task { await remoteClient.publishTerminalOutput(batch) }
+                }
             )
             activeTerminalSession = terminalSession
             sessions.append(
                 ManagedSession(id: terminalSession.id, directory: workingDirectory, toolID: selectedTool.rawValue)
             )
+            let workspaceID = workspaceID(for: workingDirectory)
+            let directory = terminalSession.directory
+            let toolKey = terminalSession.tool.rawValue
+            Task {
+                await remoteClient.setActiveSessionCount(1)
+                await remoteClient.publishWorkspace(id: workspaceID, directory: directory)
+                await remoteClient.publishSession(
+                    id: terminalSession.id,
+                    workspaceId: workspaceID,
+                    toolKey: toolKey,
+                    startedAt: terminalSession.startedAt
+                )
+            }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -71,19 +120,65 @@ final class AppModel: ObservableObject {
 
     func stopLocalTerminal() {
         activeTerminalSession?.terminate()
+        if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
     }
 
     func closeLocalTerminal() {
         activeTerminalSession?.terminate()
         activeTerminalSession = nil
+        if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
     }
 
     func terminateAllSessions() {
         activeTerminalSession?.terminate()
+        if let remoteClient { Task { await remoteClient.disconnect() } }
+    }
+
+    private func syncRemoteState() {
+        guard let remoteClient, let session = activeTerminalSession else { return }
+        let workspaceID = workspaceID(for: session.directory)
+        Task {
+            await remoteClient.setActiveSessionCount(session.state == .running ? 1 : 0)
+            await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+            await remoteClient.publishSession(
+                id: session.id,
+                workspaceId: workspaceID,
+                toolKey: session.tool.rawValue,
+                startedAt: session.startedAt
+            )
+        }
+    }
+
+    private func handleRemoteCommand(_ command: RemoteTerminalCommand) -> RemoteCommandResult {
+        guard let session = activeTerminalSession, session.id == command.sessionId else {
+            return .rejected("unknown_session", "The requested local session is not active.")
+        }
+        guard session.state == .running else {
+            return .rejected("session_not_running", "The local session is not running.")
+        }
+        switch command {
+        case .input(_, _, let data): session.sendRemoteInput(data)
+        case .resize(_, _, let columns, let rows): session.resize(columns: columns, rows: rows)
+        case .interrupt: session.sendInterrupt()
+        case .stop:
+            session.terminate()
+            if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
+        }
+        return .completed
+    }
+
+    private func workspaceID(for directory: URL) -> String {
+        var identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
+        if let existing = identifiers[directory.path] { return existing }
+        let identifier = "workspace-\(UUID().uuidString.lowercased())"
+        identifiers[directory.path] = identifier
+        defaults.set(identifiers, forKey: Keys.workspaceIDs)
+        return identifier
     }
 
     private enum Keys {
         static let serverURL = "serverURL"
         static let deviceID = "deviceID"
+        static let workspaceIDs = "workspaceIDs"
     }
 }

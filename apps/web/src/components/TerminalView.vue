@@ -5,17 +5,22 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SessionEventRecord } from '../types';
 
 const props = defineProps<{ events: SessionEventRecord[] }>();
+const emit = defineEmits<{
+  input: [data: Uint8Array];
+  resize: [columns: number, rows: number];
+}>();
 const container = ref<HTMLElement>();
 const rendered = new Set<number>();
 let terminal: Terminal | undefined;
 let resizeObserver: ResizeObserver | undefined;
+let lastSize: { columns: number; rows: number } | undefined;
 
 onMounted(() => {
   terminal = new Terminal({
     allowTransparency: false,
     convertEol: false,
     cursorBlink: false,
-    disableStdin: true,
+    disableStdin: false,
     fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.25,
@@ -28,6 +33,7 @@ onMounted(() => {
     },
   });
   terminal.open(container.value!);
+  terminal.onData((value) => emit('input', new TextEncoder().encode(value)));
   renderEvents(props.events);
   resizeObserver = new ResizeObserver(resizeTerminal);
   resizeObserver.observe(container.value!);
@@ -60,6 +66,10 @@ function resizeTerminal(): void {
   const columns = Math.max(20, Math.floor(container.value.clientWidth / 8));
   const rows = Math.max(8, Math.floor(container.value.clientHeight / 18));
   terminal.resize(columns, rows);
+  if (!lastSize || lastSize.columns !== columns || lastSize.rows !== rows) {
+    lastSize = { columns, rows };
+    emit('resize', columns, rows);
+  }
 }
 
 function decodeBase64(value: string): Uint8Array {
@@ -69,5 +79,5 @@ function decodeBase64(value: string): Uint8Array {
 </script>
 
 <template>
-  <div ref="container" class="terminal-view" aria-label="只读终端输出" />
+  <div ref="container" class="terminal-view" aria-label="远程交互终端" />
 </template>

@@ -9,7 +9,7 @@ struct ContentView: View {
                 Circle()
                     .fill(appModel.connectionState.color)
                     .frame(width: 9, height: 9)
-                Text("本地模式 · Server \(appModel.connectionState.label)")
+                Text("远程中继 · Server \(appModel.connectionState.label)")
                     .foregroundStyle(.secondary)
                 Spacer()
                 SettingsLink { Label("设置", systemImage: "gear") }

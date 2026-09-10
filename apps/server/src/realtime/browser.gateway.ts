@@ -1,4 +1,4 @@
-import { Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -23,6 +23,7 @@ import {
   type SessionEventNotification,
 } from '../sessions/sessions.service';
 import { BrowserProtocolValidator } from './browser-protocol-validator';
+import { CommandRelayService } from './command-relay.service';
 
 interface BrowserSubscription {
   ready: boolean;
@@ -58,6 +59,7 @@ export class BrowserGateway
   constructor(
     private readonly validator: BrowserProtocolValidator,
     private readonly sessions: SessionsService,
+    @Optional() private readonly commands?: CommandRelayService,
   ) {}
 
   onModuleInit(): void {
@@ -100,6 +102,31 @@ export class BrowserGateway
     }
 
     const { envelope } = result.message;
+    if (
+      result.message.type === 'terminal.input' ||
+      result.message.type === 'terminal.resize' ||
+      result.message.type === 'session.interrupt' ||
+      result.message.type === 'session.stop'
+    ) {
+      if (!this.commands) {
+        this.sendProtocolError(client, 'internal_error', 'Command relay is unavailable.', envelope.messageId);
+        return;
+      }
+      const routed = await this.commands.route(
+        client,
+        envelope as unknown as Envelope<Record<string, unknown>>,
+      );
+      if (!routed.ok) {
+        this.sendProtocolError(
+          client,
+          routed.code,
+          routed.detail,
+          envelope.messageId,
+        );
+      }
+      return;
+    }
+
     if (result.message.type === 'session.unsubscribe') {
       this.browsers.get(client)?.delete(envelope.sessionId!);
       this.sendEnvelope(client, {
@@ -114,12 +141,16 @@ export class BrowserGateway
       return;
     }
 
+    const subscribeEnvelope = result.message.type === 'session.subscribe'
+      ? result.message.envelope
+      : undefined;
+    if (!subscribeEnvelope) return;
     await this.subscribeSession(
       client,
-      envelope.deviceId,
-      envelope.sessionId!,
-      envelope.payload.afterSeq ?? -1,
-      envelope.messageId,
+      subscribeEnvelope.deviceId,
+      subscribeEnvelope.sessionId!,
+      subscribeEnvelope.payload.afterSeq ?? -1,
+      subscribeEnvelope.messageId,
     );
   }
 

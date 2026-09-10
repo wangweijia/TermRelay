@@ -150,6 +150,19 @@ export interface TerminalOutputPayload {
   data: string;
 }
 
+export interface TerminalInputPayload {
+  encoding: 'base64';
+  data: string;
+}
+
+export interface TerminalResizePayload {
+  columns: number;
+  rows: number;
+}
+
+export type SessionInterruptPayload = Record<string, never>;
+export type SessionStopPayload = Record<string, never>;
+
 export interface SessionSubscribePayload {
   afterSeq?: number;
 }
@@ -173,6 +186,57 @@ export const terminalOutputSchema = {
         '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
     },
   },
+  additionalProperties: false,
+} as const;
+
+export const terminalInputSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/commands/terminal-input.schema.json',
+  title: 'terminal.input payload',
+  type: 'object',
+  required: ['encoding', 'data'],
+  properties: {
+    encoding: { const: 'base64' },
+    data: {
+      type: 'string',
+      minLength: 4,
+      maxLength: 87_384,
+      contentEncoding: 'base64',
+      pattern:
+        '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const terminalResizeSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/commands/terminal-resize.schema.json',
+  title: 'terminal.resize payload',
+  type: 'object',
+  required: ['columns', 'rows'],
+  properties: {
+    columns: { type: 'integer', minimum: 1, maximum: 1_000 },
+    rows: { type: 'integer', minimum: 1, maximum: 1_000 },
+  },
+  additionalProperties: false,
+} as const;
+
+export const sessionInterruptSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/commands/session-interrupt.schema.json',
+  title: 'session.interrupt payload',
+  type: 'object',
+  maxProperties: 0,
+  additionalProperties: false,
+} as const;
+
+export const sessionStopSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/commands/session-stop.schema.json',
+  title: 'session.stop payload',
+  type: 'object',
+  maxProperties: 0,
   additionalProperties: false,
 } as const;
 
@@ -208,3 +272,18 @@ export interface CommandAckPayload {
   errorCode?: string;
   message?: string;
 }
+
+export const commandAckSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/commands/command-ack.schema.json',
+  title: 'command.ack payload',
+  type: 'object',
+  required: ['commandId', 'status'],
+  properties: {
+    commandId: { type: 'string', format: 'uuid' },
+    status: { enum: ['accepted', 'completed', 'rejected', 'failed'] },
+    errorCode: { type: 'string' },
+    message: { type: 'string', maxLength: 2_048 },
+  },
+  additionalProperties: false,
+} as const;

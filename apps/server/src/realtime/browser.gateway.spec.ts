@@ -12,6 +12,7 @@ import type {
 } from '../sessions/sessions.service';
 import { BrowserGateway } from './browser.gateway';
 import { BrowserProtocolValidator } from './browser-protocol-validator';
+import type { CommandRelayService } from './command-relay.service';
 
 test('sends a history snapshot then streams new events without duplicates', async () => {
   const sessions = new FakeSessionsService();
@@ -98,6 +99,26 @@ test('rejects subscriptions for mismatched sessions', async () => {
   gateway.onModuleDestroy();
 });
 
+test('routes validated terminal commands through the command relay', async () => {
+  const sessions = new FakeSessionsService();
+  const commands = new FakeCommands();
+  const gateway = new BrowserGateway(
+    new BrowserProtocolValidator(),
+    sessions as unknown as SessionsService,
+    commands as unknown as CommandRelayService,
+  );
+  const socket = new FakeSocket();
+  gateway.handleConnection(socket.asWebSocket());
+  const commandId = randomUUID();
+
+  await gateway.handleMessage(socket.asWebSocket(), {
+    ...envelope('terminal.input', { encoding: 'base64', data: 'aGk=' }),
+    commandId,
+  });
+
+  assert.deepEqual(commands.routed, [commandId]);
+});
+
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
@@ -169,6 +190,15 @@ class FakeSessionsService {
       sessionId: this.session.id,
       event: sessionEvent,
     });
+  }
+}
+
+class FakeCommands {
+  readonly routed: string[] = [];
+
+  async route(_client: WebSocket, command: { commandId?: string }) {
+    this.routed.push(command.commandId!);
+    return { ok: true as const };
   }
 }
 

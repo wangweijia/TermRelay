@@ -6,6 +6,7 @@ import { ClientGateway } from './client.gateway';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { ProtocolValidator } from './protocol-validator';
 import type { SessionsService } from '../sessions/sessions.service';
+import type { CommandRelayService } from './command-relay.service';
 import type {
   SessionStartedPayload,
   TerminalOutputPayload,
@@ -152,18 +153,48 @@ test('routes registered workspace and session events to the session service', as
   assert.equal(socket.closed.length, 0);
 });
 
+test('routes command acknowledgements from a registered Mac', () => {
+  const { gateway, commands } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  gateway.handleMessage(client, envelope('device-a', 'device.register', {
+    name: 'Development Mac', appVersion: '0.1.0', platform: 'macOS', tools: ['shell'],
+  }));
+  const commandId = randomUUID();
+  gateway.handleMessage(client, {
+    ...envelope('device-a', 'command.ack', { commandId, status: 'completed' }),
+    sessionId: 'session-a',
+    commandId,
+  });
+
+  assert.deepEqual(commands.acknowledged, [commandId]);
+});
+
 function makeGateway() {
   const registry = new DeviceConnectionRegistry();
   const sessions = new FakeSessionsService();
+  const commands = new FakeCommands();
   return {
     registry,
     sessions,
+    commands,
     gateway: new ClientGateway(
       new ProtocolValidator(),
       registry,
       sessions as unknown as SessionsService,
+      commands as unknown as CommandRelayService,
     ),
   };
+}
+
+class FakeCommands {
+  readonly acknowledged: string[] = [];
+
+  acknowledge(_client: WebSocket, envelope: { commandId?: string }): boolean {
+    this.acknowledged.push(envelope.commandId!);
+    return true;
+  }
 }
 
 function envelope(

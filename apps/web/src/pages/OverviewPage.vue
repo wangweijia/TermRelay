@@ -23,9 +23,9 @@ onBeforeUnmount(() => relay.stop());
   <main class="console-page">
     <section class="page-heading">
       <div>
-        <p class="eyebrow">SERVER S4 · READ-ONLY RELAY</p>
+        <p class="eyebrow">S5 · INTERACTIVE RELAY</p>
         <h1>终端中继控制台</h1>
-        <p>查看已注册会话的历史输出，并通过 WebSocket 接续实时事件。</p>
+        <p>查看历史输出，并通过 WebSocket 实时操作 Mac 上的终端会话。</p>
       </div>
       <div class="connection-pill" :data-state="relay.connectionState">
         <span />{{ connectionLabel }}
@@ -78,7 +78,11 @@ onBeforeUnmount(() => relay.stop());
           <div class="terminal-meta">
             <span>{{ relay.selectedSession.runtimeMode }}</span>
             <span>seq {{ relay.selectedSession.stateVersion }}</span>
-            <span>只读</span>
+            <span>可交互</span>
+          </div>
+          <div class="terminal-actions">
+            <button type="button" @click="relay.interruptSession">Ctrl-C</button>
+            <button type="button" class="danger" @click="relay.stopSession">停止</button>
           </div>
         </div>
 
@@ -87,8 +91,11 @@ onBeforeUnmount(() => relay.stop());
           v-else-if="relay.selectedSession"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
+          @input="relay.sendTerminalInput"
+          @resize="relay.resizeTerminal"
         />
         <div v-else class="terminal-placeholder">选择一个会话查看终端输出</div>
+        <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>
       </section>
     </section>
   </main>

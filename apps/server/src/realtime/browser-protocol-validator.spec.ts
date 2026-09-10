@@ -16,6 +16,21 @@ test('accepts subscribe and unsubscribe with session context', () => {
   );
 });
 
+test('accepts terminal commands only with command context', () => {
+  for (const [type, payload] of [
+    ['terminal.input', { encoding: 'base64', data: 'aGk=' }],
+    ['terminal.resize', { columns: 120, rows: 40 }],
+    ['session.interrupt', {}],
+    ['session.stop', {}],
+  ] as const) {
+    assert.equal(
+      validator.validate({ ...envelope(type, payload), commandId: randomUUID() }).ok,
+      true,
+    );
+    assert.equal(validator.validate(envelope(type, payload)).ok, false);
+  }
+});
+
 test('rejects missing sessions, invalid payloads, and unknown messages', () => {
   const missingSession = envelope('session.subscribe', {});
   const { sessionId: _sessionId, ...withoutSession } = missingSession;

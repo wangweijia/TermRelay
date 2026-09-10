@@ -2,19 +2,19 @@
 
 > 更新日期：2026-09-11
 >
-> 当前阶段：Server S4——浏览器订阅与只读终端闭环已完成
+> 当前阶段：S5——真实 Mac 网络客户端与双向终端命令已实现
 >
-> 下一阶段：真实 Mac Remote Client 与双向命令闭环
+> 下一阶段：事件确认、完整断线补传与 Session 生命周期
 
 ## 总体结论
 
-Server 已具备从模拟 Mac Client 到 MySQL，再到 Browser WebSocket 和只读 xterm.js 的完整输出链路。浏览器会先通过 HTTP 加载历史，再从最后 seq 订阅实时事件；订阅建立期间的新事件会先缓冲，避免历史与实时之间丢包。
+真实 Mac App 已接入 Server WebSocket，能够注册设备/工作区/Session、发送心跳与终端输出；Web 可以把输入、resize、Ctrl-C 和停止命令定向转发到目标 Mac PTY，并接收执行 ACK。
 
-- 工程基础完成度：约 72%。
-- Server MVP 功能完成度：约 58%～62%。
-- 阶段 2“Server 与 Mac 闭环”完成度：约 65%。
+- 工程基础完成度：约 78%。
+- Server MVP 功能完成度：约 70%。
+- 阶段 2“Server 与 Mac 闭环”完成度：约 82%。
 - 技术可行性：可行，当前未发现需要改变总体架构的阻塞项。
-- 当前核心缺口：真实 Mac 网络客户端、远程命令、ACK 与断线补传。
+- 当前核心缺口：事件级确认与完整断线补传、Session 结束状态、命令持久化和实机人工验收。
 
 以上比例是基于关键路径权重的工程估算，不是正式验收数据。
 
@@ -149,6 +149,22 @@ pnpm --filter @termrelay/server probe:s4
 Server S4 read-only terminal relay probe passed.
 ```
 
+### 真实 Mac Client 与双向命令（S5）
+
+已实现：
+
+- Mac 使用系统 `URLSessionWebSocketTask` 自动连接和指数退避重连。
+- 注册设备并按 Server 下发间隔发送心跳，连接恢复后重新同步工作区与 Session。
+- 本地 PTY 输出沿用 40 ms / 8 KiB 批处理，通过 `terminal.output` 上传。
+- 未建立连接或 Session 尚未声明时，输出进入最大 16 MiB 的有界内存缓存，声明成功后按 seq 发送。
+- Web xterm.js 接收键盘/粘贴输入并发送 Base64 `terminal.input`，尺寸变化发送 `terminal.resize`。
+- Web 提供 Ctrl-C 与停止按钮，对应 `session.interrupt`、`session.stop`。
+- 四类命令均要求 UUID `commandId`；Server 校验 Session 归属、运行状态和目标 Mac 在线状态。
+- Mac 对已执行命令维护最近 512 个幂等 ID，并返回 `command.ack`；Server 默认 15 秒超时。
+- 新增 `probe:s5` 双 WebSocket 探针，覆盖四类命令定向路由与 ACK 回程。
+
+当前环境已完成协议、Gateway 和命令路由组件测试。由于执行沙箱禁止连接新启的 3301 端口，`probe:s5` 尚未对当前构建执行真实网络复验；更新标准 3000 端口服务后可直接运行。真实 Mac GUI 启动、选择目录并与浏览器交互仍需一次人工实机验收。
+
 ## 数据库结构
 
 初始 migration 定义 8 张业务表：
@@ -159,7 +175,7 @@ Server S4 read-only terminal relay probe passed.
 | `cli_tools` | 尚未接入 |
 | `workspaces` | 已接入注册、设备归属和可用状态校验 |
 | `sessions` | 已接入 terminal/structured runtime、状态与版本持久化 |
-| `commands` | 尚未接入 |
+| `commands` | 已实现内存路由、ACK 与超时；数据库持久化尚未接入 |
 | `events` | 已接入 `session.started` 和 `terminal.output` 有序持久化 |
 | `approvals` | 尚未接入 |
 | `audit_logs` | 尚未接入 |
@@ -168,13 +184,13 @@ Server S4 read-only terminal relay probe passed.
 
 ## 协议状态
 
-当前 12 个 JSON Schema 均已通过检查；S4 新增 Session Subscribe 和 Session Unsubscribe。
+当前 16 个 JSON Schema 均已通过检查；S5 新增 Terminal Input/Resize、Session Interrupt/Stop。
 
 运行时校验已经接入 Server。仍有一项协议技术债：TypeScript/Swift 的 `generated` 类型目前是手写引导版本，尚未建立从 JSON Schema 自动生成并在 CI 检查无漂移的正式流程。
 
 ## 自动化与实测
 
-当前 Server 自动化测试共 33 项，覆盖：
+当前 Server 自动化测试共 39 项，Mac 自动化测试共 4 项，覆盖：
 
 - AppModule 无数据库模式依赖注入与生命周期。
 - 协议 Envelope/payload 校验。
@@ -187,6 +203,7 @@ Server S4 read-only terminal relay probe passed.
 - 同设备工作区/会话事件串行处理、授权失败和 seq 冲突。
 - Session Controller 列表、详情、事件分页、404 与非法参数。
 - Browser 协议校验、Session 归属验证、历史快照、初始化缓冲、实时推送、去重和取消订阅。
+- 双向命令 Schema、Session/Device 路由、离线拒绝、Mac ACK 归属与幂等命令解码。
 
 已实测：
 
@@ -205,7 +222,8 @@ Server S4 read-only terminal relay probe passed.
 - migration 回滚与升级失败恢复。
 - 当前代码的生产镜像重新构建和 Jetson 应用部署。
 - WebSocket 大量输出、慢浏览器背压、多设备和多会话并发。
-- 真实 Mac App 与 Server 的网络联调及断线重连。
+- 真实 Mac GUI 与 Server/Web 的人工交互验收及长时间断线重连。
+- `probe:s5` 在更新后的标准 3000 端口服务上的真实网络复验。
 - Cloudflare Access、客户端身份认证和速率限制。
 
 ## 当前安全边界
@@ -220,17 +238,16 @@ Server S4 read-only terminal relay probe passed.
 
 ## 下一步优先级
 
-1. 接入真实 Mac App 的 register、heartbeat、workspace、session 与 output Client。
-2. 实现浏览器到目标 Mac 的单会话输入、resize、interrupt 和 stop。
-3. 增加 command ACK、超时、`command_id` 幂等和有界 Journal。
-4. 实现断线后从已确认 seq 补传，并补测背压、多设备与多会话。
-5. 增加 session state changed、finished 和 failed 事件及 Web 状态更新。
-6. 实现 Terminal Event 物理过期清理和每会话配额。
-7. 建立 JSON Schema 到 TypeScript/Swift 的正式代码生成。
-8. PTY 闭环稳定后进入 `SA-0：AgentCore + FakeAgentAdapter`。
-9. 接入 Cloudflare Access、设备身份和生产网络限制。
+1. 为 terminal output 增加 Server ACK 和 Mac 已确认 seq Journal，实现无歧义断线补传。
+2. 持久化 command 状态，并补测超时、背压、多设备与多会话。
+3. 增加 session state changed、finished 和 failed 事件及 Web 状态更新。
+4. 在真实 Mac GUI 上完成启动 Shell/Codex、浏览器输入/resize/Ctrl-C/停止的人工验收。
+5. 实现 Terminal Event 物理过期清理和每会话配额。
+6. 建立 JSON Schema 到 TypeScript/Swift 的正式代码生成。
+7. PTY 闭环稳定后进入 `SA-0：AgentCore + FakeAgentAdapter`。
+8. 接入 Cloudflare Access、设备身份和生产网络限制。
 
-完成第 1～2 项后，项目将从“探针可演示”进入“真实 Mac 可交互”的终端中继闭环。
+完成第 1～4 项后，终端中继链路才具备可恢复、可追踪的正式 MVP 质量。
 
 ## 下次开发交接
 
@@ -241,19 +258,21 @@ pnpm contracts:check
 pnpm --filter @termrelay/server test
 ```
 
-验证 S1～S4 时，先按 `docs/ENVIRONMENTS.md` 启动本地数据库和当前 Server，然后执行：
+验证 S1～S5 时，先按 `docs/ENVIRONMENTS.md` 启动本地数据库和当前 Server，然后执行：
 
 ```bash
 pnpm --filter @termrelay/server probe:s1
 pnpm --filter @termrelay/server probe:s2
 pnpm --filter @termrelay/server probe:s3
 pnpm --filter @termrelay/server probe:s4
+pnpm --filter @termrelay/server probe:s5
 ```
 
 明确未完成：
 
-- 远程输入、resize、interrupt、stop、ACK 和断线补传。
-- 真实 Mac App 网络客户端；当前 Web 数据仍来自探针模拟设备。
+- terminal output 的 Server ACK、已确认 seq Journal 与完整断线补传。
+- command 数据库持久化、Session 结束/失败状态同步。
+- 真实 Mac GUI 与浏览器的人工实机验收。
 - 正式 Schema 代码生成。
 - Cloudflare Access、设备认证、限流和生产网络加固。
 
