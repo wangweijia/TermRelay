@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prebuild": "pnpm --filter @termrelay/contracts build",
     "build": "nest build",
     "dev": "nest start --watch",
     "migration:run": "typeorm migration:run -d dist/database/data-source.js",
     "migration:revert": "typeorm migration:revert -d dist/database/data-source.js",
+    "probe:s1": "node scripts/probe-s1.mjs",
     "start": "node dist/main.js",
+    "test": "pnpm build && node --test dist/realtime/protocol-validator.spec.js dist/realtime/device-connection.registry.spec.js dist/realtime/client.gateway.spec.js",
+    "pretypecheck": "pnpm --filter @termrelay/contracts build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,6 +23,7 @@
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.1.6",
     "@termrelay/contracts": "workspace:*",
+    "ajv": "^8.20.0",
     "fastify": "5.11.3",
     "mysql2": "^3.14.5",
     "reflect-metadata": "^0.2.2",

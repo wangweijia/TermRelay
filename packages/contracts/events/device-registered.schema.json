@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/device-registered.schema.json",
+  "title": "device.registered payload",
+  "type": "object",
+  "required": ["registeredAt", "heartbeatIntervalMs", "heartbeatTimeoutMs"],
+  "properties": {
+    "registeredAt": { "type": "string", "format": "date-time" },
+    "heartbeatIntervalMs": { "type": "integer", "minimum": 1000 },
+    "heartbeatTimeoutMs": { "type": "integer", "minimum": 1000 }
+  },
+  "additionalProperties": false
+}

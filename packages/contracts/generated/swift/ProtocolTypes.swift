@@ -19,3 +19,14 @@ public struct DeviceRegisterPayload: Codable, Sendable {
     public let platform: String
     public let tools: [String]
 }
+
+public struct DeviceRegisteredPayload: Codable, Sendable {
+    public let registeredAt: String
+    public let heartbeatIntervalMs: Int
+    public let heartbeatTimeoutMs: Int
+}
+
+public struct DeviceHeartbeatPayload: Codable, Sendable {
+    public let connectionState: String
+    public let activeSessionCount: Int?
+}
