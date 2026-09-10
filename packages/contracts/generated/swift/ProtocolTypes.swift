@@ -30,3 +30,27 @@ public struct DeviceHeartbeatPayload: Codable, Sendable {
     public let connectionState: String
     public let activeSessionCount: Int?
 }
+
+public struct WorkspaceRegisteredPayload: Codable, Sendable {
+    public let workspaceId: String
+    public let displayName: String
+    public let available: Bool
+    public let remoteStartAllowed: Bool
+}
+
+public enum SessionRuntimeMode: String, Codable, Sendable {
+    case terminal
+    case structured
+}
+
+public struct SessionStartedPayload: Codable, Sendable {
+    public let workspaceId: String
+    public let toolKey: String
+    public let runtimeMode: SessionRuntimeMode
+    public let startedAt: String
+}
+
+public struct TerminalOutputPayload: Codable, Sendable {
+    public let encoding: String
+    public let data: String
+}

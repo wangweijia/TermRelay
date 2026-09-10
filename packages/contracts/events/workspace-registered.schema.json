@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/workspace-registered.schema.json",
+  "title": "workspace.registered payload",
+  "type": "object",
+  "required": ["workspaceId", "displayName", "available", "remoteStartAllowed"],
+  "properties": {
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "available": { "type": "boolean" },
+    "remoteStartAllowed": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

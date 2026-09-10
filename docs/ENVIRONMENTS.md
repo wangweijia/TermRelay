@@ -73,3 +73,10 @@ docker compose --env-file deploy/server/.env.production \
 - 生产 migration 是显式的一次性操作，失败时不启动新版本 Server。
 - 运行用户只有 CRUD 权限，不拥有 `CREATE`、`ALTER`、`DROP` 或 `GRANT`。
 - 不复用现有 `shared` 数据库，避免 TermRelay 迁移影响其他应用。
+
+截至 2026-09-11，本地开发库和 Jetson 生产库均已应用：
+
+- `InitialSchema1788966000000`
+- `SessionRuntimeMode1789056300000`
+
+第二个 migration 只为 `sessions` 新增默认值为 `terminal` 的 `runtime_mode` 列；生产应用账户已验证可以读取新结构，但仍不具备 DDL 权限。生产 Server 镜像尚未随 S3 代码部署。

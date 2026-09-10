@@ -3,17 +3,29 @@ import type {
   DeviceHeartbeatPayload,
   DeviceRegisterPayload,
   Envelope,
+  SessionStartedPayload,
+  TerminalOutputPayload,
+  WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
 import {
   deviceHeartbeatSchema,
   deviceRegisterSchema,
   envelopeSchema,
+  sessionStartedSchema,
+  terminalOutputSchema,
+  workspaceRegisteredSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
 export type ValidClientMessage =
   | { type: 'device.register'; envelope: Envelope<DeviceRegisterPayload> }
-  | { type: 'device.heartbeat'; envelope: Envelope<DeviceHeartbeatPayload> };
+  | { type: 'device.heartbeat'; envelope: Envelope<DeviceHeartbeatPayload> }
+  | {
+      type: 'workspace.registered';
+      envelope: Envelope<WorkspaceRegisteredPayload>;
+    }
+  | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
+  | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> };
 
 export type ProtocolValidationResult =
   | { ok: true; message: ValidClientMessage }
@@ -39,6 +51,9 @@ export class ProtocolValidator {
     this.payloadValidators = new Map([
       ['device.register', ajv.compile(deviceRegisterSchema)],
       ['device.heartbeat', ajv.compile(deviceHeartbeatSchema)],
+      ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
+      ['session.started', ajv.compile(sessionStartedSchema)],
+      ['terminal.output', ajv.compile(terminalOutputSchema)],
     ]);
   }
 
@@ -84,7 +99,41 @@ export class ProtocolValidator {
       };
     }
 
-    if (envelope.type === 'device.register') {
+    if (envelope.type === 'session.started') {
+      if (!envelope.sessionId || envelope.seq !== 0) {
+        return invalidContext(
+          envelope,
+          'session.started requires sessionId and seq 0.',
+        );
+      }
+    } else if (envelope.type === 'terminal.output') {
+      if (!envelope.sessionId || envelope.seq === undefined) {
+        return invalidContext(
+          envelope,
+          'terminal.output requires sessionId and seq.',
+        );
+      }
+    }
+
+    return asValidClientMessage(envelope);
+  }
+}
+
+function invalidContext(
+  envelope: Envelope,
+  detail: string,
+): ProtocolValidationResult {
+  return {
+    ok: false,
+    code: 'invalid_message',
+    detail,
+    relatedMessageId: envelope.messageId,
+  };
+}
+
+function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
+  switch (envelope.type) {
+    case 'device.register':
       return {
         ok: true,
         message: {
@@ -92,15 +141,40 @@ export class ProtocolValidator {
           envelope: envelope as unknown as Envelope<DeviceRegisterPayload>,
         },
       };
-    }
-
-    return {
-      ok: true,
-      message: {
-        type: 'device.heartbeat',
-        envelope: envelope as unknown as Envelope<DeviceHeartbeatPayload>,
-      },
-    };
+    case 'device.heartbeat':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<DeviceHeartbeatPayload>,
+        },
+      };
+    case 'workspace.registered':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<WorkspaceRegisteredPayload>,
+        },
+      };
+    case 'session.started':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionStartedPayload>,
+        },
+      };
+    case 'terminal.output':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<TerminalOutputPayload>,
+        },
+      };
+    default:
+      throw new Error(`Payload validator missing for ${envelope.type}.`);
   }
 }
 

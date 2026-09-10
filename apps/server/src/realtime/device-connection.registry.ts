@@ -204,6 +204,15 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     return this.clientsByDeviceId.get(deviceId);
   }
 
+  isRegisteredClient(client: WebSocket, deviceId: string): boolean {
+    const connection = this.connections.get(client);
+    return (
+      connection?.state === 'registered' &&
+      connection.deviceId === deviceId &&
+      this.clientsByDeviceId.get(deviceId) === client
+    );
+  }
+
   getDevice(deviceId: string): DeviceSnapshot | undefined {
     const device = this.devices.get(deviceId);
     return device ? cloneSnapshot(device) : undefined;

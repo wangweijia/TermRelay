@@ -16,8 +16,11 @@ termrelay/
 │   │   └── Tests/
 │   ├── server/
 │   │   └── src/
+│   │       ├── database/             # TypeORM 配置与显式 migration
+│   │       ├── devices/              # 设备状态持久化与查询
 │   │       ├── health/               # 存活检查
-│   │       └── realtime/             # /ws/client 与 /ws/web
+│   │       ├── realtime/             # /ws/client 与 /ws/web
+│   │       └── sessions/             # 工作区、会话与有序事件
 │   └── web/
 │       └── src/
 │           ├── pages/
@@ -76,7 +79,7 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 ## 状态与持久化原则
 
 - MySQL 保存设备、会话状态、命令幂等键、审批、审计和有限事件元数据；本地使用 `termrelay_dev`，最终部署使用独立的 `termrelay_prod`。
-- 高频终端字节流默认只做短期环形缓冲；如需回放，采用压缩分块、TTL 和每会话配额。
+- 高频终端字节流只允许短期保留。S3 使用带 TTL 的 Base64 事件实现首个闭环；进入生产前仍需压缩分块、物理清理和每会话配额。
 - `command_id` 在 Server 和 Mac 两侧去重；`session_id + seq` 在 Server 唯一。
 - 重连顺序为：注册 → 汇报每会话最后 ACK → 补传缺口 → 获取状态快照 → 恢复实时流。
 - `session.state_version` 使用乐观锁，避免断线补传覆盖新状态。

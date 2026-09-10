@@ -1,6 +1,10 @@
 import type { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
 import { DeviceEntity } from '../devices/device.entity';
+import { SessionEventEntity } from '../sessions/session-event.entity';
+import { SessionEntity } from '../sessions/session.entity';
+import { WorkspaceEntity } from '../sessions/workspace.entity';
 import { InitialSchema1788966000000 } from './migrations/1788966000000-initial-schema';
+import { SessionRuntimeMode1789056300000 } from './migrations/1789056300000-session-runtime-mode';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -16,8 +20,8 @@ export function databaseOptions(): MysqlConnectionOptions {
     migrationsRun: false,
     migrationsTransactionMode: 'none',
     migrationsTableName: 'typeorm_migrations',
-    migrations: [InitialSchema1788966000000],
-    entities: [DeviceEntity],
+    migrations: [InitialSchema1788966000000, SessionRuntimeMode1789056300000],
+    entities: [DeviceEntity, WorkspaceEntity, SessionEntity, SessionEventEntity],
   };
 }
 

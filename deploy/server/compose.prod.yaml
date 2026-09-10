@@ -13,6 +13,7 @@ services:
       DB_NAME: ${DB_NAME:-termrelay_prod}
       DB_USER: ${DB_USER:-appuser}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      TERMINAL_EVENT_TTL_HOURS: ${TERMINAL_EVENT_TTL_HOURS:-24}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
     ports:

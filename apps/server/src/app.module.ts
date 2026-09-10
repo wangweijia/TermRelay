@@ -5,9 +5,10 @@ import { HealthController } from './health/health.controller';
 import { BrowserGateway } from './realtime/browser.gateway';
 import { ClientGateway } from './realtime/client.gateway';
 import { ProtocolValidator } from './realtime/protocol-validator';
+import { SessionsModule } from './sessions/sessions.module';
 
 @Module({
-  imports: [DatabaseModule.forRoot(), DevicesModule],
+  imports: [DatabaseModule.forRoot(), DevicesModule, SessionsModule],
   controllers: [HealthController],
   providers: [
     ClientGateway,

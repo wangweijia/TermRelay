@@ -15,8 +15,12 @@ import type {
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
+import { SessionsService } from '../sessions/sessions.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
-import { ProtocolValidator } from './protocol-validator';
+import {
+  ProtocolValidator,
+  type ValidClientMessage,
+} from './protocol-validator';
 
 @WebSocketGateway({ path: '/ws/client' })
 export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -25,6 +29,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly validator: ProtocolValidator,
     private readonly registry: DeviceConnectionRegistry,
+    private readonly sessions: SessionsService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -39,7 +44,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleMessage(
     @ConnectedSocket() client: WebSocket,
     @MessageBody() input: unknown,
-  ): void {
+  ): Promise<void> | void {
     const result = this.validator.validate(input);
     if (!result.ok) {
       this.sendProtocolError(
@@ -77,21 +82,88 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const { envelope } = result.message;
-    const heartbeat = this.registry.heartbeat(
-      client,
-      envelope.deviceId,
-      envelope.payload,
-    );
-    if (!heartbeat) {
+    if (result.message.type === 'device.heartbeat') {
+      const { envelope } = result.message;
+      const heartbeat = this.registry.heartbeat(
+        client,
+        envelope.deviceId,
+        envelope.payload,
+      );
+      if (!heartbeat) {
+        this.rejectUnregistered(client, envelope.messageId);
+      }
+      return;
+    }
+
+    if (
+      !this.registry.isRegisteredClient(
+        client,
+        result.message.envelope.deviceId,
+      )
+    ) {
+      this.rejectUnregistered(client, result.message.envelope.messageId);
+      return;
+    }
+
+    return this.handleSessionEvent(client, result.message);
+  }
+
+  private async handleSessionEvent(
+    client: WebSocket,
+    message: Exclude<
+      ValidClientMessage,
+      { type: 'device.register' | 'device.heartbeat' }
+    >,
+  ): Promise<void> {
+    const { envelope } = message;
+    try {
+      const result =
+        message.type === 'workspace.registered'
+          ? await this.sessions.registerWorkspace(
+              envelope.deviceId,
+              message.envelope.payload,
+            )
+          : message.type === 'session.started'
+            ? await this.sessions.registerSession(
+                envelope.deviceId,
+                envelope.sessionId!,
+                message.envelope.payload,
+              )
+            : await this.sessions.appendTerminalOutput(
+                envelope.deviceId,
+                envelope.sessionId!,
+                envelope.seq!,
+                message.envelope.payload,
+              );
+
+      if (result.status === 'error') {
+        this.sendProtocolError(
+          client,
+          result.code,
+          result.detail,
+          envelope.messageId,
+        );
+      }
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to handle ${message.type}: ${detail}`);
       this.sendProtocolError(
         client,
-        'unknown_device',
-        'Register this connection before sending heartbeats.',
+        'internal_error',
+        'Failed to persist client event.',
         envelope.messageId,
       );
-      client.close(1008, 'unregistered or mismatched device');
     }
+  }
+
+  private rejectUnregistered(client: WebSocket, messageId: string): void {
+    this.sendProtocolError(
+      client,
+      'unknown_device',
+      'Register this connection before sending device events.',
+      messageId,
+    );
+    client.close(1008, 'unregistered or mismatched device');
   }
 
   private sendProtocolError(

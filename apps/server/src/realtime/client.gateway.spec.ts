@@ -5,6 +5,12 @@ import type WebSocket from 'ws';
 import { ClientGateway } from './client.gateway';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { ProtocolValidator } from './protocol-validator';
+import type { SessionsService } from '../sessions/sessions.service';
+import type {
+  SessionStartedPayload,
+  TerminalOutputPayload,
+  WorkspaceRegisteredPayload,
+} from '@termrelay/contracts';
 
 test('registers a client, acknowledges registration, and accepts heartbeats', () => {
   const { gateway, registry } = makeGateway();
@@ -97,11 +103,66 @@ test('closes unsupported protocol versions with code 1002', () => {
   assert.equal(socket.closed[0]?.code, 1002);
 });
 
+test('routes registered workspace and session events to the session service', async () => {
+  const { gateway, sessions } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  gateway.handleMessage(
+    client,
+    envelope('device-a', 'device.register', {
+      name: 'Development Mac',
+      appVersion: '0.1.0',
+      platform: 'macOS',
+      tools: ['codex'],
+    }),
+  );
+
+  await gateway.handleMessage(
+    client,
+    envelope('device-a', 'workspace.registered', {
+      workspaceId: 'workspace-a',
+      displayName: 'Workspace A',
+      available: true,
+      remoteStartAllowed: false,
+    }),
+  );
+  await gateway.handleMessage(
+    client,
+    contextualEnvelope('device-a', 'session-a', 0, 'session.started', {
+      workspaceId: 'workspace-a',
+      toolKey: 'codex',
+      runtimeMode: 'terminal',
+      startedAt: new Date().toISOString(),
+    }),
+  );
+  await gateway.handleMessage(
+    client,
+    contextualEnvelope('device-a', 'session-a', 1, 'terminal.output', {
+      encoding: 'base64',
+      data: Buffer.from('hello').toString('base64'),
+    }),
+  );
+
+  assert.deepEqual(sessions.calls, [
+    'workspace:workspace-a',
+    'session:session-a',
+    'output:session-a:1',
+  ]);
+  assert.equal(socket.closed.length, 0);
+});
+
 function makeGateway() {
   const registry = new DeviceConnectionRegistry();
+  const sessions = new FakeSessionsService();
   return {
     registry,
-    gateway: new ClientGateway(new ProtocolValidator(), registry),
+    sessions,
+    gateway: new ClientGateway(
+      new ProtocolValidator(),
+      registry,
+      sessions as unknown as SessionsService,
+    ),
   };
 }
 
@@ -118,6 +179,47 @@ function envelope(
     sentAt: new Date().toISOString(),
     payload,
   };
+}
+
+function contextualEnvelope(
+  deviceId: string,
+  sessionId: string,
+  seq: number,
+  type: string,
+  payload: Record<string, unknown>,
+) {
+  return { ...envelope(deviceId, type, payload), sessionId, seq };
+}
+
+class FakeSessionsService {
+  readonly calls: string[] = [];
+
+  async registerWorkspace(
+    _deviceId: string,
+    payload: WorkspaceRegisteredPayload,
+  ) {
+    this.calls.push(`workspace:${payload.workspaceId}`);
+    return { status: 'accepted' as const };
+  }
+
+  async registerSession(
+    _deviceId: string,
+    sessionId: string,
+    _payload: SessionStartedPayload,
+  ) {
+    this.calls.push(`session:${sessionId}`);
+    return { status: 'accepted' as const };
+  }
+
+  async appendTerminalOutput(
+    _deviceId: string,
+    sessionId: string,
+    seq: number,
+    _payload: TerminalOutputPayload,
+  ) {
+    this.calls.push(`output:${sessionId}:${seq}`);
+    return { status: 'accepted' as const };
+  }
 }
 
 interface SentMessage {

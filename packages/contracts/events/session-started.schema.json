@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-started.schema.json",
+  "title": "session.started payload",
+  "type": "object",
+  "required": ["workspaceId", "toolKey", "runtimeMode", "startedAt"],
+  "properties": {
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "toolKey": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "runtimeMode": { "enum": ["terminal", "structured"] },
+    "startedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

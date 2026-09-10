@@ -1,0 +1,250 @@
+import { Injectable, Optional } from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import type {
+  SessionStartedPayload,
+  TerminalOutputPayload,
+} from '@termrelay/contracts';
+import { DataSource, Repository } from 'typeorm';
+import { SessionEventEntity } from './session-event.entity';
+import { SessionEntity, type SessionStatus } from './session.entity';
+
+export interface SessionRecord {
+  id: string;
+  deviceId: string;
+  workspaceId: string;
+  toolKey: string;
+  runtimeMode: SessionEntity['runtimeMode'];
+  status: SessionStatus;
+  stateVersion: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionEventRecord {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export type SessionWriteResult =
+  | { status: 'accepted' | 'duplicate' }
+  | { status: 'conflict'; detail: string }
+  | { status: 'unknown_session' };
+
+@Injectable()
+export class SessionRepository {
+  private readonly terminalEventTtlMs =
+    readPositiveInteger('TERMINAL_EVENT_TTL_HOURS', 24) * 60 * 60 * 1_000;
+
+  constructor(
+    @Optional()
+    @InjectDataSource()
+    private readonly dataSource?: DataSource,
+  ) {}
+
+  get enabled(): boolean {
+    return this.dataSource !== undefined;
+  }
+
+  async registerStarted(
+    deviceId: string,
+    sessionId: string,
+    payload: SessionStartedPayload,
+  ): Promise<SessionWriteResult> {
+    if (!this.dataSource) {
+      return { status: 'conflict', detail: 'Database is disabled.' };
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const sessions = manager.getRepository(SessionEntity);
+      const existing = await sessions.findOneBy({ id: sessionId });
+      if (existing) {
+        const startEvent = await manager
+          .getRepository(SessionEventEntity)
+          .findOneBy({ sessionId, seq: '0' });
+        const sameIdentity =
+          existing.deviceId === deviceId &&
+          existing.workspaceId === payload.workspaceId &&
+          existing.toolKey === payload.toolKey &&
+          existing.runtimeMode === payload.runtimeMode &&
+          startEvent !== null &&
+          sameEvent(startEvent, 'session.started', payload);
+        return sameIdentity
+          ? { status: 'duplicate' }
+          : {
+              status: 'conflict',
+              detail: 'Session ID or sequence 0 contains different metadata.',
+            };
+      }
+
+      await sessions.insert({
+        id: sessionId,
+        deviceId,
+        workspaceId: payload.workspaceId,
+        toolKey: payload.toolKey,
+        runtimeMode: payload.runtimeMode,
+        status: 'running',
+        stateVersion: '0',
+        startedAt: new Date(payload.startedAt),
+        finishedAt: null,
+      });
+      await manager.getRepository(SessionEventEntity).insert({
+        sessionId,
+        seq: '0',
+        type: 'session.started',
+        payload: { ...payload },
+        expiresAt: null,
+      });
+      return { status: 'accepted' };
+    });
+  }
+
+  async appendTerminalOutput(
+    deviceId: string,
+    sessionId: string,
+    seq: number,
+    payload: TerminalOutputPayload,
+  ): Promise<SessionWriteResult> {
+    if (!this.dataSource) {
+      return { status: 'conflict', detail: 'Database is disabled.' };
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const sessions = manager.getRepository(SessionEntity);
+      const session = await sessions
+        .createQueryBuilder('session')
+        .setLock('pessimistic_write')
+        .where('session.id = :sessionId', { sessionId })
+        .getOne();
+      if (!session || session.deviceId !== deviceId) {
+        return { status: 'unknown_session' };
+      }
+
+      const events = manager.getRepository(SessionEventEntity);
+      const existing = await events.findOneBy({ sessionId, seq: String(seq) });
+      if (existing) {
+        return sameEvent(existing, 'terminal.output', payload)
+          ? { status: 'duplicate' }
+          : {
+              status: 'conflict',
+              detail: `Sequence ${seq} already contains a different event.`,
+            };
+      }
+
+      const expectedSeq = Number(session.stateVersion) + 1;
+      if (seq !== expectedSeq) {
+        return {
+          status: 'conflict',
+          detail: `Expected sequence ${expectedSeq}, received ${seq}.`,
+        };
+      }
+
+      await events.insert({
+        sessionId,
+        seq: String(seq),
+        type: 'terminal.output',
+        payload: { ...payload },
+        expiresAt: new Date(Date.now() + this.terminalEventTtlMs),
+      });
+      await sessions.update(
+        { id: sessionId },
+        { stateVersion: String(seq), status: 'running' },
+      );
+      return { status: 'accepted' };
+    });
+  }
+
+  async list(): Promise<SessionRecord[]> {
+    if (!this.dataSource) return [];
+    const sessions = await this.repository.find({
+      order: { updatedAt: 'DESC' },
+    });
+    return sessions.map(toSessionRecord);
+  }
+
+  async findById(id: string): Promise<SessionRecord | undefined> {
+    if (!this.dataSource) return undefined;
+    const session = await this.repository.findOneBy({ id });
+    return session ? toSessionRecord(session) : undefined;
+  }
+
+  async listEvents(
+    sessionId: string,
+    afterSeq: number,
+    limit: number,
+  ): Promise<SessionEventRecord[]> {
+    if (!this.dataSource) return [];
+    const events = await this.dataSource
+      .getRepository(SessionEventEntity)
+      .createQueryBuilder('event')
+      .where('event.sessionId = :sessionId', { sessionId })
+      .andWhere('event.seq > :afterSeq', { afterSeq })
+      .andWhere('(event.expiresAt IS NULL OR event.expiresAt > CURRENT_TIMESTAMP(3))')
+      .orderBy('event.seq', 'ASC')
+      .limit(limit)
+      .getMany();
+    return events.map(toEventRecord);
+  }
+
+  private get repository(): Repository<SessionEntity> {
+    if (!this.dataSource) throw new Error('Database is disabled.');
+    return this.dataSource.getRepository(SessionEntity);
+  }
+}
+
+function sameEvent(
+  event: SessionEventEntity,
+  type: string,
+  payload: unknown,
+): boolean {
+  return event.type === type && canonicalJson(event.payload) === canonicalJson(payload);
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, sortJson(item)]),
+  );
+}
+
+function toSessionRecord(session: SessionEntity): SessionRecord {
+  return {
+    id: session.id,
+    deviceId: session.deviceId,
+    workspaceId: session.workspaceId,
+    toolKey: session.toolKey,
+    runtimeMode: session.runtimeMode,
+    status: session.status,
+    stateVersion: Number(session.stateVersion),
+    startedAt: session.startedAt?.toISOString() ?? null,
+    finishedAt: session.finishedAt?.toISOString() ?? null,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString(),
+  };
+}
+
+function toEventRecord(event: SessionEventEntity): SessionEventRecord {
+  return {
+    seq: Number(event.seq),
+    type: event.type,
+    payload: event.payload,
+    createdAt: event.createdAt.toISOString(),
+  };
+}
+
+function readPositiveInteger(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}

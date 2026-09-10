@@ -31,6 +31,60 @@ test('accepts a valid heartbeat', () => {
   if (result.ok) assert.equal(result.message.type, 'device.heartbeat');
 });
 
+test('accepts workspace, session, and terminal events with required context', () => {
+  const workspace = validator.validate(
+    envelope('workspace.registered', {
+      workspaceId: 'workspace-a',
+      displayName: 'Workspace A',
+      available: true,
+      remoteStartAllowed: false,
+    }),
+  );
+  assert.equal(workspace.ok, true);
+
+  const started = validator.validate({
+    ...envelope('session.started', {
+      workspaceId: 'workspace-a',
+      toolKey: 'codex',
+      runtimeMode: 'terminal',
+      startedAt: new Date().toISOString(),
+    }),
+    sessionId: 'session-a',
+    seq: 0,
+  });
+  assert.equal(started.ok, true);
+
+  const output = validator.validate({
+    ...envelope('terminal.output', {
+      encoding: 'base64',
+      data: Buffer.from('hello').toString('base64'),
+    }),
+    sessionId: 'session-a',
+    seq: 1,
+  });
+  assert.equal(output.ok, true);
+});
+
+test('rejects session events without context and malformed base64', () => {
+  const missingContext = validator.validate(
+    envelope('session.started', {
+      workspaceId: 'workspace-a',
+      toolKey: 'codex',
+      runtimeMode: 'terminal',
+      startedAt: new Date().toISOString(),
+    }),
+  );
+  assert.equal(missingContext.ok, false);
+  if (!missingContext.ok) assert.match(missingContext.detail, /sessionId/u);
+
+  const invalidOutput = validator.validate({
+    ...envelope('terminal.output', { encoding: 'base64', data: 'not base64' }),
+    sessionId: 'session-a',
+    seq: 1,
+  });
+  assert.equal(invalidOutput.ok, false);
+});
+
 test('rejects unsupported protocol versions distinctly', () => {
   const message = { ...envelope('device.heartbeat', { connectionState: 'connected' }) };
   message.protocolVersion = '999';
@@ -47,7 +101,7 @@ test('rejects malformed envelopes, unknown message types, and invalid payloads',
   assert.equal(malformed.ok, false);
   if (!malformed.ok) assert.equal(malformed.code, 'invalid_message');
 
-  const unknown = validator.validate(envelope('terminal.output', { data: 'abc' }));
+  const unknown = validator.validate(envelope('unknown.event', {}));
   assert.equal(unknown.ok, false);
   if (!unknown.ok) assert.match(unknown.detail, /Unsupported client message type/u);
 

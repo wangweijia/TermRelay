@@ -31,6 +31,22 @@ export interface DeviceHeartbeatPayload {
   activeSessionCount?: number;
 }
 
+export interface WorkspaceRegisteredPayload {
+  workspaceId: string;
+  displayName: string;
+  available: boolean;
+  remoteStartAllowed: boolean;
+}
+
+export type SessionRuntimeMode = 'terminal' | 'structured';
+
+export interface SessionStartedPayload {
+  workspaceId: string;
+  toolKey: string;
+  runtimeMode: SessionRuntimeMode;
+  startedAt: string;
+}
+
 export type ProtocolErrorCode =
   | 'invalid_message'
   | 'unsupported_version'
@@ -60,7 +76,7 @@ export const envelopeSchema = {
     deviceId: { type: 'string', minLength: 1, maxLength: 128 },
     sessionId: { type: 'string', minLength: 1, maxLength: 128 },
     commandId: { type: 'string', format: 'uuid' },
-    seq: { type: 'integer', minimum: 0 },
+    seq: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     sentAt: { type: 'string', format: 'date-time' },
     payload: { type: 'object' },
   },
@@ -99,10 +115,60 @@ export const deviceHeartbeatSchema = {
   additionalProperties: false,
 } as const;
 
+export const workspaceRegisteredSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/workspace-registered.schema.json',
+  title: 'workspace.registered payload',
+  type: 'object',
+  required: ['workspaceId', 'displayName', 'available', 'remoteStartAllowed'],
+  properties: {
+    workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
+    displayName: { type: 'string', minLength: 1, maxLength: 255 },
+    available: { type: 'boolean' },
+    remoteStartAllowed: { type: 'boolean' },
+  },
+  additionalProperties: false,
+} as const;
+
+export const sessionStartedSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/session-started.schema.json',
+  title: 'session.started payload',
+  type: 'object',
+  required: ['workspaceId', 'toolKey', 'runtimeMode', 'startedAt'],
+  properties: {
+    workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
+    toolKey: { type: 'string', minLength: 1, maxLength: 64 },
+    runtimeMode: { enum: ['terminal', 'structured'] },
+    startedAt: { type: 'string', format: 'date-time' },
+  },
+  additionalProperties: false,
+} as const;
+
 export interface TerminalOutputPayload {
   encoding: 'base64';
   data: string;
 }
+
+export const terminalOutputSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/terminal-output.schema.json',
+  title: 'terminal.output payload',
+  type: 'object',
+  required: ['encoding', 'data'],
+  properties: {
+    encoding: { const: 'base64' },
+    data: {
+      type: 'string',
+      minLength: 4,
+      maxLength: 1_398_104,
+      contentEncoding: 'base64',
+      pattern:
+        '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
+    },
+  },
+  additionalProperties: false,
+} as const;
 
 export type CommandStatus = 'accepted' | 'completed' | 'rejected' | 'failed';
 
