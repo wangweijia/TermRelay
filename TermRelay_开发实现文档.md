@@ -283,7 +283,7 @@ TerminalSession
 
 ### 3.10 CLI 工具抽象
 
-基础能力不能依赖 Codex 或 ACP。所有工具首先作为通用 PTY 程序运行，支持结构化协议的工具再加载适配器。
+基础能力不能依赖 Codex 或某一种结构化协议。所有工具首先作为通用 PTY 程序运行，支持结构化协议的工具再加载适配器。
 
 ~~~swift
 protocol CLIToolAdapter {
@@ -316,7 +316,7 @@ struct CLIToolDefinition: Codable, Identifiable {
 
 enum IntegrationType: String, Codable {
     case terminal
-    case acp
+    case codexAppServer
 }
 ~~~
 
@@ -333,7 +333,7 @@ enum IntegrationType: String, Codable {
 | 工具调用与审批语义 | 不保证 | 适配器提供 |
 | 精确任务完成事件 | 不保证 | 适配器提供 |
 
-ACP 是 CodexAdapter 的可选增强，不是 App 核心协议。阶段 0 需要验证当前 Codex CLI 是否能在普通交互式终端之外同时提供 ACP；若不能，MVP 先使用 PTY 完成远程镜像和输入。
+阶段 0 验证时，Codex 0.151.0 没有 ACP CLI 入口，但提供 `codex app-server` 结构化协议以及连接它的 `codex --remote` TUI 模式。App Server 是 CodexAdapter 的可选增强，不是 App 核心协议。MVP 先使用已经验证的 PTY 完成远程镜像和输入；后续若接入 App Server，应将其实现为独立适配器并保留 PTY 回退。
 
 ### 3.12 环境管理
 
@@ -578,7 +578,7 @@ Swift App 不进入 pnpm workspace。NestJS、Vue 3 与 `packages/contracts` 使
 - 使用 SwiftTerm/PTY 在指定 cwd 启动 Codex。
 - 验证颜色、中文、窗口 resize、方向键、复制和全屏 TUI。
 - 验证 PTY 输出分流到本地渲染与 WebSocket。
-- 验证 Codex ACP 是否能与期望的终端模式结合。
+- 验证 Codex App Server 是否能与期望的终端模式结合，并保留纯 PTY 回退。
 
 ### 阶段 1：Mac App 单机功能
 

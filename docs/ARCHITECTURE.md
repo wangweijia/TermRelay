@@ -71,9 +71,9 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 
 ## M0 与阶段 0 的分界
 
-当前 M0 只承诺工程可以解析、类型检查和编译。以下能力必须通过真实 Mac 实机探针后才进入业务开发：
+阶段 0 已于 2026-09-10 完成核心实机探针，结果见 `docs/MAC_STAGE0_PROBE.md`。以下能力仍需在阶段 1 持续回归：
 
 - SwiftTerm 对中文、组合字符、全屏 TUI、鼠标和 resize 的表现。
 - PTY 子进程组的 Ctrl-C、退出和 App 崩溃清理。
 - 输出双路分发的延迟、背压和内存上限。
-- 当前 Codex CLI 是否存在适合并行使用的结构化协议；失败时回退纯 PTY。
+- Codex App Server 协议的版本兼容性；任何失败都回退到已验证的纯 PTY。

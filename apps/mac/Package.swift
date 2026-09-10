@@ -7,9 +7,20 @@ let package = Package(
     products: [
         .executable(name: "TermRelay", targets: ["TermRelay"]),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/migueldeicaza/SwiftTerm.git",
+            exact: "1.20.0"
+        ),
+    ],
     targets: [
-        .executableTarget(name: "TermRelay", path: "Sources"),
+        .executableTarget(
+            name: "TermRelay",
+            dependencies: [
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
+            ],
+            path: "Sources"
+        ),
         .testTarget(name: "TermRelayTests", dependencies: ["TermRelay"], path: "Tests"),
     ]
 )
-
