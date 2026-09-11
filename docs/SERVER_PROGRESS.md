@@ -164,7 +164,7 @@ Server S4 read-only terminal relay probe passed.
 - Mac 对已执行命令维护最近 512 个幂等 ID，并返回 `command.ack`；Server 默认 15 秒超时。
 - 新增 `probe:s5` 双 WebSocket 探针，覆盖四类命令定向路由与 ACK 回程。
 
-当前环境已完成协议、Gateway 和命令路由组件测试。由于执行沙箱禁止连接新启的 3301 端口，`probe:s5` 尚未对当前构建执行真实网络复验；更新标准 3000 端口服务后可直接运行。真实 Mac GUI 启动、选择目录并与浏览器交互仍需一次人工实机验收。
+当前环境已完成协议、Gateway 和命令路由组件测试。`probe:s5` 尚未对重新部署后的开发端口 3007 执行真实网络复验；真实 Mac GUI 启动、选择目录并与浏览器交互仍需一次人工实机验收。
 
 ## 数据库结构
 
@@ -224,7 +224,7 @@ Server S4 read-only terminal relay probe passed.
 - 当前代码的生产镜像重新构建和 Jetson 应用部署。
 - WebSocket 大量输出、慢浏览器背压、多设备和多会话并发。
 - 真实 Mac GUI 与 Server/Web 的人工交互验收及长时间断线重连。
-- `probe:s5` 在更新后的标准 3000 端口服务上的真实网络复验。
+- `probe:s5` 在更新后的开发端口 3007 上进行真实网络复验。
 - Cloudflare Access、客户端身份认证和速率限制。
 
 ## 当前安全边界
@@ -233,7 +233,7 @@ Server S4 read-only terminal relay probe passed.
 
 - `/ws/client` 尚无设备 credential、签名、来源限制和速率限制。
 - `/ws/web` 尚未验证 Cloudflare Access 身份。
-- 生产 Compose 的 `127.0.0.1:3000` 适合 Tunnel 访问，但不提供 Mac 局域网直连入口。
+- 生产 Compose 的 `127.0.0.1:3006` 适合 Tunnel 访问，但不提供 Mac 局域网直连入口。
 
 在真实设备联调前，应确定 LAN 入口和设备认证方案；在公网发布前必须完成 Cloudflare Access 与安全限制。
 

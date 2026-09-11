@@ -74,6 +74,29 @@ if grep -Eq '^(DB_PASSWORD|DB_MIGRATION_PASSWORD)=replace-' "$env_file"; then
   exit 2
 fi
 
+server_port="$(sed -n 's/^SERVER_PORT=//p' "$env_file" | tail -n 1)"
+server_port="${server_port:-3006}"
+case "$server_port" in
+  *[!0-9]*|'') echo "SERVER_PORT must be an integer: $server_port" >&2; exit 2 ;;
+esac
+if [ "$server_port" -lt 1 ] || [ "$server_port" -gt 65535 ]; then
+  echo "SERVER_PORT must be between 1 and 65535: $server_port" >&2
+  exit 2
+fi
+
+docker_port_conflict="$(
+  docker ps --format '{{.Names}} {{.Ports}}' \
+    | grep -E ":${server_port}->" \
+    | grep -v '^termrelay-server-' \
+    || true
+)"
+if [ -n "$docker_port_conflict" ]; then
+  echo "SERVER_PORT=$server_port is already published by another Docker container:" >&2
+  echo "$docker_port_conflict" >&2
+  echo "Choose another SERVER_PORT in $env_file and run deploy.sh again." >&2
+  exit 1
+fi
+
 echo "Loading $TERMRELAY_IMAGE ..."
 gzip -dc "$image_archive" | docker load
 
@@ -92,8 +115,6 @@ fi
 echo "Starting TermRelay Server ..."
 compose up -d --no-build server
 
-server_port="$(sed -n 's/^SERVER_PORT=//p' "$env_file" | tail -n 1)"
-server_port="${server_port:-3000}"
 health_url="http://127.0.0.1:${server_port}/health"
 
 attempt=1

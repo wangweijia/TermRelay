@@ -132,7 +132,7 @@ MVP 不实现 App 退出后会话继续运行。若后续需要该能力，再�
 
 | 字段 | 说明 |
 | --- | --- |
-| Server URL | Server 局域网 WebSocket 地址，例如 ws://192.168.1.100:3000/ws/client |
+| Server URL | Server 局域网 WebSocket 地址，例如 ws://192.168.1.100:3006/ws/client |
 | 设备名称 | Server 页面展示名称 |
 | 自动连接 | 默认开启 |
 | 连接状态 | connected、connecting、offline、degraded |
@@ -379,7 +379,7 @@ Web UI 在源码层与 NestJS 分目录开发，但不独立部署。生产构�
 | 客户端 | 地址示例 | 网络与认证 |
 | --- | --- | --- |
 | 外部浏览器 | https://termrelay.example.com、wss://termrelay.example.com/ws/web | 通过 Cloudflare Access + Tunnel |
-| 局域网 Mac App | ws://192.168.1.100:3000/ws/client | 局域网直连，不经过 Cloudflare，不做应用层认证 |
+| 局域网 Mac App | ws://192.168.1.100:3006/ws/client | 局域网直连，不经过 Cloudflare，不做应用层认证 |
 
 Cloudflare Tunnel 指向 Server 的同一 HTTP 端口。Cloudflare Access 必须覆盖整个公网域名及所有路径，使公网访问始终经过用户认证；Mac App 使用局域网 IP 访问，因此不受 Access 影响。Server 和路由器不开放公网入站端口。
 
@@ -430,7 +430,7 @@ Web UI 使用响应式状态管理处理实时交互：
 
 | 环境 | 地址 | 数据库 | 运行用户 |
 | --- | --- | --- | --- |
-| 本地开发 | Docker `mysql:3306`；宿主机 `127.0.0.1:3307` | `termrelay_dev` | `termrelay_dev` |
+| 本地开发 | Docker `mysql:3306`；宿主机 `127.0.0.1:13307` | `termrelay_dev` | `termrelay_dev` |
 | 最终部署 | `192.168.8.134:3306` | `termrelay_prod` | `appuser` |
 
 生产配置示例：
@@ -474,7 +474,7 @@ DB_PASSWORD=通过环境变量或 Docker Secret 注入
 
 | 连接 | 地址 | 用途 |
 | --- | --- | --- |
-| Client WebSocket | ws://SERVER_LAN_IP:3000/ws/client | Server 与局域网 Mac App 双向命令和事件，无认证 |
+| Client WebSocket | ws://SERVER_LAN_IP:3006/ws/client | Server 与局域网 Mac App 双向命令和事件，无认证 |
 | Browser WebSocket | wss://PUBLIC_HOST/ws/web | 通过 Cloudflare Access，向管理页面推送状态和终端数据 |
 
 统一消息信封：

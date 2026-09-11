@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 
-const clientEndpoint = process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3100/ws/client';
-const browserEndpoint = process.env.SERVER_WEB_WS_URL ?? 'ws://127.0.0.1:3100/ws/web';
+const clientEndpoint = process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3007/ws/client';
+const browserEndpoint = process.env.SERVER_WEB_WS_URL ?? 'ws://127.0.0.1:3007/ws/web';
 const deviceId = 'probe-s5-device';
 const workspaceId = 'probe-s5-workspace';
 const sessionId = `probe-s5-${randomUUID()}`;

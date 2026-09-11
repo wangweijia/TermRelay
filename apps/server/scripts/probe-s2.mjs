@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 
 const websocketEndpoint =
-  process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3100/ws/client';
+  process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3007/ws/client';
 const httpEndpoint =
-  process.env.SERVER_HTTP_URL ?? 'http://127.0.0.1:3100';
+  process.env.SERVER_HTTP_URL ?? 'http://127.0.0.1:3007';
 const deviceId = 'probe-s2-device';
 const timeoutMs = 3_000;
 

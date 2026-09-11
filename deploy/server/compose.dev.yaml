@@ -12,7 +12,7 @@ services:
       DB_USER: termrelay_dev
       DB_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3007:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -45,7 +45,7 @@ services:
       MYSQL_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
       MYSQL_RANDOM_ROOT_PASSWORD: "yes"
     ports:
-      - "127.0.0.1:3307:3306"
+      - "127.0.0.1:13307:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:

@@ -2,6 +2,21 @@
 
 TermRelay 使用两个完全隔离的数据库环境。任何密码文件均由 `.gitignore` 排除；仓库只提交占位模板。
 
+## 端口分配
+
+| 场景 | 地址/端口 | 说明 |
+| --- | --- | --- |
+| Jetson 生产 Server | `127.0.0.1:3006` | 宿主机端口；避开 Forgejo 使用的 3000 |
+| 本地开发 Server | `127.0.0.1:3007` | Compose、Mac 默认地址和探针统一使用 |
+| 独立 Vite 开发页 | `127.0.0.1:5177` | API/WS 代理到 3007 |
+| 本地开发 MySQL | `127.0.0.1:13307` | 映射到容器 MySQL 3306 |
+| Docker 内部 Server | `3000` | 仅容器网络内使用，不占用宿主机 3000 |
+| Docker/生产 MySQL | `3306` | 容器内部及既有 Jetson 数据库端口 |
+| Mac 到 Jetson SSH 隧道 | `127.0.0.1:13006` | 转发到 Jetson `127.0.0.1:3006` |
+| 本地网络代理 | `127.0.0.1:7890` | 仅依赖下载遇到网络问题时使用 |
+
+2026-09-11 在 Jetson 实测：3000 由 Forgejo 监听，8000 由另一个 Docker 项目使用，3306 由共享 MySQL 使用；3006 未被占用。生产宿主机端口可以通过 `.env.production` 的 `SERVER_PORT` 修改，无需重新构建镜像。
+
 ## 本地开发
 
 本地数据库为 Docker MySQL 8.4：
@@ -11,7 +26,7 @@ TermRelay 使用两个完全隔离的数据库环境。任何密码文件均由 
 | 数据库 | `termrelay_dev` |
 | 用户 | `termrelay_dev` |
 | 应用内地址 | `mysql:3306` |
-| 宿主机地址 | `127.0.0.1:3307` |
+| 宿主机地址 | `127.0.0.1:13307` |
 
 启动完整开发栈：
 
@@ -24,14 +39,14 @@ docker compose -f deploy/server/compose.dev.yaml up --build
 ```bash
 docker compose -f deploy/server/compose.dev.yaml up -d mysql
 cp apps/server/.env.example apps/server/.env.development
-# 将 DB_HOST 改为 127.0.0.1，DB_PORT 改为 3307
+# 将 DB_HOST 改为 127.0.0.1，DB_PORT 改为 13307
 set -a; source apps/server/.env.development; set +a
 pnpm dev:server
 ```
 
 开发环境的默认密码只用于绑定在 `127.0.0.1` 的本机数据库，可以在 `deploy/server/.env.development` 中覆盖。
 
-Mac App 可以在设置中填写开发 Server 地址。同机运行时使用 `ws://127.0.0.1:3000/ws/client`；从另一台 Mac 连接时将主机替换为 Server 的局域网地址，并确保 Server 监听 LAN 地址。当前尚无设备认证，只能用于受控局域网。
+完整开发栈的 Server 地址是 `http://127.0.0.1:3007`。Mac App 同机运行时使用 `ws://127.0.0.1:3007/ws/client`；独立 Vite 开发页使用 `http://127.0.0.1:5177` 并代理到 3007。从另一台 Mac 连接时将主机替换为 Server 的局域网地址，并确保 Server 监听 LAN 地址。当前尚无设备认证，只能用于受控局域网。
 
 ## 最终部署
 

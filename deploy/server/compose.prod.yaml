@@ -20,7 +20,7 @@ services:
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${SERVER_BIND_ADDRESS:-127.0.0.1}:${SERVER_PORT:-3006}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s

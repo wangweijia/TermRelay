@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 
-const endpoint = process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3100/ws/client';
+const endpoint = process.env.SERVER_WS_URL ?? 'ws://127.0.0.1:3007/ws/client';
 const timeoutMs = 3_000;
 
 await probeRegistrationAndHeartbeat();

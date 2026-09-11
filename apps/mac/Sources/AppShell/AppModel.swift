@@ -21,7 +21,14 @@ final class AppModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
-        serverURL = defaults.string(forKey: Keys.serverURL) ?? "ws://localhost:3000/ws/client"
+        let storedServerURL = defaults.string(forKey: Keys.serverURL)
+        if let storedServerURL, !Keys.legacyServerURLs.contains(storedServerURL) {
+            serverURL = storedServerURL
+        } else {
+            let developmentServerURL = "ws://localhost:3007/ws/client"
+            serverURL = developmentServerURL
+            defaults.set(developmentServerURL, forKey: Keys.serverURL)
+        }
         if let stored = defaults.string(forKey: Keys.deviceID), let id = UUID(uuidString: stored) {
             deviceID = id
         } else {
@@ -180,5 +187,9 @@ final class AppModel: ObservableObject {
         static let serverURL = "serverURL"
         static let deviceID = "deviceID"
         static let workspaceIDs = "workspaceIDs"
+        static let legacyServerURLs = [
+            "ws://localhost:3000/ws/client",
+            "ws://127.0.0.1:3000/ws/client",
+        ]
     }
 }
