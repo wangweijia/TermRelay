@@ -5,6 +5,7 @@ struct SessionSidebar: View {
     let activeSession: LocalTerminalSession?
     @Binding var selection: UUID?
     let addAction: () -> Void
+    let closeAction: (UUID) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,11 +39,20 @@ struct SessionSidebar: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(sessions, selection: $selection) { session in
-                    SessionSidebarRow(
+                    ClosableSessionSidebarRow(
                         session: session,
-                        activeSession: activeSession?.id == session.id ? activeSession : nil
+                        activeSession: activeSession?.id == session.id ? activeSession : nil,
+                        isSelected: selection == session.id,
+                        closeAction: { closeAction(session.id) }
                     )
                     .tag(session.id)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            closeAction(session.id)
+                        } label: {
+                            Label("关闭会话", systemImage: "xmark")
+                        }
+                    }
                 }
                 .listStyle(.sidebar)
             }
@@ -52,6 +62,33 @@ struct SessionSidebar: View {
         }
         .navigationTitle("TermRelay")
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+private struct ClosableSessionSidebarRow: View {
+    let session: ManagedSession
+    let activeSession: LocalTerminalSession?
+    let isSelected: Bool
+    let closeAction: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            SessionSidebarRow(session: session, activeSession: activeSession)
+            Spacer(minLength: 4)
+            Button(action: closeAction) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .opacity(isHovered || isSelected ? 1 : 0)
+            .allowsHitTesting(isHovered || isSelected)
+            .help("关闭会话")
+            .accessibilityLabel("关闭会话")
+        }
+        .onHover { isHovered = $0 }
     }
 }
 

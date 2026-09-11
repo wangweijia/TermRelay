@@ -4,14 +4,17 @@ struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var selectedSessionID: UUID?
     @State private var isPresentingNewSession = false
+    @State private var closedSessionIDs: Set<UUID> = []
+    @State private var sessionPendingClose: ManagedSession?
 
     var body: some View {
         NavigationSplitView {
             SessionSidebar(
-                sessions: appModel.sessions,
+                sessions: visibleSessions,
                 activeSession: appModel.activeTerminalSession,
                 selection: $selectedSessionID,
-                addAction: { isPresentingNewSession = true }
+                addAction: { isPresentingNewSession = true },
+                closeAction: requestCloseSession
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
         } detail: {
@@ -25,13 +28,31 @@ struct ContentView: View {
             }
             .environmentObject(appModel)
         }
+        .alert(
+            "关闭会话？",
+            isPresented: Binding(
+                get: { sessionPendingClose != nil },
+                set: { if !$0 { sessionPendingClose = nil } }
+            )
+        ) {
+            Button("取消", role: .cancel) {
+                sessionPendingClose = nil
+            }
+            Button("关闭", role: .destructive) {
+                confirmCloseSession()
+            }
+        } message: {
+            if let sessionPendingClose {
+                Text("关闭“\(sessionPendingClose.directory.lastPathComponent)”将终止其中正在运行的终端进程。")
+            }
+        }
         .onAppear {
             selectedSessionID = appModel.activeTerminalSession?.id ?? appModel.sessions.last?.id
         }
         .onChange(of: appModel.activeTerminalSession?.id) { _, activeID in
             if let activeID { selectedSessionID = activeID }
         }
-        .onChange(of: appModel.sessions.map(\.id)) { _, sessionIDs in
+        .onChange(of: visibleSessions.map(\.id)) { _, sessionIDs in
             guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
                 self.selectedSessionID = appModel.activeTerminalSession?.id ?? sessionIDs.last
                 return
@@ -62,7 +83,25 @@ struct ContentView: View {
 
     private var selectedSession: ManagedSession? {
         guard let selectedSessionID else { return nil }
-        return appModel.sessions.first { $0.id == selectedSessionID }
+        return visibleSessions.first { $0.id == selectedSessionID }
+    }
+
+    private var visibleSessions: [ManagedSession] {
+        appModel.sessions.filter { !closedSessionIDs.contains($0.id) }
+    }
+
+    private func requestCloseSession(_ sessionID: UUID) {
+        sessionPendingClose = visibleSessions.first { $0.id == sessionID }
+    }
+
+    private func confirmCloseSession() {
+        guard let sessionID = sessionPendingClose?.id else { return }
+        sessionPendingClose = nil
+        if appModel.activeTerminalSession?.id == sessionID {
+            appModel.closeLocalTerminal()
+        }
+        closedSessionIDs.insert(sessionID)
+        selectedSessionID = visibleSessions.last?.id
     }
 }
 
