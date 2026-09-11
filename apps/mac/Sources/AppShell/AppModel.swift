@@ -41,10 +41,10 @@ final class AppModel: ObservableObject {
             stateHandler: { [weak self] state, message in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    connectionState = state
-                    if let message { errorMessage = message }
-                    else if state == .connected { errorMessage = nil }
-                    if state == .connected { syncRemoteState() }
+                    self.connectionState = state
+                    if let message { self.errorMessage = message }
+                    else if state == .connected { self.errorMessage = nil }
+                    if state == .connected { self.syncRemoteState() }
                 }
             },
             commandHandler: { [weak self] command in

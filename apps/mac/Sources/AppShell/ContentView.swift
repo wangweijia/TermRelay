@@ -2,88 +2,139 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var selectedSessionID: UUID?
+    @State private var isPresentingNewSession = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle()
-                    .fill(appModel.connectionState.color)
-                    .frame(width: 9, height: 9)
-                Text("远程中继 · Server \(appModel.connectionState.label)")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                SettingsLink { Label("设置", systemImage: "gear") }
+        NavigationSplitView {
+            SessionSidebar(
+                sessions: appModel.sessions,
+                activeSession: appModel.activeTerminalSession,
+                selection: $selectedSessionID,
+                addAction: { isPresentingNewSession = true }
+            )
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+        } detail: {
+            sessionDetail
+        }
+        .frame(minWidth: 900, minHeight: 600)
+        .sheet(isPresented: $isPresentingNewSession) {
+            NewSessionSheet {
+                appModel.startLocalTerminal()
+                selectedSessionID = appModel.activeTerminalSession?.id
             }
-
-            HStack(spacing: 10) {
-                Button("选择目录…") { appModel.chooseWorkingDirectory() }
-                Text(appModel.workingDirectory.path)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(.secondary)
-                    .help(appModel.workingDirectory.path)
-                Spacer()
-            }
-
-            HStack(spacing: 12) {
-                Picker("启动", selection: $appModel.selectedTool) {
-                    ForEach(BuiltInTool.allCases) { tool in
-                        Text(tool.displayName).tag(tool)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 230)
-
-                Button("启动") { appModel.startLocalTerminal() }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!appModel.selectedToolAvailability.isAvailable)
-
-                if let session = appModel.activeTerminalSession {
-                    LocalTerminalControls(session: session)
-                }
-                Spacer()
-            }
-
-            if !appModel.selectedToolAvailability.isAvailable {
-                Label(appModel.selectedToolAvailability.detail, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            if let errorMessage = appModel.errorMessage {
-                Label(errorMessage, systemImage: "xmark.octagon")
-                    .foregroundStyle(.red)
-            }
-
-            if let session = appModel.activeTerminalSession {
-                LocalTerminalPane(session: session)
-            } else {
-                ContentUnavailableView(
-                    "本地终端尚未启动",
-                    systemImage: "terminal",
-                    description: Text("选择工作目录和登录 Shell 或 Codex，然后点击启动")
-                )
+            .environmentObject(appModel)
+        }
+        .onAppear {
+            selectedSessionID = appModel.activeTerminalSession?.id ?? appModel.sessions.last?.id
+        }
+        .onChange(of: appModel.activeTerminalSession?.id) { _, activeID in
+            if let activeID { selectedSessionID = activeID }
+        }
+        .onChange(of: appModel.sessions.map(\.id)) { _, sessionIDs in
+            guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
+                self.selectedSessionID = appModel.activeTerminalSession?.id ?? sessionIDs.last
+                return
             }
         }
-        .padding(18)
-        .frame(minWidth: 820, minHeight: 560)
+    }
+
+    @ViewBuilder
+    private var sessionDetail: some View {
+        if let session = selectedTerminalSession {
+            ActiveSessionView(session: session)
+        } else if let selectedSession {
+            SessionSummaryView(session: selectedSession) {
+                isPresentingNewSession = true
+            }
+        } else {
+            EmptySessionView {
+                isPresentingNewSession = true
+            }
+        }
+    }
+
+    private var selectedTerminalSession: LocalTerminalSession? {
+        guard let activeSession = appModel.activeTerminalSession else { return nil }
+        guard selectedSessionID == nil || selectedSessionID == activeSession.id else { return nil }
+        return activeSession
+    }
+
+    private var selectedSession: ManagedSession? {
+        guard let selectedSessionID else { return nil }
+        return appModel.sessions.first { $0.id == selectedSessionID }
     }
 }
 
-private struct LocalTerminalControls: View {
+private struct ActiveSessionView: View {
+    @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalTerminalSession
 
     var body: some View {
-        Button("Ctrl-C") { session.sendInterrupt() }
-            .disabled(session.state != .running)
+        VStack(spacing: 0) {
+            SessionToolbar(session: session)
 
-        Button("停止") { session.terminate() }
-            .disabled(session.state != .running)
-
-        if session.tool == .shell {
-            Button("显示探针") { session.runVisualProbe() }
-                .help("输出 ANSI、TrueColor、中文、Emoji 和 PTY 尺寸")
+            LocalTerminalPane(session: session)
+                .padding(14)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct SessionToolbar: View {
+    @EnvironmentObject private var appModel: AppModel
+    @ObservedObject var session: LocalTerminalSession
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(session.currentDirectory)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(session.currentDirectory)
+            }
+
+            Spacer(minLength: 16)
+
+            Button {
+                session.sendInterrupt()
+            } label: {
+                Label("中断", systemImage: "stop.circle")
+            }
+            .disabled(session.state != .running)
+            .help("向当前终端发送 Ctrl-C")
+
+            Button(role: .destructive) {
+                appModel.stopLocalTerminal()
+            } label: {
+                Label("停止", systemImage: "xmark.circle")
+            }
+            .disabled(session.state != .running)
+
+            if session.tool == .shell {
+                Button {
+                    session.runVisualProbe()
+                } label: {
+                    Image(systemName: "testtube.2")
+                }
+                .help("输出 ANSI、TrueColor、中文、Emoji 和 PTY 尺寸探针")
+            }
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+            }
+            .help("设置")
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -91,24 +142,56 @@ private struct LocalTerminalPane: View {
     @ObservedObject var session: LocalTerminalSession
 
     var body: some View {
-        TerminalContainerView(session: session)
-            .id(session.id)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.separator, lineWidth: 1)
-            }
+        VStack(spacing: 8) {
+            TerminalContainerView(session: session)
+                .id(session.id)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.separator, lineWidth: 1)
+                }
 
-        HStack {
-            Text(session.title)
-            Text(session.currentDirectory)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            Text("PTY \(session.state.rawValue)")
-            Text("Relay probe: \(session.probeSnapshot.totalBytes) B / \(session.probeSnapshot.batchCount) batches / seq \(session.probeSnapshot.lastSequence)")
+            HStack(spacing: 12) {
+                Label("PTY \(session.state.rawValue)", systemImage: "terminal")
+                Spacer()
+                Text("\(session.probeSnapshot.totalBytes) B")
+                Text("\(session.probeSnapshot.batchCount) batches")
+                Text("seq \(session.probeSnapshot.lastSequence)")
+            }
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
         }
-        .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
+    }
+}
+
+private struct SessionSummaryView: View {
+    let session: ManagedSession
+    let newSessionAction: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(session.directory.lastPathComponent, systemImage: "rectangle.stack")
+        } description: {
+            Text("已选择该会话。当前多终端运行时正在独立开发，接入后将在这里切换对应终端。")
+        } actions: {
+            Button("创建新会话", action: newSessionAction)
+        }
+    }
+}
+
+private struct EmptySessionView: View {
+    let newSessionAction: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("还没有终端会话", systemImage: "terminal")
+        } description: {
+            Text("从左侧边栏点击添加按钮，选择工作目录和工具。")
+        } actions: {
+            Button(action: newSessionAction) {
+                Label("创建新会话", systemImage: "plus")
+            }
+            .keyboardShortcut("n", modifiers: [.command])
+        }
     }
 }
