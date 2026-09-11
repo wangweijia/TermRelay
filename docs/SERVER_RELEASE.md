@@ -74,7 +74,7 @@ chmod 600 .env.production
 
 编辑 `.env.production`，填写生产数据库的应用账户和 migration 账户密码。不要修改 `manifest.env` 中的镜像标识，也不要把 `.env.production` 上传到 Git。
 
-生产端口默认只绑定 Jetson 的 `127.0.0.1:3006`。在设备认证和 Cloudflare Access 完成前，不建议设置为 `0.0.0.0`。如果端口仍有冲突，只需修改 `.env.production` 中的 `SERVER_PORT`，无需重新构建镜像。
+生产发布包默认绑定 Jetson 的所有网络接口，即 `0.0.0.0:3006`。局域网设备可以通过 Jetson 的局域网 IP 直接访问；如果端口冲突，只需修改 `.env.production` 中的 `SERVER_PORT`，无需重新构建镜像。当前没有应用层认证，只能在可信局域网使用，不能通过路由器端口转发直接暴露到公网。
 
 ## 4. 一键部署
 
@@ -110,14 +110,14 @@ chmod 600 .env.production
 在 Jetson 上：
 
 ```bash
-curl -fsS http://127.0.0.1:3006/health
+curl --noproxy 127.0.0.1 -fsS http://127.0.0.1:3006/health
 docker compose --env-file .env.production -f compose.yaml -p termrelay ps
 ```
 
-从 Mac 安全访问当前仅监听本机的服务：
+从 Mac 或其他局域网设备直接访问（将示例 IP 替换为 Jetson 的实际局域网 IP）：
 
 ```bash
-ssh -N -L 13006:127.0.0.1:3006 jetson
+curl --noproxy '*' -fsS http://192.168.8.134:3006/health
 ```
 
-浏览器访问 `http://127.0.0.1:13006`，Mac App 使用 `ws://127.0.0.1:13006/ws/client`。
+浏览器访问 `http://192.168.8.134:3006`，Mac App 使用 `ws://192.168.8.134:3006/ws/client`。如果 Jetson 的地址由 DHCP 分配，请在路由器中为它保留固定地址。

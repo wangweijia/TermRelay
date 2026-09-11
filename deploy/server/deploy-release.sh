@@ -119,7 +119,9 @@ health_url="http://127.0.0.1:${server_port}/health"
 
 attempt=1
 while [ "$attempt" -le 30 ]; do
-  if curl -fsS "$health_url" >/dev/null 2>&1; then
+  # Health checks target the local Docker port and must never be routed through
+  # HTTP_PROXY/HTTPS_PROXY or a user-level curl proxy configuration.
+  if curl --noproxy 127.0.0.1 --connect-timeout 2 --max-time 5 -fsS "$health_url" >/dev/null 2>&1; then
     echo "TermRelay is healthy: $health_url"
     compose ps
     exit 0

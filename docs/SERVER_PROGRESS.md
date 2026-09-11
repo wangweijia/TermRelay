@@ -233,7 +233,7 @@ Server S4 read-only terminal relay probe passed.
 
 - `/ws/client` 尚无设备 credential、签名、来源限制和速率限制。
 - `/ws/web` 尚未验证 Cloudflare Access 身份。
-- 生产 Compose 的 `127.0.0.1:3006` 适合 Tunnel 访问，但不提供 Mac 局域网直连入口。
+- 生产 Compose 默认通过 `0.0.0.0:3006` 提供局域网直连入口，局域网内任何设备都可以访问 Web、HTTP API 和 WebSocket；当前没有应用层认证。
 
 在真实设备联调前，应确定 LAN 入口和设备认证方案；在公网发布前必须完成 Cloudflare Access 与安全限制。
 
