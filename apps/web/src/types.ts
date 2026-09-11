@@ -12,6 +12,13 @@ export interface SessionRecord {
   updatedAt: string;
 }
 
+export interface DeviceRecord {
+  id: string;
+  status: 'connected' | 'connecting' | 'offline' | 'degraded';
+  activeSessionCount: number;
+  disconnectedAt?: string;
+}
+
 export interface SessionEventRecord {
   seq: number;
   type: string;

@@ -102,7 +102,8 @@ function toRecord(entity: DeviceEntity): DeviceRecord {
     appVersion: entity.appVersion,
     platform: entity.capabilities.platform,
     tools: [...entity.capabilities.tools],
-    activeSessionCount: entity.capabilities.activeSessionCount,
+    activeSessionCount:
+      entity.status === 'offline' ? 0 : entity.capabilities.activeSessionCount,
     registeredAt: entity.capabilities.registeredAt,
     lastSeenAt: entity.lastSeenAt?.toISOString() ?? null,
     ...(entity.capabilities.disconnectedAt

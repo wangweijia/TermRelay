@@ -43,10 +43,10 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('message')
-  handleMessage(
+  async handleMessage(
     @ConnectedSocket() client: WebSocket,
     @MessageBody() input: unknown,
-  ): Promise<void> | void {
+  ): Promise<void> {
     const result = this.validator.validate(input);
     if (!result.ok) {
       this.sendProtocolError(
@@ -108,7 +108,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.message.type === 'command.ack') {
-      if (!this.commands?.acknowledge(client, result.message.envelope)) {
+      if (!await this.commands?.acknowledge(client, result.message.envelope)) {
         this.sendProtocolError(
           client,
           'conflict',

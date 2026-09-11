@@ -156,6 +156,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .terminal-actions { display: flex; gap: 7px; }
 .terminal-actions button { border: 1px solid #334155; border-radius: 6px; background: #17202b; color: #d9e2ec; padding: 5px 9px; cursor: pointer; }
 .terminal-actions button:hover { border-color: #72e0a5; color: #72e0a5; }
+.terminal-actions button:disabled { border-color: #29323d; color: #596675; cursor: not-allowed; opacity: .7; }
 .terminal-actions button.danger { border-color: #7f1d1d; color: #fca5a5; }
 .terminal-view {
   flex: 0 0 auto;

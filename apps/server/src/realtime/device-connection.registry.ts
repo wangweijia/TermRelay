@@ -231,6 +231,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     const device = this.devices.get(deviceId);
     if (!device) return;
     device.presence = 'offline';
+    device.activeSessionCount = 0;
     device.disconnectedAt = new Date(nowMs).toISOString();
     this.publish(device);
   }

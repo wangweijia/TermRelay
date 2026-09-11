@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DevicesService } from '../devices/devices.service';
+import type { DeviceConnectionRegistry } from '../realtime/device-connection.registry';
 import type { SessionRepository } from './session.repository';
 import { SessionsService } from './sessions.service';
 import type { WorkspaceEntity } from './workspace.entity';
@@ -87,15 +88,32 @@ test('publishes accepted terminal events to realtime listeners', async () => {
   assert.deepEqual(received, [1]);
 });
 
+test('finishes stale sessions on startup and when a device disconnects', async () => {
+  const workspaces = new FakeWorkspaceRepository();
+  const sessions = new FakeSessionRepository();
+  const registry = new FakeRegistry();
+  const service = makeService(workspaces, sessions, registry);
+
+  await service.onModuleInit();
+  registry.publishOffline('device-a', '2026-09-11T10:00:00.000Z');
+  await new Promise((resolve) => setImmediate(resolve));
+  await service.onModuleDestroy();
+
+  assert.equal(sessions.finishedAll, 1);
+  assert.deepEqual(sessions.finishedDevices, ['device-a']);
+});
+
 function makeService(
   workspaces: FakeWorkspaceRepository,
   sessions: FakeSessionRepository,
+  registry = new FakeRegistry(),
 ): SessionsService {
   const devices = {
     findById: async (id: string) => (id === 'device-a' ? { id } : undefined),
   } as unknown as DevicesService;
   return new SessionsService(
     devices,
+    registry as unknown as DeviceConnectionRegistry,
     workspaces as unknown as WorkspaceRepository,
     sessions as unknown as SessionRepository,
   );
@@ -133,6 +151,8 @@ class FakeWorkspaceRepository {
 class FakeSessionRepository {
   readonly enabled = true;
   readonly registrations: string[] = [];
+  readonly finishedDevices: string[] = [];
+  finishedAll = 0;
   outputResult:
     | {
         status: 'accepted';
@@ -157,6 +177,16 @@ class FakeSessionRepository {
     return this.outputResult;
   }
 
+  async finishAllActive() {
+    this.finishedAll += 1;
+  }
+
+  async finishActiveForDevice(deviceId: string) {
+    this.finishedDevices.push(deviceId);
+  }
+
+  async finishById() {}
+
   async list() {
     return [];
   }
@@ -167,6 +197,23 @@ class FakeSessionRepository {
 
   async listEvents() {
     return [];
+  }
+}
+
+class FakeRegistry {
+  private listener?: (snapshot: {
+    deviceId: string;
+    presence: 'offline';
+    disconnectedAt: string;
+  }) => void;
+
+  subscribe(listener: typeof this.listener): () => void {
+    this.listener = listener;
+    return () => { this.listener = undefined; };
+  }
+
+  publishOffline(deviceId: string, disconnectedAt: string): void {
+    this.listener?.({ deviceId, presence: 'offline', disconnectedAt });
   }
 }
 

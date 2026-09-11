@@ -73,12 +73,17 @@ export class SessionRepository {
           existing.runtimeMode === payload.runtimeMode &&
           startEvent !== null &&
           sameEvent(startEvent, 'session.started', payload);
-        return sameIdentity
-          ? { status: 'duplicate' }
-          : {
-              status: 'conflict',
-              detail: 'Session ID or sequence 0 contains different metadata.',
-            };
+        if (sameIdentity) {
+          await sessions.update(
+            { id: sessionId },
+            { status: 'running', finishedAt: null },
+          );
+          return { status: 'duplicate' };
+        }
+        return {
+          status: 'conflict',
+          detail: 'Session ID or sequence 0 contains different metadata.',
+        };
       }
 
       const createdAt = new Date();
@@ -190,6 +195,44 @@ export class SessionRepository {
     if (!this.dataSource) return undefined;
     const session = await this.repository.findOneBy({ id });
     return session ? toSessionRecord(session) : undefined;
+  }
+
+  async finishActiveForDevice(deviceId: string, finishedAt = new Date()): Promise<void> {
+    if (!this.dataSource) return;
+    await this.repository
+      .createQueryBuilder()
+      .update(SessionEntity)
+      .set({ status: 'finished', finishedAt })
+      .where('device_id = :deviceId', { deviceId })
+      .andWhere('status IN (:...statuses)', {
+        statuses: ['starting', 'running', 'stopping'],
+      })
+      .execute();
+  }
+
+  async finishAllActive(finishedAt = new Date()): Promise<void> {
+    if (!this.dataSource) return;
+    await this.repository
+      .createQueryBuilder()
+      .update(SessionEntity)
+      .set({ status: 'finished', finishedAt })
+      .where('status IN (:...statuses)', {
+        statuses: ['starting', 'running', 'stopping'],
+      })
+      .execute();
+  }
+
+  async finishById(id: string, finishedAt = new Date()): Promise<void> {
+    if (!this.dataSource) return;
+    await this.repository
+      .createQueryBuilder()
+      .update(SessionEntity)
+      .set({ status: 'finished', finishedAt })
+      .where('id = :id', { id })
+      .andWhere('status IN (:...statuses)', {
+        statuses: ['starting', 'running', 'stopping'],
+      })
+      .execute();
   }
 
   async listEvents(

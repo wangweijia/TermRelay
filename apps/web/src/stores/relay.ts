@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import type {
   CommandAckPayload,
+  DeviceRecord,
   SessionEventRecord,
   SessionRecord,
   SessionSubscribedPayload,
@@ -12,10 +13,12 @@ type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
 const HISTORY_PAGE_SIZE = 1_000;
 const MAX_HISTORY_EVENTS = 10_000;
+const SESSION_REFRESH_INTERVAL_MS = 5_000;
 
 export const useRelayStore = defineStore('relay', {
   state: () => ({
     sessions: [] as SessionRecord[],
+    devices: [] as DeviceRecord[],
     selectedSessionId: undefined as string | undefined,
     eventsBySession: {} as Record<string, SessionEventRecord[]>,
     lastSeqBySession: {} as Record<string, number>,
@@ -25,6 +28,7 @@ export const useRelayStore = defineStore('relay', {
     error: undefined as string | undefined,
     socket: undefined as WebSocket | undefined,
     reconnectTimer: undefined as number | undefined,
+    refreshTimer: undefined as number | undefined,
     reconnectAttempt: 0,
     selectionVersion: 0,
     stopped: false,
@@ -40,6 +44,13 @@ export const useRelayStore = defineStore('relay', {
         ? state.eventsBySession[state.selectedSessionId] ?? []
         : [];
     },
+    selectedSessionInteractive(state): boolean {
+      const session = state.sessions.find((item) => item.id === state.selectedSessionId);
+      if (!session || !['starting', 'running'].includes(session.status)) return false;
+      return state.devices.some(
+        (device) => device.id === session.deviceId && device.status === 'connected',
+      );
+    },
   },
 
   actions: {
@@ -50,12 +61,15 @@ export const useRelayStore = defineStore('relay', {
         await this.selectSession(this.sessions[0].id);
       }
       this.connect();
+      this.scheduleRefresh();
     },
 
     stop(): void {
       this.stopped = true;
       if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
+      if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
       this.socket?.close(1000, 'page closed');
       this.socket = undefined;
       this.connectionState = 'disconnected';
@@ -64,9 +78,18 @@ export const useRelayStore = defineStore('relay', {
     async refreshSessions(): Promise<void> {
       this.loadingSessions = true;
       try {
-        const response = await fetch('/api/sessions');
-        if (!response.ok) throw new Error(`会话列表请求失败 (${response.status})`);
-        this.sessions = (await response.json()) as SessionRecord[];
+        const [sessionsResponse, devicesResponse] = await Promise.all([
+          fetch('/api/sessions'),
+          fetch('/api/devices'),
+        ]);
+        if (!sessionsResponse.ok) {
+          throw new Error(`会话列表请求失败 (${sessionsResponse.status})`);
+        }
+        if (!devicesResponse.ok) {
+          throw new Error(`设备列表请求失败 (${devicesResponse.status})`);
+        }
+        this.sessions = (await sessionsResponse.json()) as SessionRecord[];
+        this.devices = (await devicesResponse.json()) as DeviceRecord[];
         if (
           this.selectedSessionId &&
           !this.sessions.some((item) => item.id === this.selectedSessionId)
@@ -172,7 +195,16 @@ export const useRelayStore = defineStore('relay', {
       payload: Record<string, unknown>,
     ): void {
       const session = this.selectedSession;
-      if (!session || this.socket?.readyState !== WebSocket.OPEN) {
+      if (!session) {
+        this.error = '请先选择一个会话。';
+        return;
+      }
+      if (!this.selectedSessionInteractive) {
+        this.error = '该会话当前不可操作：Mac 已离线或会话已经结束。';
+        this.commandStatus = '命令未发送';
+        return;
+      }
+      if (this.socket?.readyState !== WebSocket.OPEN) {
         this.error = 'Mac 命令无法发送：实时连接尚未建立。';
         return;
       }
@@ -221,6 +253,7 @@ export const useRelayStore = defineStore('relay', {
         if (envelope.type === 'protocol.error') {
           const payload = envelope.payload as { message?: string };
           this.error = payload.message ?? '实时订阅被 Server 拒绝。';
+          this.commandStatus = '命令执行失败';
           return;
         }
         if (envelope.type === 'command.ack') {
@@ -287,6 +320,32 @@ export const useRelayStore = defineStore('relay', {
         this.reconnectTimer = undefined;
         this.connect();
       }, delay);
+    },
+
+    scheduleRefresh(): void {
+      if (this.stopped || this.refreshTimer !== undefined) return;
+      this.refreshTimer = window.setTimeout(async () => {
+        this.refreshTimer = undefined;
+        await this.refreshSessions();
+        this.scheduleRefresh();
+      }, SESSION_REFRESH_INTERVAL_MS);
+    },
+
+    isSessionInteractive(session: SessionRecord): boolean {
+      if (!['starting', 'running'].includes(session.status)) return false;
+      return this.devices.some(
+        (device) => device.id === session.deviceId && device.status === 'connected',
+      );
+    },
+
+    sessionDisplayStatus(session: SessionRecord): string {
+      if (
+        ['starting', 'running', 'stopping'].includes(session.status) &&
+        !this.isSessionInteractive(session)
+      ) {
+        return 'offline';
+      }
+      return session.status;
     },
   },
 });

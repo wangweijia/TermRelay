@@ -1,10 +1,14 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type {
   SessionStartedPayload,
   TerminalOutputPayload,
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
 import { DevicesService } from '../devices/devices.service';
+import {
+  DeviceConnectionRegistry,
+  type DeviceSnapshot,
+} from '../realtime/device-connection.registry';
 import {
   SessionRepository,
   type SessionEventRecord,
@@ -30,18 +34,36 @@ export interface SessionEventNotification {
 export type SessionEventListener = (notification: SessionEventNotification) => void;
 
 @Injectable()
-export class SessionsService implements OnModuleDestroy {
+export class SessionsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(SessionsService.name);
   private readonly queues = new Map<string, Promise<void>>();
   private readonly listeners = new Set<SessionEventListener>();
+  private unsubscribeDevices?: () => void;
 
   constructor(
     private readonly devices: DevicesService,
+    private readonly registry: DeviceConnectionRegistry,
     private readonly workspaces: WorkspaceRepository,
     private readonly sessions: SessionRepository,
   ) {}
 
+  async onModuleInit(): Promise<void> {
+    this.unsubscribeDevices = this.registry.subscribe((snapshot) => {
+      if (snapshot.presence === 'offline') this.finishDisconnectedDevice(snapshot);
+    });
+    // No client connection survives a Server restart. Any genuinely active App
+    // session will announce itself again immediately after reconnecting.
+    await this.sessions.finishAllActive();
+  }
+
   async onModuleDestroy(): Promise<void> {
+    this.unsubscribeDevices?.();
+    this.unsubscribeDevices = undefined;
     await this.waitForWrites();
+  }
+
+  async finishSession(sessionId: string): Promise<void> {
+    await this.sessions.finishById(sessionId);
   }
 
   registerWorkspace(
@@ -146,6 +168,18 @@ export class SessionsService implements OnModuleDestroy {
 
   private async waitForWrites(): Promise<void> {
     await Promise.all(this.queues.values());
+  }
+
+  private finishDisconnectedDevice(snapshot: DeviceSnapshot): void {
+    void this.serialize(snapshot.deviceId, () =>
+      this.sessions.finishActiveForDevice(
+        snapshot.deviceId,
+        snapshot.disconnectedAt ? new Date(snapshot.disconnectedAt) : new Date(),
+      ),
+    ).catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Failed to finish sessions for ${snapshot.deviceId}: ${detail}`);
+    });
   }
 
   private publishAccepted(

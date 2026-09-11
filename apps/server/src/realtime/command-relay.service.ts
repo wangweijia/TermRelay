@@ -22,6 +22,7 @@ interface PendingCommand {
   deviceId: string;
   sessionId: string;
   commandId: string;
+  type: RemoteCommandType;
   timer: NodeJS.Timeout;
 }
 
@@ -85,6 +86,7 @@ export class CommandRelayService implements OnModuleDestroy {
       deviceId: envelope.deviceId,
       sessionId,
       commandId,
+      type: envelope.type as RemoteCommandType,
       timer,
     });
 
@@ -102,7 +104,7 @@ export class CommandRelayService implements OnModuleDestroy {
     }
   }
 
-  acknowledge(client: WebSocket, envelope: Envelope<CommandAckPayload>): boolean {
+  async acknowledge(client: WebSocket, envelope: Envelope<CommandAckPayload>): Promise<boolean> {
     const commandId = envelope.commandId!;
     const pending = this.pending.get(commandId);
     if (
@@ -118,6 +120,9 @@ export class CommandRelayService implements OnModuleDestroy {
     if (envelope.payload.status !== 'accepted') {
       clearTimeout(pending.timer);
       this.pending.delete(commandId);
+      if (pending.type === 'session.stop' && envelope.payload.status === 'completed') {
+        await this.sessions.finishSession(pending.sessionId);
+      }
     }
     return true;
   }

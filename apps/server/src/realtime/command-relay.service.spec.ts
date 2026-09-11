@@ -24,7 +24,7 @@ test('routes a command to the owning Mac and returns its acknowledgement', async
   assert.deepEqual(await service.route(browser.asWebSocket(), command), { ok: true });
   assert.equal(mac.messages[0]?.data.type, 'terminal.input');
   assert.equal(
-    service.acknowledge(mac.asWebSocket(), {
+    await service.acknowledge(mac.asWebSocket(), {
       ...command,
       type: 'command.ack',
       payload: { commandId, status: 'completed' },
@@ -50,13 +50,37 @@ test('rejects offline devices and mismatched acknowledgements', async () => {
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'unknown_device');
   assert.equal(
-    service.acknowledge(mac.asWebSocket(), {
+    await service.acknowledge(mac.asWebSocket(), {
       ...command,
       type: 'command.ack',
       payload: { commandId, status: 'completed' },
     }),
     false,
   );
+  service.onModuleDestroy();
+});
+
+test('marks a stopped session finished after the Mac confirms the command', async () => {
+  const mac = new FakeSocket();
+  const browser = new FakeSocket();
+  const sessions = new FakeSessions();
+  const service = new CommandRelayService(
+    new FakeRegistry(mac) as unknown as DeviceConnectionRegistry,
+    sessions as unknown as SessionsService,
+  );
+  const commandId = randomUUID();
+  const command = envelope('session.stop', commandId, {});
+
+  assert.deepEqual(await service.route(browser.asWebSocket(), command), { ok: true });
+  assert.equal(
+    await service.acknowledge(mac.asWebSocket(), {
+      ...command,
+      type: 'command.ack',
+      payload: { commandId, status: 'completed' },
+    }),
+    true,
+  );
+  assert.deepEqual(sessions.finished, ['session-a']);
   service.onModuleDestroy();
 });
 
@@ -78,10 +102,16 @@ function envelope(
 }
 
 class FakeSessions {
+  readonly finished: string[] = [];
+
   async findById(id: string) {
     return id === 'session-a'
       ? { id, deviceId: 'device-a', status: 'running' }
       : undefined;
+  }
+
+  async finishSession(id: string) {
+    this.finished.push(id);
   }
 }
 

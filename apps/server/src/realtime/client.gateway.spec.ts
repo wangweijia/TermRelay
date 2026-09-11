@@ -153,7 +153,7 @@ test('routes registered workspace and session events to the session service', as
   assert.equal(socket.closed.length, 0);
 });
 
-test('routes command acknowledgements from a registered Mac', () => {
+test('routes command acknowledgements from a registered Mac', async () => {
   const { gateway, commands } = makeGateway();
   const socket = new FakeSocket();
   const client = socket.asWebSocket();
@@ -162,7 +162,7 @@ test('routes command acknowledgements from a registered Mac', () => {
     name: 'Development Mac', appVersion: '0.1.0', platform: 'macOS', tools: ['shell'],
   }));
   const commandId = randomUUID();
-  gateway.handleMessage(client, {
+  await gateway.handleMessage(client, {
     ...envelope('device-a', 'command.ack', { commandId, status: 'completed' }),
     sessionId: 'session-a',
     commandId,
@@ -191,7 +191,7 @@ function makeGateway() {
 class FakeCommands {
   readonly acknowledged: string[] = [];
 
-  acknowledge(_client: WebSocket, envelope: { commandId?: string }): boolean {
+  async acknowledge(_client: WebSocket, envelope: { commandId?: string }): Promise<boolean> {
     this.acknowledged.push(envelope.commandId!);
     return true;
   }

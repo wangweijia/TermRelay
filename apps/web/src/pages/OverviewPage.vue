@@ -57,7 +57,9 @@ onBeforeUnmount(() => relay.stop());
           >
             <span class="session-title">
               <strong>{{ session.toolKey }}</strong>
-              <small :data-status="session.status">{{ session.status }}</small>
+              <small :data-status="relay.sessionDisplayStatus(session)">
+                {{ relay.sessionDisplayStatus(session) }}
+              </small>
             </span>
             <span>{{ session.workspaceId }}</span>
             <code>{{ session.id }}</code>
@@ -78,11 +80,22 @@ onBeforeUnmount(() => relay.stop());
           <div class="terminal-meta">
             <span>{{ relay.selectedSession.runtimeMode }}</span>
             <span>seq {{ relay.selectedSession.stateVersion }}</span>
-            <span>可交互</span>
+            <span>{{ relay.selectedSessionInteractive ? '可交互' : '不可操作' }}</span>
           </div>
           <div class="terminal-actions">
-            <button type="button" @click="relay.interruptSession">Ctrl-C</button>
-            <button type="button" class="danger" @click="relay.stopSession">停止</button>
+            <button
+              type="button"
+              :disabled="!relay.selectedSessionInteractive"
+              title="向当前 Shell 的前台程序发送 Ctrl-C，不关闭 Shell"
+              @click="relay.interruptSession"
+            >Ctrl-C</button>
+            <button
+              type="button"
+              class="danger"
+              :disabled="!relay.selectedSessionInteractive"
+              title="终止整个 Shell 会话及其 PTY"
+              @click="relay.stopSession"
+            >停止</button>
           </div>
         </div>
 
