@@ -97,7 +97,7 @@ case "$output_dir" in
   *) output_dir="$repo_root/$output_dir" ;;
 esac
 
-for command in codesign ditto git hdiutil plutil shasum swift xattr; do
+for command in codesign ditto git hdiutil iconutil plutil shasum sips swift xattr; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Required command is missing: $command" >&2
     exit 1
@@ -138,12 +138,26 @@ while IFS= read -r -d '' resource_bundle; do
   ditto "$resource_bundle" "$resources_dir/$(basename "$resource_bundle")"
 done < <(find "$bin_dir" -maxdepth 1 -type d -name '*.bundle' -print0)
 
+icon_master="$repo_root/TermRelay-AppIcon/TermRelay-AppIcon-1024.png"
+[ -f "$icon_master" ] || { echo "App icon master not found: $icon_master" >&2; exit 1; }
+iconset_dir="$release_tmp/$product_name.iconset"
+mkdir -p "$iconset_dir"
+for icon_size in 16 32 128 256 512; do
+  retina_size=$((icon_size * 2))
+  sips -z "$icon_size" "$icon_size" "$icon_master" \
+    --out "$iconset_dir/icon_${icon_size}x${icon_size}.png" >/dev/null
+  sips -z "$retina_size" "$retina_size" "$icon_master" \
+    --out "$iconset_dir/icon_${icon_size}x${icon_size}@2x.png" >/dev/null
+done
+iconutil --convert icns --output "$resources_dir/$product_name.icns" "$iconset_dir"
+
 info_plist="$contents_dir/Info.plist"
 plutil -create xml1 "$info_plist"
 plutil -insert CFBundleDevelopmentRegion -string en "$info_plist"
 plutil -insert CFBundleDisplayName -string "$product_name" "$info_plist"
 plutil -insert CFBundleExecutable -string "$product_name" "$info_plist"
 plutil -insert CFBundleIdentifier -string "$bundle_id" "$info_plist"
+plutil -insert CFBundleIconFile -string "$product_name.icns" "$info_plist"
 plutil -insert CFBundleInfoDictionaryVersion -string 6.0 "$info_plist"
 plutil -insert CFBundleName -string "$product_name" "$info_plist"
 plutil -insert CFBundlePackageType -string APPL "$info_plist"
