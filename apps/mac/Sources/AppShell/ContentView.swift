@@ -4,14 +4,13 @@ struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var selectedSessionID: UUID?
     @State private var isPresentingNewSession = false
-    @State private var closedSessionIDs: Set<UUID> = []
     @State private var sessionPendingClose: ManagedSession?
 
     var body: some View {
         NavigationSplitView {
             SessionSidebar(
                 sessions: visibleSessions,
-                activeSession: appModel.activeTerminalSession,
+                terminalSessions: appModel.terminalSessions,
                 selection: $selectedSessionID,
                 addAction: { isPresentingNewSession = true },
                 closeAction: requestCloseSession
@@ -23,8 +22,9 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .sheet(isPresented: $isPresentingNewSession) {
             NewSessionSheet {
-                appModel.startLocalTerminal()
-                selectedSessionID = appModel.activeTerminalSession?.id
+                if let sessionID = appModel.startLocalTerminal() {
+                    selectedSessionID = sessionID
+                }
             }
             .environmentObject(appModel)
         }
@@ -47,14 +47,11 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            selectedSessionID = appModel.activeTerminalSession?.id ?? appModel.sessions.last?.id
-        }
-        .onChange(of: appModel.activeTerminalSession?.id) { _, activeID in
-            if let activeID { selectedSessionID = activeID }
+            selectedSessionID = appModel.sessions.last?.id
         }
         .onChange(of: visibleSessions.map(\.id)) { _, sessionIDs in
             guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
-                self.selectedSessionID = appModel.activeTerminalSession?.id ?? sessionIDs.last
+                self.selectedSessionID = sessionIDs.last
                 return
             }
         }
@@ -76,9 +73,8 @@ struct ContentView: View {
     }
 
     private var selectedTerminalSession: LocalTerminalSession? {
-        guard let activeSession = appModel.activeTerminalSession else { return nil }
-        guard selectedSessionID == nil || selectedSessionID == activeSession.id else { return nil }
-        return activeSession
+        guard let selectedSessionID else { return nil }
+        return appModel.terminalSession(id: selectedSessionID)
     }
 
     private var selectedSession: ManagedSession? {
@@ -87,7 +83,7 @@ struct ContentView: View {
     }
 
     private var visibleSessions: [ManagedSession] {
-        appModel.sessions.filter { !closedSessionIDs.contains($0.id) }
+        appModel.sessions
     }
 
     private func requestCloseSession(_ sessionID: UUID) {
@@ -97,10 +93,7 @@ struct ContentView: View {
     private func confirmCloseSession() {
         guard let sessionID = sessionPendingClose?.id else { return }
         sessionPendingClose = nil
-        if appModel.activeTerminalSession?.id == sessionID {
-            appModel.closeLocalTerminal()
-        }
-        closedSessionIDs.insert(sessionID)
+        appModel.closeLocalTerminal(id: sessionID)
         selectedSessionID = visibleSessions.last?.id
     }
 }
@@ -149,7 +142,7 @@ private struct SessionToolbar: View {
             .help("向当前终端发送 Ctrl-C")
 
             Button(role: .destructive) {
-                appModel.stopLocalTerminal()
+                appModel.stopLocalTerminal(id: session.id)
             } label: {
                 Label("停止", systemImage: "xmark.circle")
             }

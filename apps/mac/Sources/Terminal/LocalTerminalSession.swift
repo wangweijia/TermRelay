@@ -19,19 +19,23 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     let terminalView: CapturingTerminalView
     let startedAt: String
 
-    @Published private(set) var state: SessionState = .starting
+    @Published private(set) var state: SessionState = .starting {
+        didSet { stateHandler?(id, state) }
+    }
     @Published private(set) var title: String
     @Published private(set) var currentDirectory: String
     @Published private(set) var probeSnapshot = TerminalProbeSnapshot()
 
     private let launchConfiguration: LaunchConfiguration
+    private let stateHandler: ((UUID, SessionState) -> Void)?
     private var outputBatcher: TerminalOutputBatcher!
     private var hasStarted = false
 
     init(
         directory: URL,
         tool: BuiltInTool,
-        outputHandler relayOutputHandler: @escaping @Sendable (TerminalOutputBatch) -> Void = { _ in }
+        outputHandler relayOutputHandler: @escaping @Sendable (TerminalOutputBatch) -> Void = { _ in },
+        stateHandler: ((UUID, SessionState) -> Void)? = nil
     ) throws {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
@@ -42,6 +46,7 @@ final class LocalTerminalSession: NSObject, ObservableObject {
         id = UUID()
         self.directory = directory
         self.tool = tool
+        self.stateHandler = stateHandler
         startedAt = RelayDate.now()
         launchConfiguration = try tool.adapter.makeLaunchConfiguration(directory: directory)
         title = "\(tool.displayName) — \(directory.lastPathComponent)"

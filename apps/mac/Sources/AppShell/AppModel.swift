@@ -5,7 +5,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .offline
     @Published private(set) var sessions: [ManagedSession] = []
-    @Published private(set) var activeTerminalSession: LocalTerminalSession?
+    @Published private(set) var terminalSessions: [UUID: LocalTerminalSession] = [:]
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published var selectedTool: BuiltInTool = .shell
@@ -91,18 +91,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func startLocalTerminal() {
-        activeTerminalSession?.terminate()
+    @discardableResult
+    func startLocalTerminal() -> UUID? {
         do {
-            guard let remoteClient else { return }
+            guard let remoteClient else { return nil }
             let terminalSession = try LocalTerminalSession(
                 directory: workingDirectory,
                 tool: selectedTool,
                 outputHandler: { batch in
                     Task { await remoteClient.publishTerminalOutput(batch) }
+                },
+                stateHandler: { [weak self] _, _ in
+                    self?.updateActiveSessionCount()
                 }
             )
-            activeTerminalSession = terminalSession
+            terminalSessions[terminalSession.id] = terminalSession
             sessions.append(
                 ManagedSession(id: terminalSession.id, directory: workingDirectory, toolID: selectedTool.rawValue)
             )
@@ -110,7 +113,7 @@ final class AppModel: ObservableObject {
             let directory = terminalSession.directory
             let toolKey = terminalSession.tool.rawValue
             Task {
-                await remoteClient.setActiveSessionCount(1)
+                await remoteClient.setActiveSessionCount(activeSessionCount)
                 await remoteClient.publishWorkspace(id: workspaceID, directory: directory)
                 await remoteClient.publishSession(
                     id: terminalSession.id,
@@ -120,44 +123,54 @@ final class AppModel: ObservableObject {
                 )
             }
             errorMessage = nil
+            return terminalSession.id
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
-    func stopLocalTerminal() {
-        activeTerminalSession?.terminate()
-        if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
+    func terminalSession(id: UUID) -> LocalTerminalSession? {
+        terminalSessions[id]
     }
 
-    func closeLocalTerminal() {
-        activeTerminalSession?.terminate()
-        activeTerminalSession = nil
-        if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
+    func stopLocalTerminal(id: UUID) {
+        terminalSessions[id]?.terminate()
+        updateActiveSessionCount()
+    }
+
+    func closeLocalTerminal(id: UUID) {
+        terminalSessions[id]?.terminate()
+        terminalSessions[id] = nil
+        sessions.removeAll { $0.id == id }
+        updateActiveSessionCount()
     }
 
     func terminateAllSessions() {
-        activeTerminalSession?.terminate()
+        for session in terminalSessions.values { session.terminate() }
         if let remoteClient { Task { await remoteClient.disconnect() } }
     }
 
     private func syncRemoteState() {
-        guard let remoteClient, let session = activeTerminalSession else { return }
-        let workspaceID = workspaceID(for: session.directory)
+        guard let remoteClient else { return }
+        let activeSessions = terminalSessions.values.filter { $0.state.isActive }
         Task {
-            await remoteClient.setActiveSessionCount(session.state == .running ? 1 : 0)
-            await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
-            await remoteClient.publishSession(
-                id: session.id,
-                workspaceId: workspaceID,
-                toolKey: session.tool.rawValue,
-                startedAt: session.startedAt
-            )
+            await remoteClient.setActiveSessionCount(activeSessions.count)
+            for session in activeSessions {
+                let workspaceID = workspaceID(for: session.directory)
+                await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+                await remoteClient.publishSession(
+                    id: session.id,
+                    workspaceId: workspaceID,
+                    toolKey: session.tool.rawValue,
+                    startedAt: session.startedAt
+                )
+            }
         }
     }
 
     private func handleRemoteCommand(_ command: RemoteTerminalCommand) -> RemoteCommandResult {
-        guard let session = activeTerminalSession, session.id == command.sessionId else {
+        guard let session = terminalSessions[command.sessionId] else {
             return .rejected("unknown_session", "The requested local session is not active.")
         }
         guard session.state == .running else {
@@ -169,9 +182,19 @@ final class AppModel: ObservableObject {
         case .interrupt: session.sendInterrupt()
         case .stop:
             session.terminate()
-            if let remoteClient { Task { await remoteClient.setActiveSessionCount(0) } }
+            updateActiveSessionCount()
         }
         return .completed
+    }
+
+    private var activeSessionCount: Int {
+        terminalSessions.values.count { $0.state.isActive }
+    }
+
+    private func updateActiveSessionCount() {
+        guard let remoteClient else { return }
+        let count = activeSessionCount
+        Task { await remoteClient.setActiveSessionCount(count) }
     }
 
     private func workspaceID(for directory: URL) -> String {
@@ -192,4 +215,8 @@ final class AppModel: ObservableObject {
             "ws://127.0.0.1:3000/ws/client",
         ]
     }
+}
+
+private extension SessionState {
+    var isActive: Bool { self == .starting || self == .running || self == .stopping }
 }

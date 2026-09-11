@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SessionSidebar: View {
     let sessions: [ManagedSession]
-    let activeSession: LocalTerminalSession?
+    let terminalSessions: [UUID: LocalTerminalSession]
     @Binding var selection: UUID?
     let addAction: () -> Void
     let closeAction: (UUID) -> Void
@@ -41,7 +41,7 @@ struct SessionSidebar: View {
                 List(sessions, selection: $selection) { session in
                     ClosableSessionSidebarRow(
                         session: session,
-                        activeSession: activeSession?.id == session.id ? activeSession : nil,
+                        terminalSession: terminalSessions[session.id],
                         isSelected: selection == session.id,
                         closeAction: { closeAction(session.id) }
                     )
@@ -67,14 +67,14 @@ struct SessionSidebar: View {
 
 private struct ClosableSessionSidebarRow: View {
     let session: ManagedSession
-    let activeSession: LocalTerminalSession?
+    let terminalSession: LocalTerminalSession?
     let isSelected: Bool
     let closeAction: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 4) {
-            SessionSidebarRow(session: session, activeSession: activeSession)
+            SessionSidebarRow(session: session, terminalSession: terminalSession)
             Spacer(minLength: 4)
             Button(action: closeAction) {
                 Image(systemName: "xmark")
@@ -94,12 +94,12 @@ private struct ClosableSessionSidebarRow: View {
 
 private struct SessionSidebarRow: View {
     let session: ManagedSession
-    let activeSession: LocalTerminalSession?
+    let terminalSession: LocalTerminalSession?
 
     @ViewBuilder
     var body: some View {
-        if let activeSession {
-            ActiveSessionSidebarRow(session: session, activeSession: activeSession)
+        if let terminalSession {
+            ActiveSessionSidebarRow(session: session, activeSession: terminalSession)
         } else {
             SessionSidebarRowContent(
                 session: session,
