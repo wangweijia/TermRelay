@@ -161,6 +161,18 @@ EOF
 checksum="$(shasum -a 256 "$output_dir/$archive_name" | awk '{print $1}')"
 printf '%s  %s\n' "$checksum" "$archive_name" > "$output_dir/$archive_name.sha256"
 
+# Keep the last known-good release until the replacement and its checksum have
+# both been created successfully, then remove every older Server artifact.
+for old_artifact in \
+  "$output_dir"/termrelay-server-*.tar.gz \
+  "$output_dir"/termrelay-server-*.tar.gz.sha256; do
+  [ -e "$old_artifact" ] || continue
+  case "$old_artifact" in
+    "$output_dir/$archive_name"|"$output_dir/$archive_name.sha256") continue ;;
+  esac
+  rm -f -- "$old_artifact"
+done
+
 echo
 echo "Release created:"
 echo "  $output_dir/$archive_name"

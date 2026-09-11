@@ -42,6 +42,8 @@ dist/termrelay-server/
 └── termrelay-server-0.1.0-linux-arm64.tar.gz.sha256
 ```
 
+每次成功生成新发布包和校验文件后，脚本会自动删除 `dist/termrelay-server` 中的旧 Server 发布包，只保留最新版本。构建或导出失败时不会清理旧包。
+
 Docker Desktop 必须正在运行，并支持 Buildx。首次跨架构构建可能需要下载 ARM64 基础镜像；网络不稳定时可以为 Docker daemon 配置代理。
 
 ## 2. 上传并校验
