@@ -2,9 +2,7 @@
 set -euo pipefail
 
 release_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-release_root="$(dirname -- "$release_dir")"
-env_file="$release_root/.env.production"
-env_file_explicit=false
+env_file="$release_dir/.env.production"
 skip_migration=false
 
 usage() {
@@ -12,8 +10,8 @@ usage() {
 Usage: ./deploy.sh [--env-file PATH] [--skip-migration]
 
 Loads the bundled TermRelay Docker image, runs database migrations, starts the
-production container, and waits for its health check. By default, all release
-versions share ../.env.production.
+production container, and waits for its health check. The release archive
+contains a ready-to-use .env.production by default.
 EOF
 }
 
@@ -22,7 +20,6 @@ while [ "$#" -gt 0 ]; do
     --env-file)
       [ "$#" -ge 2 ] || { echo "--env-file requires a path" >&2; exit 2; }
       env_file="$2"
-      env_file_explicit=true
       shift 2
       ;;
     --skip-migration)
@@ -60,25 +57,9 @@ compose_file="$release_dir/compose.yaml"
 [ -f "$compose_file" ] || { echo "Missing Compose file: $compose_file" >&2; exit 1; }
 
 if [ ! -f "$env_file" ]; then
-  legacy_env_file="$release_dir/.env.production"
-  created_from_template=true
-  if [ "$env_file_explicit" = false ] && [ -f "$legacy_env_file" ]; then
-    cp "$legacy_env_file" "$env_file"
-    echo "Migrated release-local configuration to shared file: $env_file"
-    created_from_template=false
-  else
-    cp "$release_dir/.env.production.example" "$env_file"
-    if [ "$env_file_explicit" = true ]; then
-      echo "Created configuration: $env_file"
-    else
-      echo "Created shared configuration: $env_file"
-    fi
-  fi
-  chmod 600 "$env_file"
-  if [ "$created_from_template" = true ]; then
-    echo "Fill in DB_PASSWORD and DB_MIGRATION_PASSWORD once, then run this command again." >&2
-    exit 2
-  fi
+  echo "Missing packaged production configuration: $env_file" >&2
+  echo "Rebuild the release with scripts/build-server-release.sh --env-file PATH." >&2
+  exit 2
 fi
 
 set -a
