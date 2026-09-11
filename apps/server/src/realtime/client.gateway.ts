@@ -108,7 +108,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.message.type === 'command.ack') {
-      if (!await this.commands?.acknowledge(client, result.message.envelope)) {
+      const acknowledged = await this.commands?.acknowledge(
+        client,
+        result.message.envelope,
+      );
+      if (acknowledged === 'connection_mismatch') {
         this.sendProtocolError(
           client,
           'conflict',

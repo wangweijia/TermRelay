@@ -17,6 +17,11 @@ export interface CommandRouteError {
   detail: string;
 }
 
+export type CommandAcknowledgementResult =
+  | 'acknowledged'
+  | 'ignored'
+  | 'connection_mismatch';
+
 interface PendingCommand {
   browser: WebSocket;
   deviceId: string;
@@ -104,16 +109,21 @@ export class CommandRelayService implements OnModuleDestroy {
     }
   }
 
-  async acknowledge(client: WebSocket, envelope: Envelope<CommandAckPayload>): Promise<boolean> {
+  async acknowledge(
+    client: WebSocket,
+    envelope: Envelope<CommandAckPayload>,
+  ): Promise<CommandAcknowledgementResult> {
     const commandId = envelope.commandId!;
     const pending = this.pending.get(commandId);
+    // ACKs can legitimately arrive after a timeout or Server restart. They are
+    // idempotent completion messages, so a missing pending entry is harmless.
+    if (!pending) return 'ignored';
     if (
-      !pending ||
       pending.deviceId !== envelope.deviceId ||
       pending.sessionId !== envelope.sessionId ||
       !this.registry.isRegisteredClient(client, envelope.deviceId)
     ) {
-      return false;
+      return 'connection_mismatch';
     }
 
     send(pending.browser, envelope);
@@ -124,7 +134,7 @@ export class CommandRelayService implements OnModuleDestroy {
         await this.sessions.finishSession(pending.sessionId);
       }
     }
-    return true;
+    return 'acknowledged';
   }
 
   private timeout(commandId: string): void {

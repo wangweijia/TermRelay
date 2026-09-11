@@ -29,7 +29,7 @@ test('routes a command to the owning Mac and returns its acknowledgement', async
       type: 'command.ack',
       payload: { commandId, status: 'completed' },
     }),
-    true,
+    'acknowledged',
   );
   assert.equal(browser.messages[0]?.data.type, 'command.ack');
   assert.equal(browser.messages[0]?.data.payload.status, 'completed');
@@ -55,7 +55,7 @@ test('rejects offline devices and mismatched acknowledgements', async () => {
       type: 'command.ack',
       payload: { commandId, status: 'completed' },
     }),
-    false,
+    'ignored',
   );
   service.onModuleDestroy();
 });
@@ -78,7 +78,7 @@ test('marks a stopped session finished after the Mac confirms the command', asyn
       type: 'command.ack',
       payload: { commandId, status: 'completed' },
     }),
-    true,
+    'acknowledged',
   );
   assert.deepEqual(sessions.finished, ['session-a']);
   service.onModuleDestroy();

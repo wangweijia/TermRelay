@@ -191,9 +191,12 @@ function makeGateway() {
 class FakeCommands {
   readonly acknowledged: string[] = [];
 
-  async acknowledge(_client: WebSocket, envelope: { commandId?: string }): Promise<boolean> {
+  async acknowledge(
+    _client: WebSocket,
+    envelope: { commandId?: string },
+  ): Promise<'acknowledged'> {
     this.acknowledged.push(envelope.commandId!);
-    return true;
+    return 'acknowledged';
   }
 }
 
