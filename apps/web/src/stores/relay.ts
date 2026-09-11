@@ -158,7 +158,7 @@ export const useRelayStore = defineStore('relay', {
       const envelope: WireEnvelope = {
         type,
         protocolVersion: '1',
-        messageId: crypto.randomUUID(),
+        messageId: createUuid(),
         deviceId: session.deviceId,
         sessionId: session.id,
         sentAt: new Date().toISOString(),
@@ -176,11 +176,11 @@ export const useRelayStore = defineStore('relay', {
         this.error = 'Mac 命令无法发送：实时连接尚未建立。';
         return;
       }
-      const commandId = crypto.randomUUID();
+      const commandId = createUuid();
       const envelope: WireEnvelope = {
         type,
         protocolVersion: '1',
-        messageId: crypto.randomUUID(),
+        messageId: createUuid(),
         deviceId: session.deviceId,
         sessionId: session.id,
         commandId,
@@ -332,4 +332,17 @@ function encodeBase64(data: Uint8Array): string {
 
 function shortId(value: string): string {
   return value.slice(0, 8);
+}
+
+function createUuid(): string {
+  if (typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0'));
+  return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex.slice(8, 10).join('')}-${hex.slice(10).join('')}`;
 }

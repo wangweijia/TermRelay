@@ -135,6 +135,7 @@ Server S3 session and terminal event probe passed.
 - Vue/Pinia 会话列表、连接状态、错误状态、历史分页和指数退避重连。
 - xterm.js 只读终端，支持 ANSI、UTF-8、滚动历史和容器自适应 resize。
 - 修复终端容器 padding 被重复计入行数后触发的 ResizeObserver 高度反馈循环；resize 现按内容区计算、按动画帧合并，并跳过未变化的行列数。
+- Web 消息与命令 ID 在 `crypto.randomUUID()` 不可用时使用 `crypto.getRandomValues()` 生成 RFC 4122 v4 UUID，兼容通过局域网 IP 的普通 HTTP 页面。
 - 页面切换会取消旧订阅；WebSocket 重连会从本地最后 seq 恢复。
 - 移除未使用的 Element Plus 全量运行时导入，降低页面主包体积。
 
