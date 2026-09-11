@@ -27,7 +27,8 @@ test('routes a command to the owning Mac and returns its acknowledgement', async
     await service.acknowledge(mac.asWebSocket(), {
       ...command,
       type: 'command.ack',
-      payload: { commandId, status: 'completed' },
+      commandId: commandId.toUpperCase(),
+      payload: { commandId: commandId.toUpperCase(), status: 'completed' },
     }),
     'acknowledged',
   );

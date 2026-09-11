@@ -51,7 +51,7 @@ export class CommandRelayService implements OnModuleDestroy {
     envelope: Envelope<Record<string, unknown>>,
   ): Promise<{ ok: true } | CommandRouteError> {
     const sessionId = envelope.sessionId!;
-    const commandId = envelope.commandId!;
+    const commandId = normalizeCommandId(envelope.commandId!);
     const session = await this.sessions.findById(sessionId);
     if (!session || session.deviceId !== envelope.deviceId) {
       return {
@@ -113,7 +113,7 @@ export class CommandRelayService implements OnModuleDestroy {
     client: WebSocket,
     envelope: Envelope<CommandAckPayload>,
   ): Promise<CommandAcknowledgementResult> {
-    const commandId = envelope.commandId!;
+    const commandId = normalizeCommandId(envelope.commandId!);
     const pending = this.pending.get(commandId);
     // ACKs can legitimately arrive after a timeout or Server restart. They are
     // idempotent completion messages, so a missing pending entry is harmless.
@@ -173,4 +173,8 @@ function readPositiveInteger(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeCommandId(commandId: string): string {
+  return commandId.toLowerCase();
 }
