@@ -134,6 +134,7 @@ Server S3 session and terminal event probe passed.
 - Browser Gateway 对每个订阅维护 last seq，并抑制重复或旧事件。
 - Vue/Pinia 会话列表、连接状态、错误状态、历史分页和指数退避重连。
 - xterm.js 只读终端，支持 ANSI、UTF-8、滚动历史和容器自适应 resize。
+- 修复终端容器 padding 被重复计入行数后触发的 ResizeObserver 高度反馈循环；resize 现按内容区计算、按动画帧合并，并跳过未变化的行列数。
 - 页面切换会取消旧订阅；WebSocket 重连会从本地最后 seq 恢复。
 - 移除未使用的 Element Plus 全量运行时导入，降低页面主包体积。
 

@@ -14,6 +14,7 @@ const rendered = new Set<number>();
 let terminal: Terminal | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let lastSize: { columns: number; rows: number } | undefined;
+let resizeFrame: number | undefined;
 
 onMounted(() => {
   terminal = new Terminal({
@@ -35,9 +36,9 @@ onMounted(() => {
   terminal.open(container.value!);
   terminal.onData((value) => emit('input', new TextEncoder().encode(value)));
   renderEvents(props.events);
-  resizeObserver = new ResizeObserver(resizeTerminal);
+  resizeObserver = new ResizeObserver(scheduleResize);
   resizeObserver.observe(container.value!);
-  resizeTerminal();
+  scheduleResize();
 });
 
 watch(
@@ -47,6 +48,7 @@ watch(
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
+  if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
   terminal?.dispose();
 });
 
@@ -61,15 +63,27 @@ function renderEvents(events: SessionEventRecord[]): void {
   }
 }
 
+function scheduleResize(): void {
+  if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = undefined;
+    resizeTerminal();
+  });
+}
+
 function resizeTerminal(): void {
   if (!terminal || !container.value) return;
-  const columns = Math.max(20, Math.floor(container.value.clientWidth / 8));
-  const rows = Math.max(8, Math.floor(container.value.clientHeight / 18));
+  const style = window.getComputedStyle(container.value);
+  const horizontalPadding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+  const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+  const contentWidth = Math.max(0, container.value.clientWidth - horizontalPadding);
+  const contentHeight = Math.max(0, container.value.clientHeight - verticalPadding);
+  const columns = Math.max(20, Math.floor(contentWidth / 8));
+  const rows = Math.max(8, Math.floor(contentHeight / 18));
+  if (lastSize?.columns === columns && lastSize.rows === rows) return;
+  lastSize = { columns, rows };
   terminal.resize(columns, rows);
-  if (!lastSize || lastSize.columns !== columns || lastSize.rows !== rows) {
-    lastSize = { columns, rows };
-    emit('resize', columns, rows);
-  }
+  emit('resize', columns, rows);
 }
 
 function decodeBase64(value: string): Uint8Array {
