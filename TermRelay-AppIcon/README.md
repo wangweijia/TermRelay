@@ -1,7 +1,5 @@
-# TermRelay macOS App Icon
+# TermRelay macOS App Icon V2
 
-`AppIcon.appiconset` can replace the `AppIcon.appiconset` directory inside the Xcode project's `Assets.xcassets`.
+This is the flatter, more abstract TermRelay icon set. Replace the `AppIcon.appiconset` directory inside the Xcode project's `Assets.xcassets` with the included directory.
 
-The set contains the complete macOS icon matrix: 16, 32, 64, 128, 256, 512, and 1024 pixels, including the required 1x and 2x assignments. `TermRelay-AppIcon-1024.png` is the editable master export.
-
-After replacing the asset, clean the build folder in Xcode and rebuild the application.
+The complete macOS icon matrix is included: 16, 32, 64, 128, 256, 512, and 1024 pixels. `TermRelay-AppIcon-V2-1024.png` is the master export.
