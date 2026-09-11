@@ -57,24 +57,30 @@ cd termrelay-server-0.1.0
 发布包内容：
 
 ```text
-termrelay-server-0.1.0/
-├── image.tar.gz
-├── compose.yaml
-├── deploy.sh
-├── manifest.env
-└── .env.production.example
+termrelay-server/
+├── .env.production                 # 所有版本共用，只配置一次
+└── termrelay-server-0.1.0/
+    ├── image.tar.gz
+    ├── compose.yaml
+    ├── deploy.sh
+    ├── manifest.env
+    └── .env.production.example
 ```
 
 ## 3. 首次配置
 
+第一次进入解压后的版本目录并执行 `./deploy.sh` 时，脚本会在父目录创建共享的 `../.env.production`，然后提示填写生产数据库的应用账户和 migration 账户密码。填写后再次执行 `./deploy.sh`。后续解压和部署任何新版本都会自动复用该文件，不需要重新生成或重复填写。
+
+如果旧版本目录中已经有配置，可以只迁移一次：
+
 ```bash
-cp .env.production.example .env.production
+cp termrelay-server-1.0.0/.env.production .env.production
 chmod 600 .env.production
 ```
 
-编辑 `.env.production`，填写生产数据库的应用账户和 migration 账户密码。不要修改 `manifest.env` 中的镜像标识，也不要把 `.env.production` 上传到 Git。
+不要修改版本目录内 `manifest.env` 中的镜像标识，也不要把共享的 `.env.production` 上传到 Git。
 
-生产发布包默认绑定 Jetson 的所有网络接口，即 `0.0.0.0:3006`。局域网设备可以通过 Jetson 的局域网 IP 直接访问；如果端口冲突，只需修改 `.env.production` 中的 `SERVER_PORT`，无需重新构建镜像。当前没有应用层认证，只能在可信局域网使用，不能通过路由器端口转发直接暴露到公网。
+生产发布包默认绑定 Jetson 的所有网络接口，即 `0.0.0.0:3006`。局域网设备可以通过 Jetson 的局域网 IP 直接访问；如果端口冲突，只需修改父目录共享 `.env.production` 中的 `SERVER_PORT`，无需重新构建镜像。当前没有应用层认证，只能在可信局域网使用，不能通过路由器端口转发直接暴露到公网。
 
 ## 4. 一键部署
 
@@ -111,7 +117,7 @@ chmod 600 .env.production
 
 ```bash
 curl --noproxy 127.0.0.1 -fsS http://127.0.0.1:3006/health
-docker compose --env-file .env.production -f compose.yaml -p termrelay ps
+docker compose --env-file ../.env.production -f compose.yaml -p termrelay ps
 ```
 
 从 Mac 或其他局域网设备直接访问（将示例 IP 替换为 Jetson 的实际局域网 IP）：
