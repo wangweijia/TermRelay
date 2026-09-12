@@ -81,6 +81,15 @@ test('accepts workspace, session, and terminal events with required context', ()
     seq: 1,
   });
   assert.equal(output.ok, true);
+
+  const ended = validator.validate({
+    ...envelope('session.ended', {
+      status: 'finished',
+      finishedAt: new Date().toISOString(),
+    }),
+    sessionId: 'session-a',
+  });
+  assert.equal(ended.ok, true);
 });
 
 test('rejects session events without context and malformed base64', () => {
@@ -101,6 +110,15 @@ test('rejects session events without context and malformed base64', () => {
     seq: 1,
   });
   assert.equal(invalidOutput.ok, false);
+
+  const invalidEnd = validator.validate({
+    ...envelope('session.ended', {
+      status: 'finished',
+      finishedAt: new Date().toISOString(),
+    }),
+    seq: 2,
+  });
+  assert.equal(invalidEnd.ok, false);
 });
 
 test('rejects unsupported protocol versions distinctly', () => {

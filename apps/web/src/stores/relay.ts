@@ -6,6 +6,7 @@ import type {
   SessionEventRecord,
   SessionRecord,
   SessionSubscribedPayload,
+  SessionUpdatedPayload,
   WireEnvelope,
 } from '../types';
 
@@ -312,6 +313,11 @@ export const useRelayStore = defineStore('relay', {
             payload.events,
           );
           this.lastSeqBySession[payload.session.id] = payload.latestSeq;
+          return;
+        }
+        if (envelope.type === 'session.updated') {
+          const payload = envelope.payload as unknown as SessionUpdatedPayload;
+          this.replaceSession(payload.session);
           return;
         }
         if (

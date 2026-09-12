@@ -108,8 +108,8 @@ final class AppModel: ObservableObject {
                 outputHandler: { batch in
                     Task { await remoteClient.publishTerminalOutput(batch) }
                 },
-                stateHandler: { [weak self] _, _ in
-                    self?.updateActiveSessionCount()
+                stateHandler: { [weak self] id, state in
+                    self?.handleLocalSessionState(id: id, state: state)
                 }
             )
             terminalSessions[terminalSession.id] = terminalSession
@@ -217,6 +217,18 @@ final class AppModel: ObservableObject {
         guard let remoteClient else { return }
         let count = activeSessionCount
         Task { await remoteClient.setActiveSessionCount(count) }
+    }
+
+    private func handleLocalSessionState(id: UUID, state: SessionState) {
+        updateActiveSessionCount()
+        guard state == .finished || state == .failed, let remoteClient else { return }
+        Task {
+            await remoteClient.publishSessionEnded(
+                id: id,
+                status: state,
+                finishedAt: RelayDate.now()
+            )
+        }
     }
 
     private func workspaceID(for directory: URL) -> String {

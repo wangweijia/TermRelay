@@ -147,6 +147,12 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 envelope.sessionId!,
                 message.envelope.payload,
               )
+            : message.type === 'session.ended'
+              ? await this.sessions.finishReportedSession(
+                  envelope.deviceId,
+                  envelope.sessionId!,
+                  message.envelope.payload,
+                )
             : await this.sessions.appendTerminalOutput(
                 envelope.deviceId,
                 envelope.sessionId!,

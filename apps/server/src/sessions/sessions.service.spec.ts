@@ -88,6 +88,22 @@ test('publishes accepted terminal events to realtime listeners', async () => {
   assert.deepEqual(received, [1]);
 });
 
+test('accepts a local session end and publishes its new state', async () => {
+  const workspaces = new FakeWorkspaceRepository();
+  const sessions = new FakeSessionRepository();
+  const service = makeService(workspaces, sessions);
+  const statuses: string[] = [];
+  service.subscribeState((session) => statuses.push(session.status));
+
+  const result = await service.finishReportedSession('device-a', 'session-a', {
+    status: 'finished',
+    finishedAt: new Date(2_000).toISOString(),
+  });
+
+  assert.deepEqual(result, { status: 'accepted' });
+  assert.deepEqual(statuses, ['finished']);
+});
+
 test('finishes stale sessions on startup and when a device disconnects', async () => {
   const workspaces = new FakeWorkspaceRepository();
   const sessions = new FakeSessionRepository();
@@ -195,7 +211,9 @@ class FakeSessionRepository {
     this.finishedDevices.push(deviceId);
   }
 
-  async finishById() {}
+  async finishById(id: string, finishedAt = new Date(), status = 'finished') {
+    return this.record(id, status as 'finished' | 'failed', finishedAt);
+  }
 
   async deleteFinished(id: string, purge: boolean) {
     this.deletions.push({ id, purge });
@@ -206,12 +224,33 @@ class FakeSessionRepository {
     return [];
   }
 
-  async findById() {
-    return undefined;
+  async findById(id: string) {
+    return id === 'session-a' ? this.record(id, 'running') : undefined;
   }
 
   async listEvents() {
     return [];
+  }
+
+  private record(
+    id: string,
+    status: 'running' | 'finished' | 'failed',
+    finishedAt?: Date,
+  ) {
+    return {
+      id,
+      deviceId: 'device-a',
+      workspaceId: 'workspace-a',
+      toolKey: 'shell',
+      displayName: null,
+      runtimeMode: 'terminal' as const,
+      status,
+      stateVersion: 1,
+      startedAt: new Date(1_000).toISOString(),
+      finishedAt: finishedAt?.toISOString() ?? null,
+      createdAt: new Date(1_000).toISOString(),
+      updatedAt: (finishedAt ?? new Date(1_000)).toISOString(),
+    };
   }
 }
 

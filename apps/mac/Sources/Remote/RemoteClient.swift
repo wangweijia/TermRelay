@@ -18,6 +18,8 @@ actor RemoteClient {
     private var generation = 0
     private var completedCommands: [UUID] = []
     private var announcedSessions = Set<UUID>()
+    private var endedSessions = Set<UUID>()
+    private var pendingSessionEnds: [UUID: RelaySessionEnded] = [:]
     private var pendingOutputs: [UUID: [TerminalOutputBatch]] = [:]
     private var pendingOutputBytes = 0
     private let maximumPendingOutputBytes = 16 * 1_024 * 1_024
@@ -98,6 +100,23 @@ actor RemoteClient {
         guard sent else { return }
         announcedSessions.insert(id)
         await flushPendingOutputs(sessionId: id)
+        if let pendingEnd = pendingSessionEnds.removeValue(forKey: id) {
+            await sendSessionEnded(id: id, payload: pendingEnd)
+        }
+    }
+
+    func publishSessionEnded(id: UUID, status: SessionState, finishedAt: String) async {
+        guard status == .finished || status == .failed else { return }
+        guard endedSessions.insert(id).inserted else { return }
+        let payload = RelaySessionEnded(
+            status: status == .failed ? "failed" : "finished",
+            finishedAt: finishedAt
+        )
+        guard registered, announcedSessions.contains(id) else {
+            pendingSessionEnds[id] = payload
+            return
+        }
+        await sendSessionEnded(id: id, payload: payload)
     }
 
     func publishTerminalOutput(_ batch: TerminalOutputBatch) async {
@@ -331,6 +350,15 @@ actor RemoteClient {
             return
         }
         batches.removeAll()
+    }
+
+    private func sendSessionEnded(id: UUID, payload: RelaySessionEnded) async {
+        let sent = await send(
+            type: "session.ended",
+            sessionId: id.uuidString.lowercased(),
+            payload: payload
+        )
+        if !sent { pendingSessionEnds[id] = payload }
     }
 
     private func sendRaw<Payload: Encodable & Sendable>(

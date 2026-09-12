@@ -59,6 +59,7 @@ export class BrowserGateway
     25_000,
   );
   private unsubscribeEvents?: () => void;
+  private unsubscribeStates?: () => void;
   private pingTimer?: NodeJS.Timeout;
 
   constructor(
@@ -71,6 +72,9 @@ export class BrowserGateway
     this.unsubscribeEvents = this.sessions.subscribe((notification) => {
       this.broadcast(notification);
     });
+    this.unsubscribeStates = this.sessions.subscribeState((session) => {
+      this.broadcastSessionState(session);
+    });
     this.pingTimer = setInterval(() => this.pingBrowsers(), this.pingIntervalMs);
     this.pingTimer.unref();
   }
@@ -78,6 +82,8 @@ export class BrowserGateway
   onModuleDestroy(): void {
     this.unsubscribeEvents?.();
     this.unsubscribeEvents = undefined;
+    this.unsubscribeStates?.();
+    this.unsubscribeStates = undefined;
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = undefined;
   }
@@ -307,6 +313,20 @@ export class BrowserGateway
       payload: notification.event.payload,
     });
     subscription.lastSeq = notification.event.seq;
+  }
+
+  private broadcastSessionState(session: SessionRecord): void {
+    for (const client of this.browsers.keys()) {
+      this.sendEnvelope(client, {
+        type: 'session.updated',
+        protocolVersion: '1',
+        messageId: randomUUID(),
+        deviceId: session.deviceId,
+        sessionId: session.id,
+        sentAt: session.updatedAt,
+        payload: { session },
+      });
+    }
   }
 
   private sendProtocolError(

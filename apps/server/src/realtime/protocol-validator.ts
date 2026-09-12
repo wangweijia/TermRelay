@@ -4,6 +4,7 @@ import type {
   DeviceHeartbeatPayload,
   DeviceRegisterPayload,
   Envelope,
+  SessionEndedPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
   WorkspaceRegisteredPayload,
@@ -13,6 +14,7 @@ import {
   deviceHeartbeatSchema,
   deviceRegisterSchema,
   envelopeSchema,
+  sessionEndedSchema,
   sessionStartedSchema,
   terminalOutputSchema,
   workspaceRegisteredSchema,
@@ -27,6 +29,7 @@ export type ValidClientMessage =
       envelope: Envelope<WorkspaceRegisteredPayload>;
     }
   | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
+  | { type: 'session.ended'; envelope: Envelope<SessionEndedPayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
 
@@ -56,6 +59,7 @@ export class ProtocolValidator {
       ['device.heartbeat', ajv.compile(deviceHeartbeatSchema)],
       ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
       ['session.started', ajv.compile(sessionStartedSchema)],
+      ['session.ended', ajv.compile(sessionEndedSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
     ]);
@@ -108,6 +112,13 @@ export class ProtocolValidator {
         return invalidContext(
           envelope,
           'session.started requires sessionId and seq 0.',
+        );
+      }
+    } else if (envelope.type === 'session.ended') {
+      if (!envelope.sessionId || envelope.seq !== undefined) {
+        return invalidContext(
+          envelope,
+          'session.ended requires sessionId and must not include seq.',
         );
       }
     } else if (envelope.type === 'terminal.output') {
@@ -175,6 +186,14 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
         message: {
           type: envelope.type,
           envelope: envelope as unknown as Envelope<SessionStartedPayload>,
+        },
+      };
+    case 'session.ended':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionEndedPayload>,
         },
       };
     case 'terminal.output':

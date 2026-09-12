@@ -9,6 +9,7 @@ import type { SessionsService } from '../sessions/sessions.service';
 import type { CommandRelayService } from './command-relay.service';
 import type {
   SessionStartedPayload,
+  SessionEndedPayload,
   TerminalOutputPayload,
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
@@ -145,11 +146,22 @@ test('routes registered workspace and session events to the session service', as
       data: Buffer.from('hello').toString('base64'),
     }),
   );
+  await gateway.handleMessage(
+    client,
+    {
+      ...envelope('device-a', 'session.ended', {
+        status: 'finished',
+        finishedAt: new Date().toISOString(),
+      }),
+      sessionId: 'session-a',
+    },
+  );
 
   assert.deepEqual(sessions.calls, [
     'workspace:workspace-a',
     'session:session-a',
     'output:session-a:1',
+    'ended:session-a:finished',
   ]);
   assert.equal(socket.closed.length, 0);
 });
@@ -234,6 +246,15 @@ class FakeSessionsService {
     payload: WorkspaceRegisteredPayload,
   ) {
     this.calls.push(`workspace:${payload.workspaceId}`);
+    return { status: 'accepted' as const };
+  }
+
+  async finishReportedSession(
+    _deviceId: string,
+    sessionId: string,
+    payload: SessionEndedPayload,
+  ) {
+    this.calls.push(`ended:${sessionId}:${payload.status}`);
     return { status: 'accepted' as const };
   }
 

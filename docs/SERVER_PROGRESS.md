@@ -159,6 +159,8 @@ Server S4 read-only terminal relay probe passed.
 - Mac 使用系统 `URLSessionWebSocketTask` 自动连接和指数退避重连。
 - 注册设备并按 Server 下发间隔发送心跳，连接恢复后重新同步工作区与 Session。
 - 本地 PTY 输出沿用 40 ms / 8 KiB 批处理，通过 `terminal.output` 上传。
+- Mac 本地结束 PTY 时通过 `session.ended` 上报最终状态，Server 持久化后向 Web 实时广播 `session.updated`。
+- 结束消息与最后一批输出允许乱序到达；迟到输出只推进事件序号，不会把已结束会话恢复为运行中。
 - 未建立连接或 Session 尚未声明时，输出进入最大 16 MiB 的有界内存缓存，声明成功后按 seq 发送。
 - Web xterm.js 接收键盘/粘贴输入并发送 Base64 `terminal.input`，尺寸变化发送 `terminal.resize`。
 - Web 提供 Ctrl-C 与停止按钮，对应 `session.interrupt`、`session.stop`。
@@ -179,7 +181,7 @@ Server S4 read-only terminal relay probe passed.
 | `workspaces` | 已接入注册、设备归属和可用状态校验 |
 | `sessions` | 已接入 terminal/structured runtime、状态与版本持久化 |
 | `commands` | 已实现内存路由、ACK 与超时；数据库持久化尚未接入 |
-| `events` | 已接入 `session.started` 和 `terminal.output` 有序持久化 |
+| `events` | 已接入 `session.started` 和 `terminal.output` 有序持久化；`session.ended` 更新会话状态 |
 | `approvals` | 尚未接入 |
 | `audit_logs` | 尚未接入 |
 
@@ -187,13 +189,13 @@ Server S4 read-only terminal relay probe passed.
 
 ## 协议状态
 
-当前 16 个 JSON Schema 均已通过检查；S5 新增 Terminal Input/Resize、Session Interrupt/Stop。
+当前 17 个 JSON Schema 均已通过检查；包含 Terminal Input/Resize、Session Interrupt/Stop 和 Session Ended。
 
 运行时校验已经接入 Server。仍有一项协议技术债：TypeScript/Swift 的 `generated` 类型目前是手写引导版本，尚未建立从 JSON Schema 自动生成并在 CI 检查无漂移的正式流程。
 
 ## 自动化与实测
 
-当前 Server 自动化测试共 39 项，Mac 自动化测试共 4 项，覆盖：
+当前 Server 自动化测试共 47 项，Mac 自动化测试共 6 项，覆盖：
 
 - AppModule 无数据库模式依赖注入与生命周期。
 - 协议 Envelope/payload 校验。

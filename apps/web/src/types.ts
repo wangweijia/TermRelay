@@ -51,3 +51,7 @@ export interface SessionSubscribedPayload {
   events: SessionEventRecord[];
   latestSeq: number;
 }
+
+export interface SessionUpdatedPayload {
+  session: SessionRecord;
+}

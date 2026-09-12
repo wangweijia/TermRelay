@@ -51,6 +51,16 @@ public struct SessionStartedPayload: Codable, Sendable {
     public let startedAt: String
 }
 
+public enum SessionEndedStatus: String, Codable, Sendable {
+    case finished
+    case failed
+}
+
+public struct SessionEndedPayload: Codable, Sendable {
+    public let status: SessionEndedStatus
+    public let finishedAt: String
+}
+
 public struct TerminalOutputPayload: Codable, Sendable {
     public let encoding: String
     public let data: String

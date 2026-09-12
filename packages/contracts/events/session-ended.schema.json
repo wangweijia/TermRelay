@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-ended.schema.json",
+  "title": "session.ended payload",
+  "type": "object",
+  "required": ["status", "finishedAt"],
+  "properties": {
+    "status": { "enum": ["finished", "failed"] },
+    "finishedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

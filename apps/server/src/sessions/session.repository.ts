@@ -174,7 +174,7 @@ export class SessionRepository {
       });
       await sessions.update(
         { id: sessionId },
-        { stateVersion: String(seq), status: 'running' },
+        { stateVersion: String(seq) },
       );
       return {
         status: 'accepted',
@@ -259,17 +259,22 @@ export class SessionRepository {
       .execute();
   }
 
-  async finishById(id: string, finishedAt = new Date()): Promise<void> {
-    if (!this.dataSource) return;
+  async finishById(
+    id: string,
+    finishedAt = new Date(),
+    status: Extract<SessionStatus, 'finished' | 'failed'> = 'finished',
+  ): Promise<SessionRecord | undefined> {
+    if (!this.dataSource) return undefined;
     await this.repository
       .createQueryBuilder()
       .update(SessionEntity)
-      .set({ status: 'finished', finishedAt })
+      .set({ status, finishedAt })
       .where('id = :id', { id })
       .andWhere('status IN (:...statuses)', {
         statuses: ['starting', 'running', 'stopping'],
       })
       .execute();
+    return this.findById(id);
   }
 
   async listEvents(

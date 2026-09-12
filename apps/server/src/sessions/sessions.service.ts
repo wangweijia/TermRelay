@@ -1,5 +1,6 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type {
+  SessionEndedPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
   WorkspaceRegisteredPayload,
@@ -33,12 +34,14 @@ export interface SessionEventNotification {
 }
 
 export type SessionEventListener = (notification: SessionEventNotification) => void;
+export type SessionStateListener = (session: SessionRecord) => void;
 
 @Injectable()
 export class SessionsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SessionsService.name);
   private readonly queues = new Map<string, Promise<void>>();
   private readonly listeners = new Set<SessionEventListener>();
+  private readonly stateListeners = new Set<SessionStateListener>();
   private unsubscribeDevices?: () => void;
 
   constructor(
@@ -64,7 +67,29 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async finishSession(sessionId: string): Promise<void> {
-    await this.sessions.finishById(sessionId);
+    const session = await this.sessions.finishById(sessionId);
+    if (session) this.publishState(session);
+  }
+
+  finishReportedSession(
+    deviceId: string,
+    sessionId: string,
+    payload: SessionEndedPayload,
+  ): Promise<ClientEventResult> {
+    return this.serialize(deviceId, async () => {
+      const session = await this.sessions.findById(sessionId);
+      if (!session || session.deviceId !== deviceId) {
+        return error('unknown_session', 'Session does not exist for this device.');
+      }
+      const updated = await this.sessions.finishById(
+        sessionId,
+        new Date(payload.finishedAt),
+        payload.status,
+      );
+      if (!updated) return error('unknown_session', 'Session no longer exists.');
+      this.publishState(updated);
+      return { status: 'accepted' };
+    });
   }
 
   registerWorkspace(
@@ -160,6 +185,11 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeState(listener: SessionStateListener): () => void {
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
+  }
+
   private serialize<T>(key: string, work: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(key) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(work);
@@ -200,6 +230,10 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       event: cloneEvent(result.event),
     };
     for (const listener of this.listeners) listener(notification);
+  }
+
+  private publishState(session: SessionRecord): void {
+    for (const listener of this.stateListeners) listener({ ...session });
   }
 }
 

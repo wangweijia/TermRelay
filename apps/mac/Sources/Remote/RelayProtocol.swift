@@ -44,6 +44,11 @@ struct RelaySessionStarted: Encodable, Sendable {
     let startedAt: String
 }
 
+struct RelaySessionEnded: Encodable, Sendable {
+    let status: String
+    let finishedAt: String
+}
+
 struct RelayTerminalOutput: Encodable, Sendable {
     let encoding = "base64"
     let data: String

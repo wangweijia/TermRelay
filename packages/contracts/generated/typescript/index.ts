@@ -48,6 +48,11 @@ export interface SessionStartedPayload {
   startedAt: string;
 }
 
+export interface SessionEndedPayload {
+  status: 'finished' | 'failed';
+  finishedAt: string;
+}
+
 export type ProtocolErrorCode =
   | 'invalid_message'
   | 'unsupported_version'
@@ -143,6 +148,19 @@ export const sessionStartedSchema = {
     displayName: { type: 'string', minLength: 1, maxLength: 128 },
     runtimeMode: { enum: ['terminal', 'structured'] },
     startedAt: { type: 'string', format: 'date-time' },
+  },
+  additionalProperties: false,
+} as const;
+
+export const sessionEndedSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/session-ended.schema.json',
+  title: 'session.ended payload',
+  type: 'object',
+  required: ['status', 'finishedAt'],
+  properties: {
+    status: { enum: ['finished', 'failed'] },
+    finishedAt: { type: 'string', format: 'date-time' },
   },
   additionalProperties: false,
 } as const;

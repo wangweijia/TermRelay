@@ -8,6 +8,7 @@ import type {
 } from '../sessions/session.repository';
 import type {
   SessionEventListener,
+  SessionStateListener,
   SessionsService,
 } from '../sessions/sessions.service';
 import { BrowserGateway } from './browser.gateway';
@@ -132,6 +133,27 @@ test('sends WebSocket ping frames to connected browsers', () => {
   assert.equal(socket.pings, 1);
 });
 
+test('broadcasts session state changes to connected browsers', () => {
+  const sessions = new FakeSessionsService();
+  const gateway = new BrowserGateway(
+    new BrowserProtocolValidator(),
+    sessions as unknown as SessionsService,
+  );
+  const socket = new FakeSocket();
+  gateway.onModuleInit();
+  gateway.handleConnection(socket.asWebSocket());
+
+  sessions.publishState({
+    ...sessions.session,
+    status: 'finished',
+    finishedAt: new Date(2_000).toISOString(),
+  });
+
+  assert.equal(socket.messages[0]?.data.type, 'session.updated');
+  assert.equal(socket.messages[0]?.data.payload.session.status, 'finished');
+  gateway.onModuleDestroy();
+});
+
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
@@ -170,11 +192,19 @@ class FakeSessionsService {
   };
   beforeHistory?: Promise<void>;
   private listener?: SessionEventListener;
+  private stateListener?: SessionStateListener;
 
   subscribe(listener: SessionEventListener): () => void {
     this.listener = listener;
     return () => {
       this.listener = undefined;
+    };
+  }
+
+  subscribeState(listener: SessionStateListener): () => void {
+    this.stateListener = listener;
+    return () => {
+      this.stateListener = undefined;
     };
   }
 
@@ -204,6 +234,10 @@ class FakeSessionsService {
       sessionId: this.session.id,
       event: sessionEvent,
     });
+  }
+
+  publishState(session: SessionRecord): void {
+    this.stateListener?.(session);
   }
 }
 
