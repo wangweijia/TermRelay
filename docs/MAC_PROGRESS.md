@@ -8,7 +8,9 @@
 
 ## 总体结论
 
-macOS 端已经完成本地终端、Server WebSocket 闭环和同一 App 窗口内的多 PTY Session。每个 Session 拥有独立进程和终端视图，并通过侧边栏切换；独立 macOS 多窗口和产品化能力仍未完成。
+macOS 端已经完成本地终端、Server WebSocket 闭环和同一 App 窗口内的多 Session。每个
+Shell Session 拥有独立 PTY；每个 Codex Session 拥有独立 App Server、Unix Socket、Thread、
+PTY TUI 和结构化监听连接。侧边栏可独立切换和停止；独立 macOS 原生窗口仍未实现。
 
 - 工程骨架完成度：约 40%。
 - Mac MVP 功能完成度：约 25%～30%。
@@ -219,42 +221,23 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 6. 查看 Relay 输出批次、字节数和序列号探针。
 7. 进入设置页修改 Server URL 并查看 Device ID。
 
-当前仍无法连接 Server 或接受远程控制。
+当前已能连接 Server、同步多个会话，并从 Web 发送终端输入、resize、Ctrl-C、停止及 Codex
+审批响应。生产级断线 Journal、持久化命令状态和压力测试仍未完成。
 
 ## MVP 验收情况
 
-根据开发实现文档中的 15 项 MVP 验收标准，当前已形成第 2、3、5 项的单会话实现路径，但仍需 GUI 人工确认；第 1 项只有 Server URL 和持久化 Device ID，尚无实际连接。其余验收项依赖阶段 1～4。
-
-## 提交记录判断
-
-Mac 端原有代码来自项目初始化提交：
-
-```text
-89a1d34 项目初始化
-```
-
-阶段 0 的 SwiftTerm、PTY、CodexAdapter、输出批处理和本地终端 UI 是 2026-09-10 的当前工作区变更，尚未提交。
+PTY 和结构化审批的最小纵向闭环已经形成并通过自动化测试；Codex 0.153.4 的双客户端
+App Server 行为已实测。仍需 GUI 人工回归多 Codex 会话、远程审批后 TUI 状态同步，以及断网
+恢复期间的完整性。
 
 ## 下一步优先级
 
-建议进入阶段 1 和最小 Server 闭环：
-
-1. 安装完整 Xcode，运行现有单元测试，并补充 Adapter 和 batcher 测试。
-2. 统一 `ManagedSession` 与 `LocalTerminalSession`，实现真正的多窗口。
-3. 实现菜单栏驻留、窗口关闭和退出确认。
-4. 接入 `URLSessionWebSocketTask`，完成注册、心跳和自动重连。
-5. 建立单会话的端到端远程输入输出闭环。
-6. 增加工作区授权、ACK、EventJournal 和断线补传。
-7. 持续回归中文输入法、复制粘贴、鼠标和长时间全屏 TUI。
-
-阶段 0 已关闭；完成第 4～5 项后，才具备首个可演示的 TermRelay 纵向闭环。
-
-Codex 结构化能力不阻塞上述 PTY 闭环。PTY 闭环通过后，按照
-[`ADR-001-CODEX-APP-SERVER.md`](ADR-001-CODEX-APP-SERVER.md) 的 A～E 顺序实现：Mac 本地
-stdio App Server 探针、内部 `StructuredAgentAdapter`/`ToolEvent`、TermRelay Contract、
-Server/Web UI，最后完成版本矩阵与安全加固。`codex-acp` 当前不在开发依赖中。
-适配层接口和新智能体接入流程以
-[`STRUCTURED_AGENT_ADAPTER_DESIGN.md`](STRUCTURED_AGENT_ADAPTER_DESIGN.md) 为准。
+1. 为 Server ACK 和 Mac EventJournal 增加落盘与重连续传，替换当前有界内存队列。
+2. 将命令 ACK 状态持久化，覆盖超时、断线重连和重复 ACK。
+3. 增加终端事件物理过期清理与单会话存储配额。
+4. 实测两个以上并发 Codex 组合会话、远程审批、长输出和慢浏览器背压。
+5. 从 JSON Schema 自动生成 Swift/TypeScript DTO，并在 CI 检查漂移。
+6. 完善结构化 Agent 的审计、恢复、通知和更多审批类型。
 
 ## 维护方式
 

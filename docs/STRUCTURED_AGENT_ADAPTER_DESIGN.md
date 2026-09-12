@@ -488,19 +488,18 @@ detect codex
 
 ## 12. PTY 与结构化模式关系
 
-PTY 和 Structured Agent 是两个平行 runtime，不互相模拟：
+PTY 和 Structured Agent 仍是职责独立的组件，但 Codex 产品会话会组合二者：
 
-| 能力 | Terminal Runtime | Structured Agent Runtime |
+| 能力 | Shell 会话 | Codex 组合会话 |
 | --- | --- | --- |
-| 原始 ANSI 输出 | 是 | 否 |
-| 键盘逐字节输入 | 是 | 否 |
-| resize/鼠标报告 | 是 | 否 |
-| 助手消息语义 | 不保证 | 是 |
-| 精确工具状态 | 不保证 | capability 决定 |
-| 结构化审批 | 禁止猜测 | capability 决定 |
-| 通用 CLI 支持 | 是 | 否 |
+| 原始 ANSI 输出和键盘输入 | PTY | PTY 中的远程 Codex TUI |
+| resize/鼠标报告 | PTY | PTY |
+| 助手消息、工具和审批语义 | 无 | App Server 监听连接 |
+| Provider Thread | 无 | TUI 与监听连接共享同一 Thread |
+| 通用 CLI 支持 | 是 | 仅 Codex |
 
-模式由创建会话时确定。首版不支持运行中切换，因为切换可能丢失上下文或重复执行 prompt。
+`full` 与 `approval` 在创建会话时确定，但它们只是 Web 展示策略，不会切换或重启底层
+runtime。两种展示策略都持续接收终端和结构化事件，避免漏掉审批。
 
 回退规则：
 
