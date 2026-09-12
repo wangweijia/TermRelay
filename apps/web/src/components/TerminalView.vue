@@ -4,7 +4,10 @@ import '@xterm/xterm/css/xterm.css';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SessionEventRecord } from '../types';
 
-const props = defineProps<{ events: SessionEventRecord[] }>();
+const props = defineProps<{
+  events: SessionEventRecord[];
+  interactive: boolean;
+}>();
 const emit = defineEmits<{
   input: [data: Uint8Array];
   resize: [columns: number, rows: number];
@@ -21,7 +24,7 @@ onMounted(() => {
     allowTransparency: false,
     convertEol: false,
     cursorBlink: false,
-    disableStdin: false,
+    disableStdin: !props.interactive,
     fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.25,
@@ -34,7 +37,9 @@ onMounted(() => {
     },
   });
   terminal.open(container.value!);
-  terminal.onData((value) => emit('input', new TextEncoder().encode(value)));
+  terminal.onData((value) => {
+    if (props.interactive) emit('input', new TextEncoder().encode(value));
+  });
   renderEvents(props.events);
   resizeObserver = new ResizeObserver(scheduleResize);
   resizeObserver.observe(container.value!);
@@ -44,6 +49,13 @@ onMounted(() => {
 watch(
   () => props.events,
   (events) => renderEvents(events),
+);
+
+watch(
+  () => props.interactive,
+  (interactive) => {
+    if (terminal) terminal.options.disableStdin = !interactive;
+  },
 );
 
 onBeforeUnmount(() => {
@@ -83,7 +95,7 @@ function resizeTerminal(): void {
   if (lastSize?.columns === columns && lastSize.rows === rows) return;
   lastSize = { columns, rows };
   terminal.resize(columns, rows);
-  emit('resize', columns, rows);
+  if (props.interactive) emit('resize', columns, rows);
 }
 
 function decodeBase64(value: string): Uint8Array {

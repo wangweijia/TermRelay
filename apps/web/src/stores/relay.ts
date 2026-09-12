@@ -224,6 +224,7 @@ export const useRelayStore = defineStore('relay', {
     },
 
     sendTerminalInput(data: Uint8Array): void {
+      if (!this.selectedSessionInteractive) return;
       this.sendCommand('terminal.input', {
         encoding: 'base64',
         data: encodeBase64(data),
@@ -231,6 +232,7 @@ export const useRelayStore = defineStore('relay', {
     },
 
     resizeTerminal(columns: number, rows: number): void {
+      if (!this.selectedSessionInteractive) return;
       this.sendCommand('terminal.resize', { columns, rows });
     },
 

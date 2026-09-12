@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TerminalView from '../components/TerminalView.vue';
 import { useRelayStore } from '../stores/relay';
 
 const relay = useRelayStore();
+const toastMessage = ref<string>();
+let toastTimer: number | undefined;
 const connectionLabel = computed(() => {
   switch (relay.connectionState) {
     case 'connected':
@@ -15,8 +17,24 @@ const connectionLabel = computed(() => {
   }
 });
 
+watch(
+  () => relay.error,
+  (error) => {
+    if (!error) return;
+    toastMessage.value = error;
+    if (toastTimer !== undefined) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => {
+      toastMessage.value = undefined;
+      toastTimer = undefined;
+    }, 5_000);
+  },
+);
+
 onMounted(() => void relay.initialize());
-onBeforeUnmount(() => relay.stop());
+onBeforeUnmount(() => {
+  if (toastTimer !== undefined) window.clearTimeout(toastTimer);
+  relay.stop();
+});
 </script>
 
 <template>
@@ -32,7 +50,12 @@ onBeforeUnmount(() => relay.stop());
       </div>
     </section>
 
-    <p v-if="relay.error" class="error-banner">{{ relay.error }}</p>
+    <Transition name="toast">
+      <div v-if="toastMessage" class="error-toast" role="alert">
+        <span>{{ toastMessage }}</span>
+        <button type="button" aria-label="关闭提示" @click="toastMessage = undefined">×</button>
+      </div>
+    </Transition>
 
     <section class="relay-layout">
       <aside class="session-panel">
@@ -104,6 +127,7 @@ onBeforeUnmount(() => relay.stop());
           v-else-if="relay.selectedSession"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
+          :interactive="relay.selectedSessionInteractive"
           @input="relay.sendTerminalInput"
           @resize="relay.resizeTerminal"
         />

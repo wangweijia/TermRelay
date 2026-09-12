@@ -69,15 +69,35 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .connection-pill[data-state="connecting"] span { background: #f2c66d; }
 .connection-pill[data-state="disconnected"] span { background: #f07878; }
 
-.error-banner {
-  margin-bottom: 16px;
+.error-toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(420px, calc(100vw - 36px));
   padding: 11px 14px;
   border: 1px solid #6c3438;
   border-radius: 8px;
   color: #ffb4b9;
   background: #26171a;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 45%);
   font-size: 13px;
 }
+.error-toast span { flex: 1; }
+.error-toast button {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.toast-enter-active, .toast-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-8px); }
 
 .relay-layout {
   display: grid;
