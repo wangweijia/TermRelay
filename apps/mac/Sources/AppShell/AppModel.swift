@@ -12,6 +12,9 @@ final class AppModel: ObservableObject {
     @Published var selectedTool: BuiltInTool = .shell
     @Published var selectedRuntimeMode: SessionRuntimeMode = .terminal
     @Published var sessionName = ""
+    @Published var proxyConfigurations: [String: ToolProxyConfiguration] {
+        didSet { persistProxyConfigurations() }
+    }
     @Published var serverURL: String {
         didSet { defaults.set(serverURL, forKey: Keys.serverURL) }
     }
@@ -23,6 +26,7 @@ final class AppModel: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
         let storedServerURL = defaults.string(forKey: Keys.serverURL)
         if let storedServerURL, !Keys.legacyServerURLs.contains(storedServerURL) {
@@ -86,6 +90,14 @@ final class AppModel: ObservableObject {
         "\(selectedTool.displayName) — \(workingDirectory.lastPathComponent)"
     }
 
+    func proxyConfiguration(for tool: BuiltInTool) -> ToolProxyConfiguration {
+        proxyConfigurations[tool.rawValue] ?? .inherited
+    }
+
+    func setProxyConfiguration(_ configuration: ToolProxyConfiguration, for tool: BuiltInTool) {
+        proxyConfigurations[tool.rawValue] = configuration
+    }
+
     func chooseWorkingDirectory() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -103,10 +115,16 @@ final class AppModel: ObservableObject {
     func startLocalTerminal() -> UUID? {
         do {
             guard let remoteClient else { return nil }
+            let proxy = proxyConfiguration(for: selectedTool)
+            if let validationMessage = proxy.validationMessage {
+                errorMessage = validationMessage
+                return nil
+            }
             let displayName = normalizedSessionName
             let terminalSession = try LocalTerminalSession(
                 directory: workingDirectory,
                 tool: selectedTool,
+                proxy: proxy,
                 outputHandler: { batch in
                     Task { await remoteClient.publishTerminalOutput(batch) }
                 },
@@ -157,10 +175,16 @@ final class AppModel: ObservableObject {
             errorMessage = "结构化模式目前仅支持 Codex。"
             return nil
         }
+        let proxy = proxyConfiguration(for: selectedTool)
+        if let validationMessage = proxy.validationMessage {
+            errorMessage = validationMessage
+            return nil
+        }
         let displayName = normalizedSessionName
         let session = LocalStructuredAgentSession(
             directory: workingDirectory,
             adapter: CodexStructuredAdapter(),
+            environment: TerminalEnvironment.make(proxy: proxy),
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
             },
@@ -354,10 +378,27 @@ final class AppModel: ObservableObject {
         static let serverURL = "serverURL"
         static let deviceID = "deviceID"
         static let workspaceIDs = "workspaceIDs"
+        static let proxyConfigurations = "toolProxyConfigurations"
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",
         ]
+    }
+
+    private func persistProxyConfigurations() {
+        guard let data = try? JSONEncoder().encode(proxyConfigurations) else { return }
+        defaults.set(data, forKey: Keys.proxyConfigurations)
+    }
+
+    private static func loadProxyConfigurations(
+        from defaults: UserDefaults
+    ) -> [String: ToolProxyConfiguration] {
+        guard let data = defaults.data(forKey: Keys.proxyConfigurations),
+              let value = try? JSONDecoder().decode(
+                [String: ToolProxyConfiguration].self,
+                from: data
+              ) else { return [:] }
+        return value
     }
 }
 

@@ -29,7 +29,8 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
         }
         let transport = CodexAppServerProcess(
             executableURL: installation.executableURL,
-            directory: configuration.workspaceURL
+            directory: configuration.workspaceURL,
+            environment: configuration.environment
         )
         return CodexStructuredRuntime(
             sessionID: configuration.sessionID,

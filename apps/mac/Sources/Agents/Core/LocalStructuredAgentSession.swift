@@ -9,6 +9,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     @Published private(set) var events: [ToolEvent] = []
 
     private let adapter: any StructuredAgentAdapter
+    private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
     private var coordinator: StructuredSessionCoordinator?
@@ -18,12 +19,14 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         id: UUID = UUID(),
         directory: URL,
         adapter: any StructuredAgentAdapter,
+        environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void
     ) {
         self.id = id
         self.directory = directory
         self.adapter = adapter
+        self.environment = environment
         self.eventHandler = eventHandler
         self.stateHandler = stateHandler
         startedAt = RelayDate.now()
@@ -35,7 +38,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         do {
             let runtime = try await adapter.makeRuntime(configuration: AgentLaunchConfiguration(
                 sessionID: id,
-                workspaceURL: directory
+                workspaceURL: directory,
+                environment: environment
             ))
             let coordinator = StructuredSessionCoordinator(runtime: runtime)
             self.coordinator = coordinator

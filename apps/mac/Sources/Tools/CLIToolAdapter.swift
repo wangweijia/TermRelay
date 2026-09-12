@@ -12,7 +12,10 @@ protocol CLIToolAdapter: Sendable {
     var toolID: String { get }
     var displayName: String { get }
     func detect() -> ToolAvailability
-    func makeLaunchConfiguration(directory: URL) throws -> LaunchConfiguration
+    func makeLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration
+    ) throws -> LaunchConfiguration
 }
 
 struct ToolAvailability: Sendable, Equatable {
@@ -55,7 +58,10 @@ struct LoginShellAdapter: CLIToolAdapter {
         )
     }
 
-    func makeLaunchConfiguration(directory: URL) throws -> LaunchConfiguration {
+    func makeLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration = .inherited
+    ) throws -> LaunchConfiguration {
         let shell = shellURL
         guard FileManager.default.isExecutableFile(atPath: shell.path) else {
             throw ToolLaunchError.notExecutable(shell.path)
@@ -64,7 +70,7 @@ struct LoginShellAdapter: CLIToolAdapter {
             executableURL: shell,
             arguments: [],
             directory: directory,
-            environment: TerminalEnvironment.make(),
+            environment: TerminalEnvironment.make(proxy: proxy),
             executableName: "-\(shell.lastPathComponent)"
         )
     }
@@ -90,7 +96,10 @@ struct CodexAdapter: CLIToolAdapter {
         return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
     }
 
-    func makeLaunchConfiguration(directory: URL) throws -> LaunchConfiguration {
+    func makeLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration = .inherited
+    ) throws -> LaunchConfiguration {
         guard let executable = ExecutableLocator.find(named: "codex") else {
             throw ToolLaunchError.notFound("codex")
         }
@@ -98,7 +107,7 @@ struct CodexAdapter: CLIToolAdapter {
             executableURL: executable,
             arguments: [],
             directory: directory,
-            environment: TerminalEnvironment.make(),
+            environment: TerminalEnvironment.make(proxy: proxy),
             executableName: nil
         )
     }
@@ -147,7 +156,7 @@ enum ExecutableLocator {
 }
 
 enum TerminalEnvironment {
-    static func make() -> [String: String] {
+    static func make(proxy: ToolProxyConfiguration = .inherited) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let fallbackPaths = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
@@ -166,6 +175,6 @@ enum TerminalEnvironment {
         if environment["LANG"] == nil && environment["LC_ALL"] == nil {
             environment["LANG"] = "en_US.UTF-8"
         }
-        return environment
+        return proxy.applying(to: environment)
     }
 }

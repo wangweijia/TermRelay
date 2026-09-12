@@ -12,6 +12,7 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
 
     private let executableURL: URL
     private let directory: URL
+    private let environment: [String: String]
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let stateLock = NSLock()
     private let lineBuffer: JSONLineBuffer
@@ -19,9 +20,14 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
     private var inputHandle: FileHandle?
     private var stderrTail = Data()
 
-    init(executableURL: URL, directory: URL) {
+    init(
+        executableURL: URL,
+        directory: URL,
+        environment: [String: String] = TerminalEnvironment.make()
+    ) {
         self.executableURL = executableURL
         self.directory = directory
+        self.environment = environment
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         lines = stream.stream
         continuation = stream.continuation
@@ -120,7 +126,7 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
     }
 
     private func sanitizedEnvironment() -> [String: String] {
-        var environment = TerminalEnvironment.make()
+        var environment = self.environment
         environment.removeValue(forKey: "TERM")
         environment.removeValue(forKey: "COLORTERM")
         return environment

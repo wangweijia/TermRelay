@@ -48,11 +48,18 @@ struct AgentLaunchConfiguration: Sendable {
     let sessionID: UUID
     let workspaceURL: URL
     let ephemeral: Bool
+    let environment: [String: String]
 
-    init(sessionID: UUID, workspaceURL: URL, ephemeral: Bool = false) {
+    init(
+        sessionID: UUID,
+        workspaceURL: URL,
+        ephemeral: Bool = false,
+        environment: [String: String] = TerminalEnvironment.make()
+    ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
         self.ephemeral = ephemeral
+        self.environment = environment
     }
 }
 

@@ -150,6 +150,7 @@ starting → running → stopping → finished
 | 菜单栏驻留 | 未实现 | 无 `MenuBarExtra` 或 AppKit 生命周期管理 |
 | 退出确认和进程清理 | 部分完成 | App 退出会终止进程，尚无会话数量确认框 |
 | 本地终端输入、停止和恢复 UI | 部分完成 | 输入、Ctrl-C、停止已完成；恢复未实现 |
+| 按工具配置启动代理 | 已完成 | 支持继承、禁用、自定义；同时注入大小写 HTTP/HTTPS/ALL/NO_PROXY |
 
 ### 阶段 2：Server 与 Mac App 闭环
 
@@ -184,6 +185,7 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 - 审批仅提供单次允许和拒绝；停止、未知请求和关联不匹配均不会自动批准。
 - `LocalStructuredAgentSession` 已接入 App 会话列表与本地 UI，Terminal/Structured runtime 可并存。
 - `tool.event`、`tool.turn.start`、`tool.turn.interrupt`、`tool.approval.resolve` 已接入 RemoteClient。
+- Codex PTY 与 Codex App Server 使用同一份按工具代理配置快照；配置仅作用于新会话。
 
 ### 阶段 4：发布与加固
 

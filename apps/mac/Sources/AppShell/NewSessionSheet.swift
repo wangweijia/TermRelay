@@ -107,6 +107,19 @@ struct NewSessionSheet: View {
                 )
             }
 
+            HStack {
+                Label(
+                    proxySummary,
+                    systemImage: appModel.proxyConfiguration(for: appModel.selectedTool).mode == .custom
+                        ? "network" : "network.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer()
+                SettingsLink { Text("配置启动代理…") }
+                    .font(.caption)
+            }
+
             if let errorMessage = appModel.errorMessage {
                 Label(errorMessage, systemImage: "xmark.octagon")
                     .font(.callout)
@@ -128,5 +141,13 @@ struct NewSessionSheet: View {
         }
         .padding(24)
         .frame(width: 560)
+    }
+
+    private var proxySummary: String {
+        switch appModel.proxyConfiguration(for: appModel.selectedTool).mode {
+        case .inherit: "启动代理：跟随 App 环境"
+        case .disabled: "启动代理：已禁用"
+        case .custom: "启动代理：使用 \(appModel.selectedTool.displayName) 的独立配置"
+        }
     }
 }
