@@ -1,8 +1,8 @@
 # TermRelay macOS 端任务进展
 
-> 评估日期：2026-09-10
+> 评估日期：2026-09-12
 >
-> 当前阶段：阶段 2 PTY 多会话闭环开发中
+> 当前阶段：PTY 多会话闭环完成，结构化 Agent SA-1 开发中
 >
 > 评估范围：`apps/mac` 现有源码、测试、项目规划及 Git 提交记录
 
@@ -14,7 +14,7 @@ macOS 端已经完成本地终端、Server WebSocket 闭环和同一 App 窗口�
 - Mac MVP 功能完成度：约 25%～30%。
 - 当前可实际使用程度：可作为单窗口本地终端原型使用。
 - 当前可以完成：选择目录、启动登录 Shell/Codex、PTY 交互、终端渲染、Ctrl-C、停止及输出批处理探针。
-- 当前无法完成：独立 macOS 多窗口、无歧义断线补传和正式应用分发。
+- 当前无法完成：结构化 Agent 的 Server/Web 跨端交互、无歧义断线补传和正式签名分发。
 
 以上比例是基于当前规划任务数量和关键路径权重的工程估算，不是正式验收数据。
 
@@ -140,9 +140,9 @@ starting → running → stopping → finished
 
 | 工作项 | 状态 | 备注 |
 | --- | --- | --- |
-| Server URL 设置 | 部分完成 | 已持久化，尚未校验和实际连接 |
+| Server URL 设置 | 已完成 | 已持久化、校验并用于实际 WebSocket 连接 |
 | Device ID 持久化 | 已完成 | 使用 `UserDefaults` |
-| 自动连接和设备注册 | 未实现 | 无 WebSocket 客户端 |
+| 自动连接和设备注册 | 已完成 | 支持注册、心跳和指数退避重连 |
 | NSOpenPanel 目录选择 | 已完成 | 当前用于单活动终端 |
 | CLI 工具选择器 | 已完成 | 支持登录 Shell 和 Codex |
 | CodexAdapter | 基础完成 | 支持检测、环境构造和 PTY 启动 |
@@ -153,7 +153,7 @@ starting → running → stopping → finished
 
 ### 阶段 2：Server 与 Mac App 闭环
 
-以下 Mac 侧能力均尚未实现：
+以下 Mac 侧能力已经完成：
 
 - WebSocket 建连与自动重连。
 - `device.register` 和心跳。
@@ -162,14 +162,24 @@ starting → running → stopping → finished
 - 远程输入、resize、中断和停止。
 - 基于 `session_id` 的命令路由。
 - `command_id` 幂等处理。
-- 输出 `seq`、ACK 和断线补传。
-- 本地有界 EventJournal。
+- 输出 `seq` 和有界内存缓存。
+
+仍未完成：Server 事件 ACK、持久化 EventJournal 和无歧义断线补传。
 
 共享协议中已有部分 Swift 生成类型，但尚未接入 Mac Remote 层。
 
 ### 阶段 3：管理页面联动
 
-Mac 端尚未具备与管理页面联动所需的实时终端、远程输入、审批或通知事件能力。
+Mac 与管理页面的实时终端和远程输入已经完成；结构化消息、工具事件和审批尚未接入跨端 Contract。
+
+### 结构化 Agent 当前进度
+
+- AgentCore、capability、action、event、状态机和错误边界已建立。
+- FakeAgentAdapter 已验证 turn、审批关联、事件序号和幂等停止。
+- Codex App Server stdio Process 与 JSON-RPC 请求关联、超时和反向 request 已实现。
+- `codex-cli 0.153.4` 的真实 `initialize` 与 ephemeral `thread/start` 已通过，无模型调用。
+- 已映射助手/reasoning/plan 增量、命令、文件变化、审批、turn completion 和 error。
+- 审批仅提供单次允许和拒绝；停止、未知请求和关联不匹配均不会自动批准。
 
 ### 阶段 4：发布与加固
 

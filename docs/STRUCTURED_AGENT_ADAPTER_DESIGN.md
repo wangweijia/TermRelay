@@ -689,22 +689,22 @@ enum AgentError: Error, Sendable {
 
 ### Phase SA-0：接口与测试骨架
 
-- [ ] 创建 `Agents/Core`。
-- [ ] 定义 Adapter、Runtime、capabilities、action、event 和 error。
-- [ ] 创建 `FakeAgentAdapter`，验证 SessionCore 不依赖 Codex。
-- [ ] 让 ManagedSession 能承载 terminal/structured 两种 runtime。
-- [ ] 保持现有 PTY 行为和测试全部通过。
+- [x] 创建 `Agents/Core`。
+- [x] 定义 Adapter、Runtime、capabilities、action、event 和 error。
+- [x] 创建 `FakeAgentAdapter`，验证 SessionCore 不依赖 Codex。
+- [x] 让 ManagedSession 能承载 terminal/structured 两种 runtime。
+- [x] 保持现有 PTY 行为和测试全部通过。
 
 完成条件：使用 Fake Adapter 可以创建 session、发送 turn、收到事件、停止；代码中没有 Codex
 分支进入 SessionCore。
 
 ### Phase SA-1：Codex 本地协议探针
 
-- [ ] 实现 Process 和 JSON-RPC Client。
-- [ ] 完成 initialize、thread start/resume、turn start/interrupt。
+- [x] 实现 Process 和 JSON-RPC Client。
+- [x] 完成 initialize、thread start/resume、turn start/interrupt。
 - [ ] 生成并固定当前 Codex Schema fixture。
-- [ ] 映射文本、command、file change、approval、completion 和 error。
-- [ ] 增加不兼容版本检测及 PTY 回退提示。
+- [x] 映射文本、command、file change、approval、completion 和 error。
+- [x] 增加不兼容版本检测；PTY 回退提示待接入创建会话 UI。
 
 完成条件：没有 TermRelay Server 时，Mac 测试宿主可以完成本地结构化 turn 和审批闭环。
 
@@ -793,6 +793,5 @@ StructuredAgentAdapter
 
 ## 24. 当前下一步
 
-当前仍先完成 ADR-001 Phase A 的通用 PTY Server/Web 闭环。准备开始结构化开发时，第一个 Issue
-应是 **Phase SA-0：AgentCore 接口与 FakeAgentAdapter**，而不是直接在 `CodexAdapter` 中解析
-App Server JSON。SA-0 验收通过后，再进入 Codex 本地协议探针。
+Phase SA-0 已完成。当前 `codex-cli 0.153.4` 已通过真实 `initialize` 和 ephemeral
+`thread/start` 探针，下一步固定 Schema fixture，并进入 Phase SA-2 的最小跨端 Contract。

@@ -243,14 +243,13 @@ Server S4 read-only terminal relay probe passed.
 
 ## 下一步优先级
 
-1. 为 terminal output 增加 Server ACK 和 Mac 已确认 seq Journal，实现无歧义断线补传。
-2. 持久化 command 状态，并补测超时、背压、多设备与多会话。
-3. 增加 session state changed、finished 和 failed 事件及 Web 状态更新。
-4. 在真实 Mac GUI 上完成启动 Shell/Codex、浏览器输入/resize/Ctrl-C/停止的人工验收。
-5. 实现 Terminal Event 物理过期清理和每会话配额。
+1. 结构化 Agent 优先：固定 Codex Schema fixture，完成最小 `tool.*` Contract、Server/Web 审批闭环。
+2. 为 terminal/structured event 增加 Server ACK 和 Mac 已确认 seq Journal，实现统一断线补传。
+3. 持久化 command 和 approval 状态，并补测超时、重复 ACK 与串会话防护。
+4. 在真实 Mac GUI 上完成人工验收，包括结构化 turn、中断、允许和拒绝审批。
+5. 实现 Event 物理过期清理、每会话配额和慢浏览器背压保护。
 6. 建立 JSON Schema 到 TypeScript/Swift 的正式代码生成。
-7. PTY 闭环稳定后进入 `SA-0：AgentCore + FakeAgentAdapter`。
-8. 接入 Cloudflare Access、设备身份和生产网络限制。
+7. 接入设备身份和生产网络限制；Cloudflare Access Web 入口已配置。
 
 完成第 1～4 项后，终端中继链路才具备可恢复、可追踪的正式 MVP 质量。
 
