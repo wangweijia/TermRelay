@@ -45,6 +45,9 @@ export class SessionEntity {
   @Column({ name: 'finished_at', type: 'datetime', precision: 3, nullable: true })
   finishedAt!: Date | null;
 
+  @Column({ name: 'deleted_at', type: 'datetime', precision: 3, nullable: true })
+  deletedAt!: Date | null;
+
   @Column({ name: 'created_at', type: 'datetime', precision: 3 })
   createdAt!: Date;
 

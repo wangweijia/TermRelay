@@ -129,6 +129,44 @@ export const useRelayStore = defineStore('relay', {
       }
     },
 
+    async deleteSession(sessionId: string, purge: boolean): Promise<boolean> {
+      const session = this.sessions.find((item) => item.id === sessionId);
+      if (!session || session.status !== 'finished') {
+        this.error = '只能删除已经结束的会话。';
+        return false;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}?purge=${purge}`,
+          { method: 'DELETE' },
+        );
+        if (!response.ok) {
+          throw new Error(await responseError(response, '删除会话失败'));
+        }
+
+        if (this.selectedSessionId === sessionId) {
+          this.sendSubscription('session.unsubscribe', session, {});
+          this.selectedSessionId = undefined;
+          this.selectionVersion += 1;
+          this.loadingHistory = false;
+        }
+        this.sessions = this.sessions.filter((item) => item.id !== sessionId);
+        delete this.eventsBySession[sessionId];
+        delete this.lastSeqBySession[sessionId];
+        this.commandStatus = undefined;
+        this.error = undefined;
+
+        if (!this.selectedSessionId && this.sessions[0]) {
+          await this.selectSession(this.sessions[0].id);
+        }
+        return true;
+      } catch (error: unknown) {
+        this.error = describeError(error);
+        return false;
+      }
+    },
+
     connect(): void {
       if (
         this.stopped ||
@@ -383,6 +421,20 @@ function mergeEvents(
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function responseError(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: string | string[] };
+    if (Array.isArray(body.message)) return body.message.join('；');
+    if (body.message) return body.message;
+  } catch {
+    // The fallback includes the HTTP status when the response is not JSON.
+  }
+  return `${fallback} (${response.status})`;
 }
 
 function encodeBase64(data: Uint8Array): string {

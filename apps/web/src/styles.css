@@ -138,18 +138,22 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .panel-heading button:disabled { opacity: .5; cursor: default; }
 .session-list { max-height: 550px; overflow: auto; }
 
+.session-row { position: relative; border-bottom: 1px solid #202a34; }
+
 .session-item {
   display: grid;
   width: 100%;
   gap: 7px;
   padding: 15px 16px;
   border: 0;
-  border-bottom: 1px solid #202a34;
+  border-bottom: 0;
   color: #a6b3bf;
   text-align: left;
   background: transparent;
   cursor: pointer;
 }
+
+.session-row:has(.session-delete) .session-item { padding-right: 64px; }
 
 .session-item:hover { background: #151e27; }
 .session-item.active { background: #17251f; box-shadow: inset 3px 0 #72e0a5; }
@@ -157,6 +161,19 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .session-title small { color: #72e0a5; text-transform: uppercase; }
 .session-item > span:not(.session-title) { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
 .session-item code { color: #637181; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-delete {
+  position: absolute;
+  right: 12px;
+  bottom: 13px;
+  padding: 3px 7px;
+  border: 1px solid #63383c;
+  border-radius: 5px;
+  color: #d98c92;
+  background: #21171a;
+  cursor: pointer;
+  font-size: 11px;
+}
+.session-delete:hover { border-color: #ef737d; color: #ffadb3; }
 
 .empty-state, .terminal-placeholder {
   display: grid;
@@ -188,6 +205,55 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .terminal-view .xterm { height: 100%; }
 .terminal-view .xterm-viewport { scrollbar-color: #344454 #0c1117; }
 .command-status { position: absolute; right: 16px; bottom: 7px; z-index: 2; color: #718096; font: 10px/1.2 ui-monospace, monospace; pointer-events: none; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 68%);
+  backdrop-filter: blur(3px);
+}
+.confirm-dialog {
+  width: min(480px, 100%);
+  padding: 24px;
+  border: 1px solid #3a4653;
+  border-radius: 12px;
+  background: #121920;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 60%);
+}
+.confirm-dialog > small { color: #ef737d; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .12em; }
+.confirm-dialog h2 { margin: 7px 0 10px; font-size: 22px; }
+.confirm-dialog > code { display: block; margin-top: 6px; color: #738293; font-size: 11px; overflow-wrap: anywhere; }
+.purge-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 22px;
+  padding: 13px;
+  border: 1px solid #3b3135;
+  border-radius: 8px;
+  background: #1c1619;
+  cursor: pointer;
+}
+.purge-option input { margin-top: 3px; accent-color: #ef737d; }
+.purge-option span { display: grid; gap: 4px; }
+.purge-option strong { color: #f1d4d6; font-size: 13px; }
+.purge-option small { color: #a17f83; line-height: 1.4; }
+.soft-delete-note { margin-top: 10px; color: #7f8e9d; font-size: 12px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+.dialog-actions button {
+  padding: 8px 13px;
+  border: 1px solid #3b4856;
+  border-radius: 7px;
+  color: #bec9d4;
+  background: #19222c;
+  cursor: pointer;
+}
+.dialog-actions button.danger { border-color: #8c343b; color: #ffd4d7; background: #70262c; }
+.dialog-actions button:disabled { opacity: .55; cursor: wait; }
 
 @media (max-width: 820px) {
   header span { display: none; }

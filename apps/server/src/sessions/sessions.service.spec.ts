@@ -103,6 +103,15 @@ test('finishes stale sessions on startup and when a device disconnects', async (
   assert.deepEqual(sessions.finishedDevices, ['device-a']);
 });
 
+test('delegates finished session deletion after queued writes settle', async () => {
+  const workspaces = new FakeWorkspaceRepository();
+  const sessions = new FakeSessionRepository();
+  const service = makeService(workspaces, sessions);
+
+  assert.equal(await service.deleteFinished('session-a', true), 'deleted');
+  assert.deepEqual(sessions.deletions, [{ id: 'session-a', purge: true }]);
+});
+
 function makeService(
   workspaces: FakeWorkspaceRepository,
   sessions: FakeSessionRepository,
@@ -152,6 +161,7 @@ class FakeSessionRepository {
   readonly enabled = true;
   readonly registrations: string[] = [];
   readonly finishedDevices: string[] = [];
+  readonly deletions: Array<{ id: string; purge: boolean }> = [];
   finishedAll = 0;
   outputResult:
     | {
@@ -186,6 +196,11 @@ class FakeSessionRepository {
   }
 
   async finishById() {}
+
+  async deleteFinished(id: string, purge: boolean) {
+    this.deletions.push({ id, purge });
+    return 'deleted' as const;
+  }
 
   async list() {
     return [];

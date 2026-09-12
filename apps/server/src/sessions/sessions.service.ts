@@ -12,6 +12,7 @@ import {
 import {
   SessionRepository,
   type SessionEventRecord,
+  type SessionDeleteResult,
   type SessionRecord,
   type SessionWriteResult,
 } from './session.repository';
@@ -137,6 +138,11 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   async findById(id: string): Promise<SessionRecord | undefined> {
     await this.waitForWrites();
     return this.sessions.findById(id);
+  }
+
+  async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {
+    await this.waitForWrites();
+    return this.sessions.deleteFinished(id, purge);
   }
 
   async listEvents(

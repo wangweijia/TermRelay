@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { SessionRecord } from './session.repository';
 import { SessionsController } from './sessions.controller';
 import type { SessionsService } from './sessions.service';
@@ -49,6 +53,51 @@ test('rejects invalid event pagination', async () => {
   );
   await assert.rejects(
     () => controller.listEvents('session-a', '0', '1001'),
+    (error: unknown) => error instanceof BadRequestException,
+  );
+});
+
+test('deletes finished sessions with an explicit purge choice', async () => {
+  const calls: Array<{ id: string; purge: boolean }> = [];
+  const controller = new SessionsController({
+    deleteFinished: async (id: string, purge: boolean) => {
+      calls.push({ id, purge });
+      return 'deleted';
+    },
+  } as unknown as SessionsService);
+
+  assert.deepEqual(await controller.deleteFinished('session-a'), {
+    deleted: true,
+    purged: false,
+  });
+  assert.deepEqual(await controller.deleteFinished('session-b', 'true'), {
+    deleted: true,
+    purged: true,
+  });
+  assert.deepEqual(calls, [
+    { id: 'session-a', purge: false },
+    { id: 'session-b', purge: true },
+  ]);
+});
+
+test('rejects deletion for active, missing, and invalid purge requests', async () => {
+  const active = new SessionsController({
+    deleteFinished: async () => 'not_finished',
+  } as unknown as SessionsService);
+  const missing = new SessionsController({
+    deleteFinished: async () => 'not_found',
+  } as unknown as SessionsService);
+
+  await assert.rejects(
+    () => active.deleteFinished('session-a', 'false'),
+    (error: unknown) => error instanceof ConflictException,
+  );
+  await assert.rejects(
+    () => missing.deleteFinished('session-a', 'true'),
+    (error: unknown) => error instanceof NotFoundException,
+  );
+  await assert.rejects(
+    () => active.deleteFinished('session-a', 'yes'),
     (error: unknown) => error instanceof BadRequestException,
   );
 });

@@ -4,7 +4,7 @@ import type {
   SessionStartedPayload,
   TerminalOutputPayload,
 } from '@termrelay/contracts';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { SessionEventEntity } from './session-event.entity';
 import { SessionEntity, type SessionStatus } from './session.entity';
 
@@ -34,6 +34,8 @@ export type SessionWriteResult =
   | { status: 'duplicate' }
   | { status: 'conflict'; detail: string }
   | { status: 'unknown_session' };
+
+export type SessionDeleteResult = 'deleted' | 'not_found' | 'not_finished';
 
 @Injectable()
 export class SessionRepository {
@@ -76,7 +78,7 @@ export class SessionRepository {
         if (sameIdentity) {
           await sessions.update(
             { id: sessionId },
-            { status: 'running', finishedAt: null },
+            { status: 'running', finishedAt: null, deletedAt: null },
           );
           return { status: 'duplicate' };
         }
@@ -97,6 +99,7 @@ export class SessionRepository {
         stateVersion: '0',
         startedAt: new Date(payload.startedAt),
         finishedAt: null,
+        deletedAt: null,
       });
       await manager.getRepository(SessionEventEntity).insert({
         sessionId,
@@ -186,6 +189,7 @@ export class SessionRepository {
   async list(): Promise<SessionRecord[]> {
     if (!this.dataSource) return [];
     const sessions = await this.repository.find({
+      where: { deletedAt: IsNull() },
       order: { updatedAt: 'DESC' },
     });
     return sessions.map(toSessionRecord);
@@ -193,8 +197,39 @@ export class SessionRepository {
 
   async findById(id: string): Promise<SessionRecord | undefined> {
     if (!this.dataSource) return undefined;
-    const session = await this.repository.findOneBy({ id });
+    const session = await this.repository.findOneBy({ id, deletedAt: IsNull() });
     return session ? toSessionRecord(session) : undefined;
+  }
+
+  async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {
+    if (!this.dataSource) return 'not_found';
+
+    return this.dataSource.transaction(async (manager) => {
+      const sessions = manager.getRepository(SessionEntity);
+      const session = await sessions
+        .createQueryBuilder('session')
+        .setLock('pessimistic_write')
+        .where('session.id = :id', { id })
+        .getOne();
+      if (!session || (!purge && session.deletedAt !== null)) return 'not_found';
+      if (session.status !== 'finished') return 'not_finished';
+
+      if (!purge) {
+        await sessions.update({ id }, { deletedAt: new Date() });
+        return 'deleted';
+      }
+
+      for (const table of ['commands', 'approvals', 'events']) {
+        await manager
+          .createQueryBuilder()
+          .delete()
+          .from(table)
+          .where('session_id = :id', { id })
+          .execute();
+      }
+      await sessions.delete({ id });
+      return 'deleted';
+    });
   }
 
   async finishActiveForDevice(deviceId: string, finishedAt = new Date()): Promise<void> {

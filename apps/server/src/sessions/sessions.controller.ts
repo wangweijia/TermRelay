@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -40,6 +42,27 @@ export class SessionsController {
     if (!events) throw new NotFoundException('session not found');
     return events;
   }
+
+  @Delete(':id')
+  async deleteFinished(
+    @Param('id') id: string,
+    @Query('purge') rawPurge?: string,
+  ): Promise<{ deleted: true; purged: boolean }> {
+    const purge = parseBoolean(rawPurge, false);
+    const result = await this.sessions.deleteFinished(id, purge);
+    if (result === 'not_found') throw new NotFoundException('session not found');
+    if (result === 'not_finished') {
+      throw new ConflictException('only finished sessions can be deleted');
+    }
+    return { deleted: true, purged: purge };
+  }
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new BadRequestException('query parameter must be true or false');
 }
 
 function parseInteger(
