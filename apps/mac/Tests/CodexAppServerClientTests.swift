@@ -1,8 +1,45 @@
+import CryptoKit
 import Foundation
 import XCTest
 @testable import TermRelay
 
 final class CodexAppServerClientTests: XCTestCase {
+    func testUnixProxyCodecPerformsWebSocketUpgradeAndReadsTextFrame() async throws {
+        let stream = AsyncThrowingStream<Data, Error>.makeStream()
+        let codec = WebSocketPipeCodec(continuation: stream.continuation)
+        let request = try XCTUnwrap(String(data: codec.handshakeRequest, encoding: .utf8))
+        let keyLine = try XCTUnwrap(
+            request.components(separatedBy: "\r\n")
+                .first { $0.lowercased().hasPrefix("sec-websocket-key:") }
+        )
+        let key = keyLine.split(separator: ":", maxSplits: 1)[1]
+            .trimmingCharacters(in: .whitespaces)
+        let digest = Insecure.SHA1.hash(
+            data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8)
+        )
+        let accept = Data(digest).base64EncodedString()
+        let message = Data(#"{"id":1,"result":{}}"#.utf8)
+        var response = Data(
+            ("HTTP/1.1 101 Switching Protocols\r\n" +
+             "Upgrade: websocket\r\n" +
+             "Connection: Upgrade\r\n" +
+             "Sec-WebSocket-Accept: \(accept)\r\n\r\n").utf8
+        )
+        response.append(0x81)
+        response.append(UInt8(message.count))
+        response.append(message)
+
+        XCTAssertTrue(codec.receive(response).isEmpty)
+        XCTAssertNoThrow(try codec.waitForHandshake(timeout: .now() + 1))
+        var iterator = stream.stream.makeAsyncIterator()
+        let received = try await iterator.next()
+        XCTAssertEqual(received, message)
+
+        let clientFrame = codec.clientTextFrame(message)
+        XCTAssertEqual(clientFrame.first, 0x81)
+        XCTAssertEqual(clientFrame[1] & 0x80, 0x80, "Client WebSocket frames must be masked")
+    }
+
     func testInitializeHandshakeAndServerMessages() async throws {
         let transport = FakeCodexTransport()
         let client = CodexAppServerClient(transport: transport, timeout: .seconds(1))

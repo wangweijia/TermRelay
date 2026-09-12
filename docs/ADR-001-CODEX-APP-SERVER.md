@@ -22,8 +22,8 @@ TermRelay 的 Codex 结构化集成直接使用 Codex 官方 `app-server` 协议
 - App Server 是 Codex 专属的可选结构化增强，不替代通用 PTY 和 TermRelay 自有协议。
 - 每个 Codex 会话独占一个本地 `codex app-server` 和 Unix Socket。
 - Codex TUI 与 TermRelay 结构化监听连接作为两个客户端，共享该会话的同一 Thread。
-- TermRelay 监听端通过 `codex app-server proxy --sock` 使用 JSONL stdio 接入，TUI 通过
-  `codex resume --remote unix://...` 接入。
+- TermRelay 监听端通过 `codex app-server proxy --sock` 建立 WebSocket-over-Unix 连接，TUI
+  通过 `codex resume --remote unix://...` 接入。
 - Mac App 将 App Server 事件转换为 TermRelay 的语言无关事件；Server 和 Web 不直接依赖 Codex 原始协议。
 - 不把 App Server 的 WebSocket 端口暴露给 TermRelay Server、局域网或公网。
 - 当前不引入 ACP；达到本文定义的重新评估条件后再决定是否增加 ACP Adapter。
@@ -37,7 +37,7 @@ Web <-> TermRelay Server <-> Mac App <-> PTY <-> Shell / Codex TUI / 其他 CLI
 Codex 结构化模式：
                                           /-> PTY <-> Codex TUI
 Web <-> TermRelay Server <-> Mac App <-> 每会话独立 Unix Socket <-> codex app-server
-                                          \-> JSONL proxy（结构化监听/审批响应）
+                                          \-> WebSocket proxy（结构化监听/审批响应）
 ```
 
 ## 背景
@@ -167,7 +167,9 @@ tool.approval.resolve
    codex app-server --listen unix:///private/tmp/termrelay-<session>.sock
    ```
 
-4. TermRelay 通过 `codex app-server proxy --sock <path>` 建立逐行 JSONL 监听连接。
+4. TermRelay 通过 `codex app-server proxy --sock <path>` 转发 Unix Socket 字节，并完成标准
+   HTTP WebSocket Upgrade；每个 WebSocket 文本帧承载一条 JSON-RPC 消息。不能把 JSONL
+   直接写入该 proxy。
 5. 发送 `initialize` 请求，收到成功响应后发送 `initialized` notification。
 6. 未完成握手前禁止创建 thread 或 turn。
 7. 创建 Thread 后，在 PTY 中运行
