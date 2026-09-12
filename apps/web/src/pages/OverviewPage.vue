@@ -148,8 +148,9 @@ onBeforeUnmount(() => {
             <span>seq {{ relay.selectedSession.stateVersion }}</span>
             <span>{{ relay.selectedSessionInteractive ? '可交互' : '不可操作' }}</span>
           </div>
-          <div v-if="relay.selectedSession.runtimeMode === 'terminal'" class="terminal-actions">
+          <div class="terminal-actions">
             <button
+              v-if="relay.selectedSession.runtimeMode === 'terminal' || relay.selectedSession.webDisplayMode === 'full'"
               type="button"
               :disabled="!relay.selectedSessionInteractive"
               title="向当前 Shell 的前台程序发送 Ctrl-C，不关闭 Shell"
@@ -180,8 +181,8 @@ onBeforeUnmount(() => {
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
           :display-mode="relay.selectedSession.webDisplayMode ?? 'full'"
-          @start-turn="relay.startToolTurn"
-          @interrupt="relay.interruptToolTurn"
+          @input="relay.sendTerminalInput"
+          @resize="relay.resizeTerminal"
           @resolve-approval="relay.resolveApproval"
         />
         <div v-else class="terminal-placeholder">选择一个会话查看内容</div>

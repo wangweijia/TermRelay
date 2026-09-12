@@ -4,9 +4,11 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.codex
     let displayName = "Codex 结构化 Agent"
     let configuredExecutableURL: URL?
+    let host: CodexAppServerHost?
 
-    init(configuredExecutableURL: URL? = nil) {
+    init(configuredExecutableURL: URL? = nil, host: CodexAppServerHost? = nil) {
         self.configuredExecutableURL = configuredExecutableURL
+        self.host = host
     }
 
     func detect() async throws -> AgentInstallation {
@@ -32,16 +34,19 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
                 installation.unsupportedReason ?? "Codex 版本未通过兼容性验证"
             )
         }
+        try await host?.start()
         let transport = CodexAppServerProcess(
             executableURL: installation.executableURL,
             directory: configuration.workspaceURL,
-            environment: configuration.environment
+            environment: configuration.environment,
+            socketPath: host?.socketPath
         )
         return CodexStructuredRuntime(
             sessionID: configuration.sessionID,
             workspaceURL: configuration.workspaceURL,
             providerVersion: installation.version,
-            client: CodexAppServerClient(transport: transport)
+            client: CodexAppServerClient(transport: transport),
+            host: host
         )
     }
 
@@ -101,6 +106,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
     private let sessionID: UUID
     private let workspaceURL: URL
     private let client: CodexAppServerClient
+    private let host: CodexAppServerHost?
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
     private var threadID: String?
@@ -113,11 +119,13 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         sessionID: UUID,
         workspaceURL: URL,
         providerVersion: String,
-        client: CodexAppServerClient
+        client: CodexAppServerClient,
+        host: CodexAppServerHost? = nil
     ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
         self.client = client
+        self.host = host
         descriptor = AgentDescriptor(
             providerID: .codex,
             providerVersion: providerVersion,
@@ -254,6 +262,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         messageTask?.cancel()
         messageTask = nil
         await client.stop()
+        host?.stop()
         continuation.finish()
     }
 

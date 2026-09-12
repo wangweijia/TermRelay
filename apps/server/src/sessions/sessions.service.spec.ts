@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DevicesService } from '../devices/devices.service';
 import type { DeviceConnectionRegistry } from '../realtime/device-connection.registry';
-import type { SessionRepository } from './session.repository';
+import { canAppendSessionEvent, type SessionRepository } from './session.repository';
 import { SessionsService } from './sessions.service';
 import type { WorkspaceEntity } from './workspace.entity';
 import type { WorkspaceRepository } from './workspace.repository';
@@ -68,6 +68,13 @@ test('maps sequence conflicts from terminal output persistence', async () => {
 
   assert.equal(result.status, 'error');
   if (result.status === 'error') assert.equal(result.code, 'conflict');
+});
+
+test('allows mixed terminal and tool events only for structured sessions', () => {
+  assert.equal(canAppendSessionEvent('terminal', 'terminal.output'), true);
+  assert.equal(canAppendSessionEvent('terminal', 'tool.event'), false);
+  assert.equal(canAppendSessionEvent('structured', 'terminal.output'), true);
+  assert.equal(canAppendSessionEvent('structured', 'tool.event'), true);
 });
 
 test('publishes accepted terminal events to realtime listeners', async () => {

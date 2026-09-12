@@ -13,6 +13,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
+    private let referenceHandler: @MainActor (AgentSessionReference) -> Void
     private var coordinator: StructuredSessionCoordinator?
     private var eventTask: Task<Void, Never>?
 
@@ -23,7 +24,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         webDisplayMode: AgentWebDisplayMode = .full,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
-        stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void
+        stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
+        referenceHandler: @escaping @MainActor (AgentSessionReference) -> Void = { _ in }
     ) {
         self.id = id
         self.directory = directory
@@ -32,6 +34,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.environment = environment
         self.eventHandler = eventHandler
         self.stateHandler = stateHandler
+        self.referenceHandler = referenceHandler
         startedAt = RelayDate.now()
     }
 
@@ -59,8 +62,15 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 sessionID: id,
                 workspaceURL: directory
             ))
+            if let reference = await coordinator.snapshot().reference {
+                referenceHandler(reference)
+            }
             await refreshState()
         } catch {
+            eventTask?.cancel()
+            eventTask = nil
+            await coordinator?.stop()
+            coordinator = nil
             setState(.failed)
         }
     }

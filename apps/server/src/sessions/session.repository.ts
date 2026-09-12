@@ -133,7 +133,7 @@ export class SessionRepository {
     seq: number,
     payload: TerminalOutputPayload,
   ): Promise<SessionWriteResult> {
-    return this.appendEvent(deviceId, sessionId, seq, 'terminal.output', payload, 'terminal');
+    return this.appendEvent(deviceId, sessionId, seq, 'terminal.output', payload);
   }
 
   async appendToolEvent(
@@ -142,7 +142,7 @@ export class SessionRepository {
     seq: number,
     payload: ToolEventPayload,
   ): Promise<SessionWriteResult> {
-    return this.appendEvent(deviceId, sessionId, seq, 'tool.event', payload, 'structured');
+    return this.appendEvent(deviceId, sessionId, seq, 'tool.event', payload);
   }
 
   private async appendEvent(
@@ -151,7 +151,6 @@ export class SessionRepository {
     seq: number,
     type: 'terminal.output' | 'tool.event',
     payload: TerminalOutputPayload | ToolEventPayload,
-    runtimeMode: SessionEntity['runtimeMode'],
   ): Promise<SessionWriteResult> {
     if (!this.dataSource) {
       return { status: 'conflict', detail: 'Database is disabled.' };
@@ -167,7 +166,7 @@ export class SessionRepository {
       if (!session || session.deviceId !== deviceId) {
         return { status: 'unknown_session' };
       }
-      if (session.runtimeMode !== runtimeMode) {
+      if (!canAppendSessionEvent(session.runtimeMode, type)) {
         return { status: 'conflict', detail: `${type} is not valid for a ${session.runtimeMode} session.` };
       }
 
@@ -329,6 +328,15 @@ export class SessionRepository {
     if (!this.dataSource) throw new Error('Database is disabled.');
     return this.dataSource.getRepository(SessionEntity);
   }
+}
+
+export function canAppendSessionEvent(
+  runtimeMode: SessionEntity['runtimeMode'],
+  type: 'terminal.output' | 'tool.event',
+): boolean {
+  return type === 'terminal.output'
+    ? runtimeMode === 'terminal' || runtimeMode === 'structured'
+    : runtimeMode === 'structured';
 }
 
 async function persistApprovalProjection(

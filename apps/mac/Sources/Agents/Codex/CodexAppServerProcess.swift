@@ -13,6 +13,7 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
     private let executableURL: URL
     private let directory: URL
     private let environment: [String: String]
+    private let socketPath: String?
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let stateLock = NSLock()
     private let lineBuffer: JSONLineBuffer
@@ -23,11 +24,13 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
     init(
         executableURL: URL,
         directory: URL,
-        environment: [String: String] = TerminalEnvironment.make()
+        environment: [String: String] = TerminalEnvironment.make(),
+        socketPath: String? = nil
     ) {
         self.executableURL = executableURL
         self.directory = directory
         self.environment = environment
+        self.socketPath = socketPath
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         lines = stream.stream
         continuation = stream.continuation
@@ -42,7 +45,11 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
             let output = Pipe()
             let error = Pipe()
             process.executableURL = executableURL
-            process.arguments = ["app-server", "--listen", "stdio://"]
+            if let socketPath {
+                process.arguments = ["app-server", "proxy", "--sock", socketPath]
+            } else {
+                process.arguments = ["app-server", "--listen", "stdio://"]
+            }
             process.currentDirectoryURL = directory
             process.environment = sanitizedEnvironment()
             process.standardInput = input

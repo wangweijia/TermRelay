@@ -20,7 +20,10 @@ TermRelay 的 Codex 结构化集成直接使用 Codex 官方 `app-server` 协议
 
 - PTY 是所有 CLI 工具的基础能力，也是 Codex 的稳定回退路径。
 - App Server 是 Codex 专属的可选结构化增强，不替代通用 PTY 和 TermRelay 自有协议。
-- Mac App 在本机以子进程方式启动 `codex app-server`，首选 `stdio` JSONL transport。
+- 每个 Codex 会话独占一个本地 `codex app-server` 和 Unix Socket。
+- Codex TUI 与 TermRelay 结构化监听连接作为两个客户端，共享该会话的同一 Thread。
+- TermRelay 监听端通过 `codex app-server proxy --sock` 使用 JSONL stdio 接入，TUI 通过
+  `codex resume --remote unix://...` 接入。
 - Mac App 将 App Server 事件转换为 TermRelay 的语言无关事件；Server 和 Web 不直接依赖 Codex 原始协议。
 - 不把 App Server 的 WebSocket 端口暴露给 TermRelay Server、局域网或公网。
 - 当前不引入 ACP；达到本文定义的重新评估条件后再决定是否增加 ACP Adapter。
@@ -32,7 +35,9 @@ TermRelay 的 Codex 结构化集成直接使用 Codex 官方 `app-server` 协议
 Web <-> TermRelay Server <-> Mac App <-> PTY <-> Shell / Codex TUI / 其他 CLI
 
 Codex 结构化模式：
-Web <-> TermRelay Server <-> Mac App <-> stdio JSONL <-> codex app-server
+                                          /-> PTY <-> Codex TUI
+Web <-> TermRelay Server <-> Mac App <-> 每会话独立 Unix Socket <-> codex app-server
+                                          \-> JSONL proxy（结构化监听/审批响应）
 ```
 
 ## 背景
@@ -80,17 +85,19 @@ TermRelay 当前的通用性来自 PTY 和内部 `CLIToolAdapter`，而不是要
 
 ## 架构边界
 
-### 1. 两种会话模式
+### 1. 两种展示模式，共用一个 Codex Runtime
 
-Codex 支持两个明确、互不混用的运行模式：
+Shell 仍是纯终端会话。Codex 会话则同时拥有 TUI 终端流和结构化事件流，Web 展示模式只决定
+显示内容，不改变底层运行方式：
 
-| 模式 | 本地进程 | UI | 远程数据 |
+| Web 模式 | 本地进程 | UI | 远程数据 |
 | --- | --- | --- | --- |
-| `terminal` | `codex` 运行于 PTY | SwiftTerm/xterm.js | ANSI 字节、输入、resize、interrupt |
-| `codexAppServer` | `codex app-server` 运行于 pipe | 结构化消息/工具/审批视图 | TermRelay 规范化事件和动作 |
+| `full` | 独立 App Server + PTY 中的远程 TUI + JSONL 监听 | 完整 TUI，审批卡片悬浮显示 | ANSI 字节及规范化审批事件 |
+| `approval` | 与 `full` 相同 | 只显示审批、警告和错误 | 仍持续接收终端流和结构化事件 |
 
-第一版不尝试在同一个会话里同时运行 Codex TUI 和 App Server。官方 `codex --remote` 加
-App Server WebSocket 的组合留作以后实验，不能阻塞 PTY 闭环或首版结构化模式。
+每个会话使用不同 Unix Socket、App Server、Thread、PTY 和 TermRelay 监听连接；窗口之间不
+共享运行时状态。2026-09-12 已用 Codex CLI 0.153.4 实测：TUI 发起的 turn 和审批请求会同步
+到第二个监听客户端，TUI 处理结果也会广播给监听端。
 
 ### 2. Mac 端组件
 
@@ -154,15 +161,17 @@ tool.approval.resolve
 
 1. 使用与 PTY Adapter 相同的可执行文件发现逻辑定位 `codex`。
 2. 读取 `codex --version`，与支持矩阵比较。
-3. 使用已授权工作区作为 `cwd`，通过 pipe 启动：
+3. 使用已授权工作区作为 `cwd`，启动仅限本机的每会话 Unix Socket：
 
    ```bash
-   codex app-server --listen stdio://
+   codex app-server --listen unix:///private/tmp/termrelay-<session>.sock
    ```
 
-4. `stdout` 仅作为逐行 JSONL 协议流解析；`stderr` 进入有界、脱敏的诊断日志。
+4. TermRelay 通过 `codex app-server proxy --sock <path>` 建立逐行 JSONL 监听连接。
 5. 发送 `initialize` 请求，收到成功响应后发送 `initialized` notification。
 6. 未完成握手前禁止创建 thread 或 turn。
+7. 创建 Thread 后，在 PTY 中运行
+   `codex resume --remote unix://<path> --no-alt-screen -C <cwd> <thread-id>`。
 
 ### 新会话
 
@@ -210,7 +219,8 @@ prompt。
 
 ## 安全约束
 
-- App Server 只绑定本地 stdio，不监听公网或局域网端口。
+- App Server 只绑定随机、短路径的本地 Unix Socket，不监听公网或局域网端口。
+- Unix Socket 随会话创建并在会话、进程或 App 退出时删除。
 - Server 和 Web 永远不能直接获得 App Server transport 的访问能力。
 - `cwd` 必须来自 Mac 已授权工作区，不能直接接受 Server 发送的真实路径。
 - 使用现有 Codex 登录状态或本机安全配置；Token、API Key 和完整环境不能上传 Server。

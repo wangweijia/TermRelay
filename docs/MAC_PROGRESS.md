@@ -2,7 +2,7 @@
 
 > 评估日期：2026-09-12
 >
-> 当前阶段：PTY 多会话闭环完成，结构化 Agent SA-1 开发中
+> 当前阶段：PTY 多会话闭环完成，Codex TUI/结构化审批合并运行时已实现
 >
 > 评估范围：`apps/mac` 现有源码、测试、项目规划及 Git 提交记录
 
@@ -189,6 +189,10 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 - Codex PTY 与 Codex App Server 使用同一份按工具代理配置快照；配置仅作用于新会话。
 - 新建会话只选择 Shell/Codex；Codex 的底层结构化 runtime 不再作为一级 UI 选项。
 - Codex 可选择 Web“仅审批/终端完整流”，两种模式都持续接收结构化审批事件。
+- 每个 Codex 会话独占 App Server Unix Socket、Thread、PTY TUI 和 TermRelay JSONL 监听连接。
+- TUI 使用 `codex resume --remote unix://...` 进入监听端创建的同一 Thread；多会话互不影响。
+- 已用 Codex CLI 0.153.4 实测第二客户端可收到 TUI 发起的 turn、命令和审批 request。
+- Codex 会话的终端输出与结构化事件使用统一、稳定的 Relay 序号及同一断线内存队列。
 
 ### 阶段 4：发布与加固
 

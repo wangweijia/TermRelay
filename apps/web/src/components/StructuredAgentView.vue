@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
+import TerminalView from './TerminalView.vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 const props = defineProps<{
@@ -8,16 +9,15 @@ const props = defineProps<{
   displayMode: 'approval' | 'full';
 }>();
 const emit = defineEmits<{
-  startTurn: [text: string];
-  interrupt: [];
+  input: [data: Uint8Array];
+  resize: [columns: number, rows: number];
   resolveApproval: [approvalId: string, turnId: string, decision: 'allowOnce' | 'deny'];
 }>();
-const prompt = ref('');
 
 const toolEvents = computed(() => props.events.flatMap((event) => {
   if (event.type !== 'tool.event') return [];
   const normalized = { ...event, payload: event.payload as unknown as ToolEventPayload };
-  if (props.displayMode === 'approval' && ![
+  if (![
     'approval.requested', 'approval.resolved', 'warning', 'error',
   ].includes(normalized.payload.kind)) return [];
   return [normalized];
@@ -28,21 +28,21 @@ const resolvedApprovals = computed(() => new Set(toolEvents.value.flatMap(({ pay
     : [],
 )));
 
-function submit(): void {
-  const value = prompt.value.trim();
-  if (!value || !props.interactive) return;
-  emit('startTurn', value);
-  prompt.value = '';
-}
-
 function text(data: Record<string, unknown>, field: string): string {
   return typeof data[field] === 'string' ? data[field] : '';
 }
 </script>
 
 <template>
-  <section class="agent-view">
-    <div class="agent-timeline">
+  <section class="agent-view" :class="`agent-view-${displayMode}`">
+    <TerminalView
+      v-if="displayMode === 'full'"
+      :events="events"
+      :interactive="interactive"
+      @input="emit('input', $event)"
+      @resize="(columns, rows) => emit('resize', columns, rows)"
+    />
+    <div v-if="displayMode === 'approval' || toolEvents.length" class="agent-timeline">
       <article v-for="event in toolEvents" :key="event.seq" class="agent-event" :data-kind="event.payload.kind">
         <small>{{ event.payload.kind }} · #{{ event.seq }}</small>
         <p v-if="['assistant.delta', 'reasoning.delta', 'command.output', 'plan.updated'].includes(event.payload.kind)">
@@ -71,14 +71,9 @@ function text(data: Record<string, unknown>, field: string): string {
           {{ text(event.payload.data, 'message') }}
         </p>
       </article>
-      <div v-if="!toolEvents.length" class="terminal-placeholder">此结构化 Agent 会话还没有事件</div>
-    </div>
-    <form class="agent-composer" @submit.prevent="submit">
-      <textarea v-model="prompt" :disabled="!interactive" rows="3" placeholder="向 Agent 描述要完成的任务…" />
-      <div>
-        <button type="button" :disabled="!interactive" @click="emit('interrupt')">中断当前 Turn</button>
-        <button type="submit" class="approve" :disabled="!interactive || !prompt.trim()">发送</button>
+      <div v-if="!toolEvents.length && displayMode === 'approval'" class="terminal-placeholder">
+        当前没有待处理的审批
       </div>
-    </form>
+    </div>
   </section>
 </template>

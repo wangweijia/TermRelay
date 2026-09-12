@@ -32,10 +32,12 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     private var hasStarted = false
 
     init(
+        id: UUID = UUID(),
         directory: URL,
         tool: BuiltInTool,
         executableURL: URL? = nil,
         proxy: ToolProxyConfiguration = .inherited,
+        launchConfiguration customLaunchConfiguration: LaunchConfiguration? = nil,
         outputHandler relayOutputHandler: @escaping @Sendable (TerminalOutputBatch) -> Void = { _ in },
         stateHandler: ((UUID, SessionState) -> Void)? = nil
     ) throws {
@@ -45,15 +47,16 @@ final class LocalTerminalSession: NSObject, ObservableObject {
             throw ToolLaunchError.invalidDirectory(directory.path)
         }
 
-        id = UUID()
+        self.id = id
         self.directory = directory
         self.tool = tool
         self.stateHandler = stateHandler
         startedAt = RelayDate.now()
-        launchConfiguration = try tool.makeAdapter(executableURL: executableURL).makeLaunchConfiguration(
-            directory: directory,
-            proxy: proxy
-        )
+        launchConfiguration = try customLaunchConfiguration
+            ?? tool.makeAdapter(executableURL: executableURL).makeLaunchConfiguration(
+                directory: directory,
+                proxy: proxy
+            )
         title = "\(tool.displayName) — \(directory.lastPathComponent)"
         currentDirectory = directory.path
 

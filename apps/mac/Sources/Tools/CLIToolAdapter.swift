@@ -131,6 +131,26 @@ struct CodexAdapter: CLIToolAdapter {
             executableName: nil
         )
     }
+
+    func makeRemoteLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration,
+        endpoint: String,
+        threadID: String
+    ) throws -> LaunchConfiguration {
+        guard let executable = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
+            throw ToolLaunchError.notFound("codex")
+        }
+        return LaunchConfiguration(
+            executableURL: executable,
+            arguments: [
+                "resume", "--remote", endpoint, "--no-alt-screen", "-C", directory.path, threadID,
+            ],
+            directory: directory,
+            environment: TerminalEnvironment.make(proxy: proxy),
+            executableName: nil
+        )
+    }
 }
 
 enum ToolLaunchError: LocalizedError, Equatable {

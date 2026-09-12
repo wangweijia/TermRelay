@@ -213,18 +213,44 @@ final class AppModel: ObservableObject {
             return nil
         }
         let displayName = normalizedSessionName
+        guard let executableURL = configuredExecutableURL(for: selectedTool)
+            ?? ExecutableLocator.find(named: "codex") else {
+            errorMessage = "找不到 codex 可执行程序"
+            return nil
+        }
+        let sessionID = UUID()
+        let sessionDirectory = workingDirectory
+        let environment = TerminalEnvironment.make(proxy: proxy)
+        let host = CodexAppServerHost(
+            executableURL: executableURL,
+            directory: sessionDirectory,
+            environment: environment
+        )
         let session = LocalStructuredAgentSession(
-            directory: workingDirectory,
+            id: sessionID,
+            directory: sessionDirectory,
             adapter: CodexStructuredAdapter(
-                configuredExecutableURL: configuredExecutableURL(for: selectedTool)
+                configuredExecutableURL: executableURL,
+                host: host
             ),
             webDisplayMode: agentWebDisplayMode,
-            environment: TerminalEnvironment.make(proxy: proxy),
+            environment: environment,
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
             },
             stateHandler: { [weak self] id, state in
                 self?.handleStructuredSessionState(id: id, state: state)
+            },
+            referenceHandler: { [weak self] reference in
+                self?.startCodexTUI(
+                    sessionID: sessionID,
+                    directory: sessionDirectory,
+                    executableURL: executableURL,
+                    proxy: proxy,
+                    endpoint: host.endpoint,
+                    threadID: reference.opaqueID,
+                    remoteClient: remoteClient
+                )
             }
         )
         structuredSessions[session.id] = session
@@ -256,6 +282,46 @@ final class AppModel: ObservableObject {
         return session.id
     }
 
+    private func startCodexTUI(
+        sessionID: UUID,
+        directory: URL,
+        executableURL: URL,
+        proxy: ToolProxyConfiguration,
+        endpoint: String,
+        threadID: String,
+        remoteClient: RemoteClient
+    ) {
+        guard structuredSessions[sessionID] != nil, terminalSessions[sessionID] == nil else { return }
+        do {
+            let adapter = CodexAdapter(configuredExecutableURL: executableURL)
+            let launch = try adapter.makeRemoteLaunchConfiguration(
+                directory: directory,
+                proxy: proxy,
+                endpoint: endpoint,
+                threadID: threadID
+            )
+            let terminal = try LocalTerminalSession(
+                id: sessionID,
+                directory: directory,
+                tool: .codex,
+                executableURL: executableURL,
+                proxy: proxy,
+                launchConfiguration: launch,
+                outputHandler: { batch in
+                    Task { await remoteClient.publishTerminalOutput(batch) }
+                },
+                stateHandler: { [weak self] id, state in
+                    self?.handleLocalSessionState(id: id, state: state)
+                }
+            )
+            terminalSessions[sessionID] = terminal
+            terminal.startIfNeeded()
+        } catch {
+            errorMessage = error.localizedDescription
+            Task { await structuredSessions[sessionID]?.stop() }
+        }
+    }
+
     func terminalSession(id: UUID) -> LocalTerminalSession? {
         terminalSessions[id]
     }
@@ -266,6 +332,9 @@ final class AppModel: ObservableObject {
 
     func stopLocalTerminal(id: UUID) {
         terminalSessions[id]?.terminate()
+        if let structured = structuredSessions[id] {
+            Task { await structured.stop() }
+        }
         updateActiveSessionCount()
     }
 
@@ -287,11 +356,13 @@ final class AppModel: ObservableObject {
 
     private func syncRemoteState() {
         guard let remoteClient else { return }
-        let activeSessions = terminalSessions.values.filter { $0.state.isActive }
+        let activeSessions = terminalSessions.values.filter {
+            $0.state.isActive && structuredSessions[$0.id] == nil
+        }
         let activeStructured = structuredSessions.values.filter { $0.state.isActive }
         let displayNames = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.displayName) })
         Task {
-            await remoteClient.setActiveSessionCount(activeSessions.count + activeStructured.count)
+            await remoteClient.setActiveSessionCount(activeSessionCount)
             for session in activeSessions {
                 let workspaceID = workspaceID(for: session.directory)
                 await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
@@ -339,6 +410,7 @@ final class AppModel: ObservableObject {
             }
             return await session.resolveApproval(approvalID: approvalID, turnID: turnID, decision: decision)
         case .stop(_, let sessionID) where structuredSessions[sessionID] != nil:
+            terminalSessions[sessionID]?.terminate()
             await structuredSessions[sessionID]?.stop()
             updateActiveSessionCount()
             return .completed
@@ -364,8 +436,9 @@ final class AppModel: ObservableObject {
     }
 
     private var activeSessionCount: Int {
-        terminalSessions.values.count { $0.state.isActive }
-            + structuredSessions.values.count { $0.state.isActive }
+        let terminalIDs = Set(terminalSessions.values.filter { $0.state.isActive }.map(\.id))
+        let structuredIDs = Set(structuredSessions.values.filter { $0.state.isActive }.map(\.id))
+        return terminalIDs.union(structuredIDs).count
     }
 
     private var normalizedSessionName: String {
@@ -382,6 +455,9 @@ final class AppModel: ObservableObject {
     private func handleLocalSessionState(id: UUID, state: SessionState) {
         updateActiveSessionCount()
         guard state == .finished || state == .failed, let remoteClient else { return }
+        if let structured = structuredSessions[id], structured.state != .finished {
+            Task { await structured.stop() }
+        }
         Task {
             await remoteClient.publishSessionEnded(
                 id: id,
@@ -394,6 +470,9 @@ final class AppModel: ObservableObject {
     private func handleStructuredSessionState(id: UUID, state: StructuredSessionState) {
         updateActiveSessionCount()
         guard state == .finished || state == .failed, let remoteClient else { return }
+        if terminalSessions[id]?.state.isActive == true {
+            terminalSessions[id]?.terminate()
+        }
         Task {
             await remoteClient.publishSessionEnded(
                 id: id,

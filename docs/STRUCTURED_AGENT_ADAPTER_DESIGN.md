@@ -31,7 +31,7 @@ Mac 会话核心、TermRelay Server 或 Web UI 依赖某个厂商的原始协议
 - 不设计一个覆盖所有现有和未来智能体功能的“万能协议”。
 - 不把 Codex App Server JSON-RPC 直接暴露给 Server 或 Web。
 - 不要求所有普通 CLI 都提供结构化事件。
-- 不在首版同时运行 Codex PTY TUI 和 Codex App Server 模式。
+- 不把 Web 展示模式当成两套独立运行时；Codex 始终保留 TUI，并独立监听结构化审批流。
 - 不在当前阶段实现 Claude、Gemini 或 ACP Adapter。
 - 不用结构化 Adapter 替代 TermRelay 的设备、会话、ACK 和重连协议。
 
@@ -60,15 +60,13 @@ Browser <-> Server <----------------------------> Mac RemoteCore
                                                 ManagedSession
                                                  /          \
                                                 /            \
-                                    Terminal Runtime     Agent Runtime
-                                         |                   |
-                                   TerminalAdapter   StructuredAgentAdapter
-                                         |              /           \
-                                        PTY    CodexAppServer     Future ACP
-                                         |              |
-                              Shell / Codex TUI      stdio JSONL
-                                                        |
-                                                 codex app-server
+                                    Shell Runtime       Codex Session Runtime
+                                         |                /              \
+                                        PTY        PTY / Codex TUI    Agent Adapter
+                                                            \            /
+                                                        per-session Unix Socket
+                                                                  |
+                                                          codex app-server
 ```
 
 关键依赖方向：
@@ -130,8 +128,9 @@ apps/mac/Sources/
 - `CLIToolAdapter`：描述可执行文件、参数、环境和 PTY 启动方式。
 - `StructuredAgentAdapter`：管理结构化协议连接、会话、动作和事件。
 
-Codex 可以同时在 Registry 中声明这两种集成能力，但一次 Managed Session 只能选择一种
-runtime。
+Shell 使用纯 Terminal Runtime。Codex Managed Session 同时组合 PTY 和 Structured Runtime，
+二者共享一个会话 ID 和 App Server Thread；Server 必须允许 `structured` 会话交错保存
+`terminal.output` 与 `tool.event`。
 
 ## 5. 会话 Runtime
 

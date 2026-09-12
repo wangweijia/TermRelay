@@ -20,7 +20,9 @@ actor RemoteClient {
     private var announcedSessions = Set<UUID>()
     private var endedSessions = Set<UUID>()
     private var pendingSessionEnds: [UUID: RelaySessionEnded] = [:]
-    private var pendingOutputs: [UUID: [TerminalOutputBatch]] = [:]
+    private var pendingEvents: [UUID: [PendingSessionEvent]] = [:]
+    private var nextSequenceBySession: [UUID: UInt64] = [:]
+    private var relaySequenceBySource: [UUID: [RelayEventSource: UInt64]] = [:]
     private var pendingOutputBytes = 0
     private let maximumPendingOutputBytes = 16 * 1_024 * 1_024
 
@@ -88,6 +90,7 @@ actor RemoteClient {
         webDisplayMode: AgentWebDisplayMode? = nil,
         startedAt: String
     ) async {
+        if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
         let sent = await send(
             type: "session.started",
             sessionId: id.uuidString.lowercased(),
@@ -103,7 +106,7 @@ actor RemoteClient {
         )
         guard sent else { return }
         announcedSessions.insert(id)
-        await flushPendingOutputs(sessionId: id)
+        await flushPendingEvents(sessionId: id)
         if let pendingEnd = pendingSessionEnds.removeValue(forKey: id) {
             await sendSessionEnded(id: id, payload: pendingEnd)
         }
@@ -124,28 +127,46 @@ actor RemoteClient {
     }
 
     func publishTerminalOutput(_ batch: TerminalOutputBatch) async {
-        guard registered, announcedSessions.contains(batch.sessionID) else {
-            enqueue(batch)
+        let sequence = relaySequence(
+            for: RelayEventSource(kind: .terminal, sequence: batch.sequence),
+            sessionID: batch.sessionID
+        )
+        let sequenced = TerminalOutputBatch(
+            sessionID: batch.sessionID,
+            sequence: sequence,
+            capturedAt: batch.capturedAt,
+            bytes: batch.bytes
+        )
+        let pending = PendingSessionEvent.terminal(sequenced)
+        guard registered, announcedSessions.contains(sequenced.sessionID) else {
+            enqueue(pending)
             return
         }
-        let sent = await send(
-            type: "terminal.output",
-            sessionId: batch.sessionID.uuidString.lowercased(),
-            seq: batch.sequence,
-            payload: RelayTerminalOutput(data: batch.bytes.base64EncodedString())
-        )
-        if !sent { enqueue(batch) }
+        if !(await send(pending)) { enqueue(pending) }
     }
 
     func publishToolEvent(_ event: ToolEvent) async {
-        // Sequence zero is represented by session.started in the relay protocol.
-        guard event.sequence > 0 else { return }
-        _ = await send(
-            type: "tool.event",
-            sessionId: event.sessionID.uuidString.lowercased(),
-            seq: event.sequence,
-            payload: RelayToolEvent(event)
+        // Provider session startup is represented by session.started. All other
+        // providers share one relay sequence with terminal output for this session.
+        if case .sessionStarted = event.payload { return }
+        let sequence = relaySequence(
+            for: RelayEventSource(kind: .tool, sequence: event.sequence),
+            sessionID: event.sessionID
         )
+        let pending = PendingSessionEvent.tool(sequence: sequence, event: event)
+        guard registered, announcedSessions.contains(event.sessionID) else {
+            enqueue(pending)
+            return
+        }
+        if !(await send(pending)) { enqueue(pending) }
+    }
+
+    private func relaySequence(for source: RelayEventSource, sessionID: UUID) -> UInt64 {
+        if let existing = relaySequenceBySource[sessionID]?[source] { return existing }
+        let next = nextSequenceBySession[sessionID] ?? 1
+        nextSequenceBySession[sessionID] = next + 1
+        relaySequenceBySource[sessionID, default: [:]][source] = next
+        return next
     }
 
     private func connectionLoop(generation expectedGeneration: Int) async {
@@ -343,46 +364,60 @@ actor RemoteClient {
         }
     }
 
-    private func enqueue(_ batch: TerminalOutputBatch) {
-        var sessionBatches = pendingOutputs[batch.sessionID] ?? []
-        if sessionBatches.contains(where: { $0.sequence == batch.sequence }) { return }
-        sessionBatches.append(batch)
-        sessionBatches.sort { $0.sequence < $1.sequence }
-        pendingOutputs[batch.sessionID] = sessionBatches
-        pendingOutputBytes += batch.bytes.count
+    private func enqueue(_ event: PendingSessionEvent) {
+        var sessionEvents = pendingEvents[event.sessionID] ?? []
+        if sessionEvents.contains(where: { $0.sequence == event.sequence }) { return }
+        sessionEvents.append(event)
+        sessionEvents.sort { $0.sequence < $1.sequence }
+        pendingEvents[event.sessionID] = sessionEvents
+        pendingOutputBytes += event.byteCount
 
         while pendingOutputBytes > maximumPendingOutputBytes {
             guard
-                let oldestSession = pendingOutputs.min(by: {
-                    ($0.value.first?.capturedAt ?? .distantFuture) <
-                        ($1.value.first?.capturedAt ?? .distantFuture)
+                let oldestSession = pendingEvents.min(by: {
+                    ($0.value.first?.occurredAt ?? .distantFuture) <
+                        ($1.value.first?.occurredAt ?? .distantFuture)
                 })?.key,
-                var batches = pendingOutputs[oldestSession],
-                !batches.isEmpty
+                var events = pendingEvents[oldestSession],
+                !events.isEmpty
             else { break }
-            let removed = batches.removeFirst()
-            pendingOutputBytes -= removed.bytes.count
-            pendingOutputs[oldestSession] = batches.isEmpty ? nil : batches
-            stateHandler(.degraded, "离线输出缓存已满，最旧的终端数据被丢弃。")
+            let removed = events.removeFirst()
+            pendingOutputBytes -= removed.byteCount
+            pendingEvents[oldestSession] = events.isEmpty ? nil : events
+            stateHandler(.degraded, "离线事件缓存已满，最旧的会话数据被丢弃。")
         }
     }
 
-    private func flushPendingOutputs(sessionId: UUID) async {
-        guard var batches = pendingOutputs[sessionId] else { return }
-        pendingOutputs[sessionId] = nil
-        pendingOutputBytes -= batches.reduce(0) { $0 + $1.bytes.count }
-        for (index, batch) in batches.enumerated() {
-            let sent = await send(
+    private func flushPendingEvents(sessionId: UUID) async {
+        guard var events = pendingEvents[sessionId] else { return }
+        pendingEvents[sessionId] = nil
+        pendingOutputBytes -= events.reduce(0) { $0 + $1.byteCount }
+        for (index, event) in events.enumerated() {
+            let sent = await send(event)
+            if sent { continue }
+            for remaining in events[index...] { enqueue(remaining) }
+            return
+        }
+        events.removeAll()
+    }
+
+    private func send(_ event: PendingSessionEvent) async -> Bool {
+        switch event {
+        case .terminal(let batch):
+            await send(
                 type: "terminal.output",
-                sessionId: sessionId.uuidString.lowercased(),
+                sessionId: batch.sessionID.uuidString.lowercased(),
                 seq: batch.sequence,
                 payload: RelayTerminalOutput(data: batch.bytes.base64EncodedString())
             )
-            if sent { continue }
-            for remaining in batches[index...] { enqueue(remaining) }
-            return
+        case .tool(let sequence, let event):
+            await send(
+                type: "tool.event",
+                sessionId: event.sessionID.uuidString.lowercased(),
+                seq: sequence,
+                payload: RelayToolEvent(event)
+            )
         }
-        batches.removeAll()
     }
 
     private func sendSessionEnded(id: UUID, payload: RelaySessionEnded) async {
@@ -415,6 +450,46 @@ actor RemoteClient {
         )
         let bytes = try JSONEncoder().encode(RelaySocketPacket(data: envelope))
         try await socket.send(.data(bytes))
+    }
+}
+
+private struct RelayEventSource: Hashable {
+    enum Kind: Hashable { case terminal, tool }
+
+    let kind: Kind
+    let sequence: UInt64
+}
+
+private enum PendingSessionEvent {
+    case terminal(TerminalOutputBatch)
+    case tool(sequence: UInt64, event: ToolEvent)
+
+    var sessionID: UUID {
+        switch self {
+        case .terminal(let batch): batch.sessionID
+        case .tool(_, let event): event.sessionID
+        }
+    }
+
+    var sequence: UInt64 {
+        switch self {
+        case .terminal(let batch): batch.sequence
+        case .tool(let sequence, _): sequence
+        }
+    }
+
+    var occurredAt: Date {
+        switch self {
+        case .terminal(let batch): batch.capturedAt
+        case .tool(_, let event): event.occurredAt
+        }
+    }
+
+    var byteCount: Int {
+        switch self {
+        case .terminal(let batch): batch.bytes.count
+        case .tool: 1_024
+        }
     }
 }
 
