@@ -83,6 +83,20 @@ final class ToolProxyConfigurationTests: XCTestCase {
         }
     }
 
+    func testCodexHostUsesTheAppTemporaryDirectoryForItsSocket() {
+        let temporaryDirectory = URL(fileURLWithPath: "/private/tmp/app-container", isDirectory: true)
+        let host = CodexAppServerHost(
+            executableURL: URL(fileURLWithPath: "/bin/echo"),
+            directory: URL(fileURLWithPath: "/private/tmp"),
+            environment: [:],
+            temporaryDirectory: temporaryDirectory
+        )
+
+        XCTAssertTrue(host.socketPath.hasPrefix("/private/tmp/app-container/tr-"))
+        XCTAssertTrue(host.socketPath.hasSuffix(".sock"))
+        XCTAssertLessThan(host.socketPath.utf8.count, 100)
+    }
+
     @MainActor
     func testAppModelPersistsConfigurationPerTool() throws {
         let suiteName = "ToolProxyConfigurationTests.\(UUID().uuidString)"
