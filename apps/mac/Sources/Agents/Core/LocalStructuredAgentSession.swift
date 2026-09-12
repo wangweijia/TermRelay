@@ -5,6 +5,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     let id: UUID
     let directory: URL
     let startedAt: String
+    let webDisplayMode: AgentWebDisplayMode
     @Published private(set) var state: StructuredSessionState = .created
     @Published private(set) var events: [ToolEvent] = []
 
@@ -19,6 +20,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         id: UUID = UUID(),
         directory: URL,
         adapter: any StructuredAgentAdapter,
+        webDisplayMode: AgentWebDisplayMode = .full,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void
@@ -26,6 +28,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.id = id
         self.directory = directory
         self.adapter = adapter
+        self.webDisplayMode = webDisplayMode
         self.environment = environment
         self.eventHandler = eventHandler
         self.stateHandler = stateHandler

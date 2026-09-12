@@ -32,22 +32,29 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
-        case .shell: "登录 Shell"
+        case .shell: "终端"
         case .codex: "Codex"
         }
     }
 
-    var adapter: any CLIToolAdapter {
+    func makeAdapter(executableURL: URL? = nil) -> any CLIToolAdapter {
         switch self {
-        case .shell: LoginShellAdapter()
-        case .codex: CodexAdapter()
+        case .shell: LoginShellAdapter(configuredExecutableURL: executableURL)
+        case .codex: CodexAdapter(configuredExecutableURL: executableURL)
         }
     }
+
+    var adapter: any CLIToolAdapter { makeAdapter() }
 }
 
 struct LoginShellAdapter: CLIToolAdapter {
     let toolID = BuiltInTool.shell.rawValue
     let displayName = BuiltInTool.shell.displayName
+    let configuredExecutableURL: URL?
+
+    init(configuredExecutableURL: URL? = nil) {
+        self.configuredExecutableURL = configuredExecutableURL
+    }
 
     func detect() -> ToolAvailability {
         let path = shellURL.path
@@ -76,6 +83,7 @@ struct LoginShellAdapter: CLIToolAdapter {
     }
 
     private var shellURL: URL {
+        if let configuredExecutableURL { return configuredExecutableURL }
         let configured = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         return URL(fileURLWithPath: configured)
     }
@@ -84,13 +92,25 @@ struct LoginShellAdapter: CLIToolAdapter {
 struct CodexAdapter: CLIToolAdapter {
     let toolID = BuiltInTool.codex.rawValue
     let displayName = BuiltInTool.codex.displayName
+    let configuredExecutableURL: URL?
+
+    init(configuredExecutableURL: URL? = nil) {
+        self.configuredExecutableURL = configuredExecutableURL
+    }
 
     func detect() -> ToolAvailability {
-        guard let url = ExecutableLocator.find(named: "codex") else {
+        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
             return ToolAvailability(
                 isAvailable: false,
                 executablePath: nil,
                 detail: "未在 PATH、~/.local/bin、/opt/homebrew/bin 或 /usr/local/bin 找到 codex"
+            )
+        }
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            return ToolAvailability(
+                isAvailable: false,
+                executablePath: url.path,
+                detail: "文件不存在或不可执行：\(url.path)"
             )
         }
         return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
@@ -100,7 +120,7 @@ struct CodexAdapter: CLIToolAdapter {
         directory: URL,
         proxy: ToolProxyConfiguration = .inherited
     ) throws -> LaunchConfiguration {
-        guard let executable = ExecutableLocator.find(named: "codex") else {
+        guard let executable = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
             throw ToolLaunchError.notFound("codex")
         }
         return LaunchConfiguration(

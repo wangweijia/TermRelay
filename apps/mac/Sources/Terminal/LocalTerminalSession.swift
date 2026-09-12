@@ -34,6 +34,7 @@ final class LocalTerminalSession: NSObject, ObservableObject {
     init(
         directory: URL,
         tool: BuiltInTool,
+        executableURL: URL? = nil,
         proxy: ToolProxyConfiguration = .inherited,
         outputHandler relayOutputHandler: @escaping @Sendable (TerminalOutputBatch) -> Void = { _ in },
         stateHandler: ((UUID, SessionState) -> Void)? = nil
@@ -49,7 +50,7 @@ final class LocalTerminalSession: NSObject, ObservableObject {
         self.tool = tool
         self.stateHandler = stateHandler
         startedAt = RelayDate.now()
-        launchConfiguration = try tool.adapter.makeLaunchConfiguration(
+        launchConfiguration = try tool.makeAdapter(executableURL: executableURL).makeLaunchConfiguration(
             directory: directory,
             proxy: proxy
         )

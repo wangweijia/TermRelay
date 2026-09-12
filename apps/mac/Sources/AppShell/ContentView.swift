@@ -132,13 +132,25 @@ private struct StructuredAgentSessionView: View {
             .padding()
             .background(.bar)
 
-            List(session.events, id: \.sequence) { event in
-                StructuredEventRow(event: event, session: session)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(session.events, id: \.sequence) { event in
+                        StructuredEventRow(event: event, session: session)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
             }
+            .background(Color(nsColor: NSColor(
+                calibratedRed: 0.035,
+                green: 0.05,
+                blue: 0.07,
+                alpha: 1
+            )))
 
             HStack(alignment: .bottom, spacing: 10) {
                 TextEditor(text: $prompt)
-                    .font(.body)
+                    .font(.system(size: 13, design: .monospaced))
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
                 Button("发送") {
@@ -161,7 +173,10 @@ private struct StructuredEventRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.caption.monospaced()).foregroundStyle(.secondary)
-            Text(detail).textSelection(.enabled)
+            Text(detail)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(eventColor)
+                .textSelection(.enabled)
             if case .approvalRequested(let approval) = event.payload {
                 HStack {
                     Button("拒绝", role: .destructive) {
@@ -174,7 +189,8 @@ private struct StructuredEventRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func resolve(_ approval: ApprovalRequest, _ decision: ApprovalDecision) {
@@ -219,6 +235,16 @@ private struct StructuredEventRow: View {
         case .approvalResolved(_, _, let decision): decision.rawValue
         case .turnCompleted(_, let status): status.rawValue
         case .warning(_, let message), .failed(_, let message): message
+        }
+    }
+
+    private var eventColor: Color {
+        switch event.payload {
+        case .failed: .red
+        case .warning, .approvalRequested: .orange
+        case .assistantTextDelta: Color(nsColor: .textColor)
+        case .reasoningDelta: .secondary
+        default: Color(nsColor: .systemGreen)
         }
     }
 }

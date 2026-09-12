@@ -5,6 +5,7 @@ export interface SessionRecord {
   toolKey: string;
   displayName: string | null;
   runtimeMode: 'terminal' | 'structured';
+  webDisplayMode?: 'approval' | 'full';
   status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
   stateVersion: number;
   startedAt: string | null;

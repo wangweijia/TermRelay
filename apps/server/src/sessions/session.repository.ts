@@ -16,6 +16,7 @@ export interface SessionRecord {
   toolKey: string;
   displayName: string | null;
   runtimeMode: SessionEntity['runtimeMode'];
+  webDisplayMode?: SessionEntity['webDisplayMode'];
   status: SessionStatus;
   stateVersion: number;
   startedAt: string | null;
@@ -75,6 +76,7 @@ export class SessionRepository {
           existing.workspaceId === payload.workspaceId &&
           existing.toolKey === payload.toolKey &&
           existing.runtimeMode === payload.runtimeMode &&
+          existing.webDisplayMode === (payload.webDisplayMode ?? 'full') &&
           startEvent !== null &&
           sameEvent(startEvent, 'session.started', payload);
         if (sameIdentity) {
@@ -98,6 +100,7 @@ export class SessionRepository {
         toolKey: payload.toolKey,
         displayName: payload.displayName ?? null,
         runtimeMode: payload.runtimeMode,
+        webDisplayMode: payload.webDisplayMode ?? 'full',
         status: 'running',
         stateVersion: '0',
         startedAt: new Date(payload.startedAt),
@@ -394,6 +397,7 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     toolKey: session.toolKey,
     displayName: session.displayName,
     runtimeMode: session.runtimeMode,
+    webDisplayMode: session.webDisplayMode,
     status: session.status,
     stateVersion: Number(session.stateVersion),
     startedAt: session.startedAt?.toISOString() ?? null,

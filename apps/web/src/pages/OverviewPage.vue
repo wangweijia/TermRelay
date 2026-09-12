@@ -179,6 +179,7 @@ onBeforeUnmount(() => {
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
+          :display-mode="relay.selectedSession.webDisplayMode ?? 'full'"
           @start-turn="relay.startToolTurn"
           @interrupt="relay.interruptToolTurn"
           @resolve-approval="relay.resolveApproval"

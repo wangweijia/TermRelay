@@ -85,6 +85,7 @@ actor RemoteClient {
         toolKey: String,
         displayName: String,
         runtimeMode: SessionRuntimeMode = .terminal,
+        webDisplayMode: AgentWebDisplayMode? = nil,
         startedAt: String
     ) async {
         let sent = await send(
@@ -96,6 +97,7 @@ actor RemoteClient {
                 toolKey: toolKey,
                 displayName: displayName,
                 runtimeMode: runtimeMode.rawValue,
+                webDisplayMode: webDisplayMode?.rawValue,
                 startedAt: startedAt
             )
         )

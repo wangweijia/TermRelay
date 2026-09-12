@@ -60,9 +60,12 @@ final class ToolProxyConfigurationTests: XCTestCase {
 
         let first = AppModel(defaults: defaults)
         first.setProxyConfiguration(codex, for: .codex)
+        first.setExecutablePath("/opt/homebrew/bin/codex", for: .codex)
         let restored = AppModel(defaults: defaults)
 
         XCTAssertEqual(restored.proxyConfiguration(for: .codex), codex)
         XCTAssertEqual(restored.proxyConfiguration(for: .shell), .inherited)
+        XCTAssertEqual(restored.executablePath(for: .codex), "/opt/homebrew/bin/codex")
+        XCTAssertEqual(restored.executablePath(for: .shell), "")
     }
 }

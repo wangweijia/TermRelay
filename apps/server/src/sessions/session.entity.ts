@@ -34,6 +34,14 @@ export class SessionEntity {
   runtimeMode!: SessionRuntimeMode;
 
   @Column({
+    name: 'web_display_mode',
+    type: 'enum',
+    enum: ['approval', 'full'],
+    default: 'full',
+  })
+  webDisplayMode!: 'approval' | 'full';
+
+  @Column({
     type: 'enum',
     enum: ['starting', 'running', 'stopping', 'finished', 'failed'],
   })

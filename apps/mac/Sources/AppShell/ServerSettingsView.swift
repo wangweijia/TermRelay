@@ -12,6 +12,7 @@ struct ServerSettingsView: View {
             }
 
             ForEach(BuiltInTool.allCases) { tool in
+                ToolExecutableSettingsSection(tool: tool)
                 ToolProxySettingsSection(tool: tool)
             }
 
@@ -24,6 +25,42 @@ struct ServerSettingsView: View {
         .formStyle(.grouped)
         .padding()
         .frame(width: 520)
+    }
+}
+
+private struct ToolExecutableSettingsSection: View {
+    @EnvironmentObject private var appModel: AppModel
+    let tool: BuiltInTool
+
+    private var path: Binding<String> {
+        Binding(
+            get: { appModel.executablePath(for: tool) },
+            set: { appModel.setExecutablePath($0, for: tool) }
+        )
+    }
+
+    var body: some View {
+        Section("\(tool.displayName) 可执行文件") {
+            HStack {
+                TextField("自动从 PATH 查找", text: path)
+                Button("选择…") { appModel.chooseExecutable(for: tool) }
+                if !path.wrappedValue.isEmpty {
+                    Button("自动查找") { appModel.setExecutablePath("", for: tool) }
+                }
+            }
+            Text(path.wrappedValue.isEmpty
+                 ? "留空时自动从 PATH 和常用安装目录查找。"
+                 : tool.makeAdapter(executableURL: expandedURL).detect().detail)
+                .font(.caption)
+                .foregroundStyle(tool.makeAdapter(executableURL: expandedURL).detect().isAvailable
+                                 ? Color.secondary : Color.orange)
+        }
+    }
+
+    private var expandedURL: URL? {
+        let value = path.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        return URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
     }
 }
 

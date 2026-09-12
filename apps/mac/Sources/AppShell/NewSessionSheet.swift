@@ -64,23 +64,7 @@ struct NewSessionSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 9) {
-                Text("运行模式")
-                    .font(.headline)
-                Picker("运行模式", selection: $appModel.selectedRuntimeMode) {
-                    Text("终端").tag(SessionRuntimeMode.terminal)
-                    Text("结构化 Agent").tag(SessionRuntimeMode.structured)
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                Text(appModel.selectedRuntimeMode == .structured
-                     ? "通过 Codex App Server 获取结构化事件，并支持远程审批。"
-                     : "启动独立 PTY，可在本机和 Web 中直接操作。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 9) {
-                Text("终端工具")
+                Text("会话")
                     .font(.headline)
                 Picker("终端工具", selection: $appModel.selectedTool) {
                     ForEach(BuiltInTool.allCases) { tool in
@@ -90,10 +74,6 @@ struct NewSessionSheet: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .disabled(appModel.selectedRuntimeMode == .structured)
-                .onChange(of: appModel.selectedRuntimeMode) { _, mode in
-                    if mode == .structured { appModel.selectedTool = .codex }
-                }
 
                 Label(
                     appModel.selectedToolAvailability.detail,
@@ -107,6 +87,24 @@ struct NewSessionSheet: View {
                 )
             }
 
+            if appModel.selectedTool == .codex {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("Web 展示")
+                        .font(.headline)
+                    Picker("Web 展示", selection: $appModel.agentWebDisplayMode) {
+                        Text("仅审批").tag(AgentWebDisplayMode.approval)
+                        Text("终端（完整流）").tag(AgentWebDisplayMode.full)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    Text(appModel.agentWebDisplayMode == .approval
+                         ? "Web 只显示审批、警告和错误；Mac 仍显示完整过程。"
+                         : "Web 显示完整 Agent 活动流，并始终独立显示审批。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             HStack {
                 Label(
                     proxySummary,
@@ -116,7 +114,7 @@ struct NewSessionSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 Spacer()
-                SettingsLink { Text("配置启动代理…") }
+                SettingsLink { Text("配置工具路径和代理…") }
                     .font(.caption)
             }
 
@@ -135,8 +133,7 @@ struct NewSessionSheet: View {
                     if appModel.errorMessage == nil { dismiss() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!appModel.selectedToolAvailability.isAvailable
-                          || (appModel.selectedRuntimeMode == .structured && appModel.selectedTool != .codex))
+                .disabled(!appModel.selectedToolAvailability.isAvailable)
             }
         }
         .padding(24)

@@ -41,6 +41,7 @@ struct RelaySessionStarted: Encodable, Sendable {
     let toolKey: String
     let displayName: String
     let runtimeMode: String
+    let webDisplayMode: String?
     let startedAt: String
 }
 

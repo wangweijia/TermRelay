@@ -190,6 +190,7 @@ Server S4 read-only terminal relay probe passed.
 ## 协议状态
 
 当前 21 个 JSON Schema 均已通过检查；新增归一化 `tool.event`、Turn 控制和审批决策协议。
+Session 通过 migration 0006 保存 Codex Web 展示模式（仅审批/完整流），不改变底层命令路由模式。
 
 运行时校验已经接入 Server。仍有一项协议技术债：TypeScript/Swift 的 `generated` 类型目前是手写引导版本，尚未建立从 JSON Schema 自动生成并在 CI 检查无漂移的正式流程。
 

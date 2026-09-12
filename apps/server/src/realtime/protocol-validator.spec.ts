@@ -65,6 +65,7 @@ test('accepts workspace, session, and terminal events with required context', ()
       toolKey: 'codex',
       displayName: '后端服务',
       runtimeMode: 'terminal',
+      webDisplayMode: 'full',
       startedAt: new Date().toISOString(),
     }),
     sessionId: 'session-a',

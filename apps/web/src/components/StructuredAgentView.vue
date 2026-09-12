@@ -2,7 +2,11 @@
 import { computed, ref } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
-const props = defineProps<{ events: SessionEventRecord[]; interactive: boolean }>();
+const props = defineProps<{
+  events: SessionEventRecord[];
+  interactive: boolean;
+  displayMode: 'approval' | 'full';
+}>();
 const emit = defineEmits<{
   startTurn: [text: string];
   interrupt: [];
@@ -12,7 +16,11 @@ const prompt = ref('');
 
 const toolEvents = computed(() => props.events.flatMap((event) => {
   if (event.type !== 'tool.event') return [];
-  return [{ ...event, payload: event.payload as unknown as ToolEventPayload }];
+  const normalized = { ...event, payload: event.payload as unknown as ToolEventPayload };
+  if (props.displayMode === 'approval' && ![
+    'approval.requested', 'approval.resolved', 'warning', 'error',
+  ].includes(normalized.payload.kind)) return [];
+  return [normalized];
 }));
 const resolvedApprovals = computed(() => new Set(toolEvents.value.flatMap(({ payload }) =>
   payload.kind === 'approval.resolved' && typeof payload.data.approvalId === 'string'

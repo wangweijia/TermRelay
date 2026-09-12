@@ -10,10 +10,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published var selectedTool: BuiltInTool = .shell
-    @Published var selectedRuntimeMode: SessionRuntimeMode = .terminal
+    @Published var agentWebDisplayMode: AgentWebDisplayMode {
+        didSet { defaults.set(agentWebDisplayMode.rawValue, forKey: Keys.agentWebDisplayMode) }
+    }
     @Published var sessionName = ""
     @Published var proxyConfigurations: [String: ToolProxyConfiguration] {
         didSet { persistProxyConfigurations() }
+    }
+    @Published var toolExecutablePaths: [String: String] {
+        didSet { defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths) }
     }
     @Published var serverURL: String {
         didSet { defaults.set(serverURL, forKey: Keys.serverURL) }
@@ -27,6 +32,9 @@ final class AppModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
+        toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
+        agentWebDisplayMode = defaults.string(forKey: Keys.agentWebDisplayMode)
+            .flatMap(AgentWebDisplayMode.init(rawValue:)) ?? .full
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
         let storedServerURL = defaults.string(forKey: Keys.serverURL)
         if let storedServerURL, !Keys.legacyServerURLs.contains(storedServerURL) {
@@ -85,7 +93,9 @@ final class AppModel: ObservableObject {
         )
     }
 
-    var selectedToolAvailability: ToolAvailability { selectedTool.adapter.detect() }
+    var selectedToolAvailability: ToolAvailability {
+        selectedTool.makeAdapter(executableURL: configuredExecutableURL(for: selectedTool)).detect()
+    }
     var suggestedSessionName: String {
         "\(selectedTool.displayName) — \(workingDirectory.lastPathComponent)"
     }
@@ -96,6 +106,27 @@ final class AppModel: ObservableObject {
 
     func setProxyConfiguration(_ configuration: ToolProxyConfiguration, for tool: BuiltInTool) {
         proxyConfigurations[tool.rawValue] = configuration
+    }
+
+    func executablePath(for tool: BuiltInTool) -> String {
+        toolExecutablePaths[tool.rawValue] ?? ""
+    }
+
+    func setExecutablePath(_ path: String, for tool: BuiltInTool) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { toolExecutablePaths.removeValue(forKey: tool.rawValue) }
+        else { toolExecutablePaths[tool.rawValue] = trimmed }
+    }
+
+    func chooseExecutable(for tool: BuiltInTool) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选择"
+        if panel.runModal() == .OK, let url = panel.url {
+            setExecutablePath(url.path, for: tool)
+        }
     }
 
     func chooseWorkingDirectory() {
@@ -124,6 +155,7 @@ final class AppModel: ObservableObject {
             let terminalSession = try LocalTerminalSession(
                 directory: workingDirectory,
                 tool: selectedTool,
+                executableURL: configuredExecutableURL(for: selectedTool),
                 proxy: proxy,
                 outputHandler: { batch in
                     Task { await remoteClient.publishTerminalOutput(batch) }
@@ -166,7 +198,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession() -> UUID? {
-        selectedRuntimeMode == .structured ? startStructuredSession() : startLocalTerminal()
+        selectedTool == .codex ? startStructuredSession() : startLocalTerminal()
     }
 
     @discardableResult
@@ -183,7 +215,10 @@ final class AppModel: ObservableObject {
         let displayName = normalizedSessionName
         let session = LocalStructuredAgentSession(
             directory: workingDirectory,
-            adapter: CodexStructuredAdapter(),
+            adapter: CodexStructuredAdapter(
+                configuredExecutableURL: configuredExecutableURL(for: selectedTool)
+            ),
+            webDisplayMode: agentWebDisplayMode,
             environment: TerminalEnvironment.make(proxy: proxy),
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
@@ -198,7 +233,8 @@ final class AppModel: ObservableObject {
             directory: workingDirectory,
             toolID: selectedTool.rawValue,
             displayName: displayName,
-            runtimeMode: .structured
+            runtimeMode: .structured,
+            webDisplayMode: agentWebDisplayMode
         ))
         let workspaceID = workspaceID(for: workingDirectory)
         Task {
@@ -210,6 +246,7 @@ final class AppModel: ObservableObject {
                 toolKey: selectedTool.rawValue,
                 displayName: displayName,
                 runtimeMode: .structured,
+                webDisplayMode: agentWebDisplayMode,
                 startedAt: session.startedAt
             )
             await session.start()
@@ -276,6 +313,7 @@ final class AppModel: ObservableObject {
                     toolKey: BuiltInTool.codex.rawValue,
                     displayName: displayNames[session.id] ?? "Codex Agent — \(session.directory.lastPathComponent)",
                     runtimeMode: .structured,
+                    webDisplayMode: session.webDisplayMode,
                     startedAt: session.startedAt
                 )
                 for event in session.events { await remoteClient.publishToolEvent(event) }
@@ -379,6 +417,8 @@ final class AppModel: ObservableObject {
         static let deviceID = "deviceID"
         static let workspaceIDs = "workspaceIDs"
         static let proxyConfigurations = "toolProxyConfigurations"
+        static let toolExecutablePaths = "toolExecutablePaths"
+        static let agentWebDisplayMode = "agentWebDisplayMode"
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",
@@ -399,6 +439,12 @@ final class AppModel: ObservableObject {
                 from: data
               ) else { return [:] }
         return value
+    }
+
+    private func configuredExecutableURL(for tool: BuiltInTool) -> URL? {
+        let path = executablePath(for: tool).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
     }
 }
 

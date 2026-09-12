@@ -45,6 +45,7 @@ export interface SessionStartedPayload {
   toolKey: string;
   displayName?: string;
   runtimeMode: SessionRuntimeMode;
+  webDisplayMode?: 'approval' | 'full';
   startedAt: string;
 }
 
@@ -147,6 +148,7 @@ export const sessionStartedSchema = {
     toolKey: { type: 'string', minLength: 1, maxLength: 64 },
     displayName: { type: 'string', minLength: 1, maxLength: 128 },
     runtimeMode: { enum: ['terminal', 'structured'] },
+    webDisplayMode: { enum: ['approval', 'full'] },
     startedAt: { type: 'string', format: 'date-time' },
   },
   additionalProperties: false,

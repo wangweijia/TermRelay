@@ -3,9 +3,14 @@ import Foundation
 struct CodexStructuredAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.codex
     let displayName = "Codex 结构化 Agent"
+    let configuredExecutableURL: URL?
+
+    init(configuredExecutableURL: URL? = nil) {
+        self.configuredExecutableURL = configuredExecutableURL
+    }
 
     func detect() async throws -> AgentInstallation {
-        guard let executable = ExecutableLocator.find(named: "codex") else {
+        guard let executable = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
             throw AgentError.providerUnavailable("找不到 codex 可执行程序")
         }
         let version = try readVersion(executable)

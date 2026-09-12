@@ -48,6 +48,7 @@ public struct SessionStartedPayload: Codable, Sendable {
     public let toolKey: String
     public let displayName: String?
     public let runtimeMode: SessionRuntimeMode
+    public let webDisplayMode: String?
     public let startedAt: String
 }
 
