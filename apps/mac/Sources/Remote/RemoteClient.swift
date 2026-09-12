@@ -77,7 +77,13 @@ actor RemoteClient {
         )
     }
 
-    func publishSession(id: UUID, workspaceId: String, toolKey: String, startedAt: String) async {
+    func publishSession(
+        id: UUID,
+        workspaceId: String,
+        toolKey: String,
+        displayName: String,
+        startedAt: String
+    ) async {
         let sent = await send(
             type: "session.started",
             sessionId: id.uuidString.lowercased(),
@@ -85,6 +91,7 @@ actor RemoteClient {
             payload: RelaySessionStarted(
                 workspaceId: workspaceId,
                 toolKey: toolKey,
+                displayName: displayName,
                 startedAt: startedAt
             )
         )

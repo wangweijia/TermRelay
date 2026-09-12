@@ -3,6 +3,7 @@ export interface SessionRecord {
   deviceId: string;
   workspaceId: string;
   toolKey: string;
+  displayName: string | null;
   runtimeMode: 'terminal' | 'structured';
   status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
   stateVersion: number;

@@ -43,6 +43,7 @@ export type SessionRuntimeMode = 'terminal' | 'structured';
 export interface SessionStartedPayload {
   workspaceId: string;
   toolKey: string;
+  displayName?: string;
   runtimeMode: SessionRuntimeMode;
   startedAt: string;
 }
@@ -139,6 +140,7 @@ export const sessionStartedSchema = {
   properties: {
     workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
     toolKey: { type: 'string', minLength: 1, maxLength: 64 },
+    displayName: { type: 'string', minLength: 1, maxLength: 128 },
     runtimeMode: { enum: ['terminal', 'structured'] },
     startedAt: { type: 'string', format: 'date-time' },
   },

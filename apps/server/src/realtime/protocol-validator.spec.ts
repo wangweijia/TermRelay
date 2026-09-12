@@ -63,6 +63,7 @@ test('accepts workspace, session, and terminal events with required context', ()
     ...envelope('session.started', {
       workspaceId: 'workspace-a',
       toolKey: 'codex',
+      displayName: '后端服务',
       runtimeMode: 'terminal',
       startedAt: new Date().toISOString(),
     }),

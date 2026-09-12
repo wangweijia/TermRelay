@@ -109,7 +109,7 @@ onBeforeUnmount(() => {
               @click="relay.selectSession(session.id)"
             >
               <span class="session-title">
-                <strong>{{ session.toolKey }}</strong>
+                <strong>{{ relay.sessionDisplayName(session) }}</strong>
                 <small :data-status="relay.sessionDisplayStatus(session)">
                   {{ relay.sessionDisplayStatus(session) }}
                 </small>
@@ -137,7 +137,10 @@ onBeforeUnmount(() => {
         <div v-if="relay.selectedSession" class="terminal-heading">
           <div>
             <small>{{ relay.selectedSession.deviceId }}</small>
-            <strong>{{ relay.selectedSession.workspaceId }} / {{ relay.selectedSession.toolKey }}</strong>
+            <strong>
+              {{ relay.sessionDisplayName(relay.selectedSession) }}
+              <small>· {{ relay.selectedSession.workspaceId }}</small>
+            </strong>
           </div>
           <div class="terminal-meta">
             <span>{{ relay.selectedSession.runtimeMode }}</span>
@@ -185,7 +188,7 @@ onBeforeUnmount(() => {
         <small>DELETE SESSION</small>
         <h2 id="delete-title">确定删除这个会话？</h2>
         <p>
-          {{ sessionPendingDelete.toolKey }} · {{ sessionPendingDelete.workspaceId }}
+          {{ relay.sessionDisplayName(sessionPendingDelete) }} · {{ sessionPendingDelete.workspaceId }}
         </p>
         <code>{{ sessionPendingDelete.id }}</code>
         <label class="purge-option">

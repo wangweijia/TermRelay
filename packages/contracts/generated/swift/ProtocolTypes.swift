@@ -46,6 +46,7 @@ public enum SessionRuntimeMode: String, Codable, Sendable {
 public struct SessionStartedPayload: Codable, Sendable {
     public let workspaceId: String
     public let toolKey: String
+    public let displayName: String?
     public let runtimeMode: SessionRuntimeMode
     public let startedAt: String
 }

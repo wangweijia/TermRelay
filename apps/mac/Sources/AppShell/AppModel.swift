@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published var selectedTool: BuiltInTool = .shell
+    @Published var sessionName = ""
     @Published var serverURL: String {
         didSet { defaults.set(serverURL, forKey: Keys.serverURL) }
     }
@@ -72,11 +73,16 @@ final class AppModel: ObservableObject {
         Task { await remoteClient.connect(to: url) }
     }
 
-    func addSession(directory: URL, toolID: String) {
-        sessions.append(ManagedSession(directory: directory, toolID: toolID))
+    func addSession(directory: URL, toolID: String, displayName: String? = nil) {
+        sessions.append(
+            ManagedSession(directory: directory, toolID: toolID, displayName: displayName)
+        )
     }
 
     var selectedToolAvailability: ToolAvailability { selectedTool.adapter.detect() }
+    var suggestedSessionName: String {
+        "\(selectedTool.displayName) — \(workingDirectory.lastPathComponent)"
+    }
 
     func chooseWorkingDirectory() {
         let panel = NSOpenPanel()
@@ -95,6 +101,7 @@ final class AppModel: ObservableObject {
     func startLocalTerminal() -> UUID? {
         do {
             guard let remoteClient else { return nil }
+            let displayName = normalizedSessionName
             let terminalSession = try LocalTerminalSession(
                 directory: workingDirectory,
                 tool: selectedTool,
@@ -107,7 +114,12 @@ final class AppModel: ObservableObject {
             )
             terminalSessions[terminalSession.id] = terminalSession
             sessions.append(
-                ManagedSession(id: terminalSession.id, directory: workingDirectory, toolID: selectedTool.rawValue)
+                ManagedSession(
+                    id: terminalSession.id,
+                    directory: workingDirectory,
+                    toolID: selectedTool.rawValue,
+                    displayName: displayName
+                )
             )
             let workspaceID = workspaceID(for: workingDirectory)
             let directory = terminalSession.directory
@@ -119,10 +131,12 @@ final class AppModel: ObservableObject {
                     id: terminalSession.id,
                     workspaceId: workspaceID,
                     toolKey: toolKey,
+                    displayName: displayName,
                     startedAt: terminalSession.startedAt
                 )
             }
             errorMessage = nil
+            sessionName = ""
             return terminalSession.id
         } catch {
             errorMessage = error.localizedDescription
@@ -154,6 +168,7 @@ final class AppModel: ObservableObject {
     private func syncRemoteState() {
         guard let remoteClient else { return }
         let activeSessions = terminalSessions.values.filter { $0.state.isActive }
+        let displayNames = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.displayName) })
         Task {
             await remoteClient.setActiveSessionCount(activeSessions.count)
             for session in activeSessions {
@@ -163,6 +178,8 @@ final class AppModel: ObservableObject {
                     id: session.id,
                     workspaceId: workspaceID,
                     toolKey: session.tool.rawValue,
+                    displayName: displayNames[session.id]
+                        ?? "\(session.tool.displayName) — \(session.directory.lastPathComponent)",
                     startedAt: session.startedAt
                 )
             }
@@ -189,6 +206,11 @@ final class AppModel: ObservableObject {
 
     private var activeSessionCount: Int {
         terminalSessions.values.count { $0.state.isActive }
+    }
+
+    private var normalizedSessionName: String {
+        let trimmed = sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String((trimmed.isEmpty ? suggestedSessionName : trimmed).prefix(128))
     }
 
     private func updateActiveSessionCount() {

@@ -387,6 +387,10 @@ export const useRelayStore = defineStore('relay', {
       }
       return session.status;
     },
+
+    sessionDisplayName(session: SessionRecord): string {
+      return session.displayName?.trim() || session.toolKey;
+    },
   },
 });
 

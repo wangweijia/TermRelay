@@ -109,6 +109,7 @@ function record(): SessionRecord {
     deviceId: 'device-a',
     workspaceId: 'workspace-a',
     toolKey: 'codex',
+    displayName: 'API 调试',
     runtimeMode: 'terminal',
     status: 'running',
     stateVersion: 1,

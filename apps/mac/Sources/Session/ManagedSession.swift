@@ -4,17 +4,21 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
     let id: UUID
     let directory: URL
     let toolID: String
+    let displayName: String
     private(set) var state: SessionState
 
     init(
         id: UUID = UUID(),
         directory: URL,
         toolID: String,
+        displayName: String? = nil,
         state: SessionState = .starting
     ) {
         self.id = id
         self.directory = directory
         self.toolID = toolID
+        self.displayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? directory.lastPathComponent
         self.state = state
     }
 
@@ -24,6 +28,10 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
         }
         state = next
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 enum SessionState: String, Codable, Sendable {
@@ -48,4 +56,3 @@ enum SessionState: String, Codable, Sendable {
 enum SessionTransitionError: Error, Equatable {
     case invalid(from: SessionState, to: SessionState)
 }
-

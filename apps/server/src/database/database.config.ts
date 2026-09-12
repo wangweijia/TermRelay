@@ -6,6 +6,7 @@ import { WorkspaceEntity } from '../sessions/workspace.entity';
 import { InitialSchema1788966000000 } from './migrations/1788966000000-initial-schema';
 import { SessionRuntimeMode1789056300000 } from './migrations/1789056300000-session-runtime-mode';
 import { SessionSoftDelete1789178400000 } from './migrations/1789178400000-session-soft-delete';
+import { SessionDisplayName1789264800000 } from './migrations/1789264800000-session-display-name';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -25,6 +26,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       InitialSchema1788966000000,
       SessionRuntimeMode1789056300000,
       SessionSoftDelete1789178400000,
+      SessionDisplayName1789264800000,
     ],
     entities: [DeviceEntity, WorkspaceEntity, SessionEntity, SessionEventEntity],
   };

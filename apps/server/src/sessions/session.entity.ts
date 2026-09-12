@@ -22,6 +22,9 @@ export class SessionEntity {
   @Column({ name: 'tool_key', type: 'varchar', length: 64 })
   toolKey!: string;
 
+  @Column({ name: 'display_name', type: 'varchar', length: 128, nullable: true })
+  displayName!: string | null;
+
   @Column({
     name: 'runtime_mode',
     type: 'enum',

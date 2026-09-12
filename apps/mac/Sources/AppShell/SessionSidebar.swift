@@ -103,7 +103,7 @@ private struct SessionSidebarRow: View {
         } else {
             SessionSidebarRowContent(
                 session: session,
-                title: session.directory.lastPathComponent,
+                title: session.displayName,
                 state: session.state
             )
         }
@@ -117,7 +117,7 @@ private struct ActiveSessionSidebarRow: View {
     var body: some View {
         SessionSidebarRowContent(
             session: session,
-            title: activeSession.title,
+            title: session.displayName,
             state: activeSession.state
         )
     }

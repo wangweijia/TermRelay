@@ -133,6 +133,7 @@ test('routes registered workspace and session events to the session service', as
     contextualEnvelope('device-a', 'session-a', 0, 'session.started', {
       workspaceId: 'workspace-a',
       toolKey: 'codex',
+      displayName: '后端服务',
       runtimeMode: 'terminal',
       startedAt: new Date().toISOString(),
     }),

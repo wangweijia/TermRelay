@@ -13,6 +13,7 @@ export interface SessionRecord {
   deviceId: string;
   workspaceId: string;
   toolKey: string;
+  displayName: string | null;
   runtimeMode: SessionEntity['runtimeMode'];
   status: SessionStatus;
   stateVersion: number;
@@ -94,6 +95,7 @@ export class SessionRepository {
         deviceId,
         workspaceId: payload.workspaceId,
         toolKey: payload.toolKey,
+        displayName: payload.displayName ?? null,
         runtimeMode: payload.runtimeMode,
         status: 'running',
         stateVersion: '0',
@@ -322,6 +324,7 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     deviceId: session.deviceId,
     workspaceId: session.workspaceId,
     toolKey: session.toolKey,
+    displayName: session.displayName,
     runtimeMode: session.runtimeMode,
     status: session.status,
     stateVersion: Number(session.stateVersion),

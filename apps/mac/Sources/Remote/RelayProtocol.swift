@@ -39,6 +39,7 @@ struct RelayWorkspace: Encodable, Sendable {
 struct RelaySessionStarted: Encodable, Sendable {
     let workspaceId: String
     let toolKey: String
+    let displayName: String
     let runtimeMode = "terminal"
     let startedAt: String
 }

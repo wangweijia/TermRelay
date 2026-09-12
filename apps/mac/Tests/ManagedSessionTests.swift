@@ -18,4 +18,17 @@ final class ManagedSessionTests: XCTestCase {
         )
         XCTAssertThrowsError(try session.transition(to: .running))
     }
+
+    func testUsesCustomNameAndFallsBackToDirectoryName() {
+        let directory = URL(fileURLWithPath: "/tmp/project")
+        XCTAssertEqual(
+            ManagedSession(directory: directory, toolID: "codex", displayName: "  API 调试  ")
+                .displayName,
+            "API 调试"
+        )
+        XCTAssertEqual(
+            ManagedSession(directory: directory, toolID: "shell", displayName: "  ").displayName,
+            "project"
+        )
+    }
 }

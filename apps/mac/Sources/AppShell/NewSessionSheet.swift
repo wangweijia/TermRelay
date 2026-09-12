@@ -11,7 +11,7 @@ struct NewSessionSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("创建新会话")
                         .font(.title2.weight(.semibold))
-                    Text("选择工作目录和要运行的终端工具。")
+                    Text("命名会话，然后选择工作目录和要运行的终端工具。")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -24,6 +24,25 @@ struct NewSessionSheet: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭")
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                Text("会话名称")
+                    .font(.headline)
+                TextField(
+                    "会话名称",
+                    text: $appModel.sessionName,
+                    prompt: Text(appModel.suggestedSessionName)
+                )
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: appModel.sessionName) { _, value in
+                    if value.count > 128 {
+                        appModel.sessionName = String(value.prefix(128))
+                    }
+                }
+                Text("留空将使用“\(appModel.suggestedSessionName)”。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 9) {

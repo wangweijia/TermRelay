@@ -43,7 +43,7 @@ struct ContentView: View {
             }
         } message: {
             if let sessionPendingClose {
-                Text("关闭“\(sessionPendingClose.directory.lastPathComponent)”将终止其中正在运行的终端进程。")
+                Text("关闭“\(sessionPendingClose.displayName)”将终止其中正在运行的终端进程。")
             }
         }
         .onAppear {
@@ -60,7 +60,10 @@ struct ContentView: View {
     @ViewBuilder
     private var sessionDetail: some View {
         if let session = selectedTerminalSession {
-            ActiveSessionView(session: session)
+            ActiveSessionView(
+                session: session,
+                displayName: selectedSession?.displayName ?? session.title
+            )
         } else if let selectedSession {
             SessionSummaryView(session: selectedSession) {
                 isPresentingNewSession = true
@@ -101,10 +104,11 @@ struct ContentView: View {
 private struct ActiveSessionView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalTerminalSession
+    let displayName: String
 
     var body: some View {
         VStack(spacing: 0) {
-            SessionToolbar(session: session)
+            SessionToolbar(session: session, displayName: displayName)
 
             LocalTerminalPane(session: session)
                 .padding(14)
@@ -116,11 +120,12 @@ private struct ActiveSessionView: View {
 private struct SessionToolbar: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalTerminalSession
+    let displayName: String
 
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
+                Text(displayName)
                     .font(.headline)
                     .lineLimit(1)
                 Text(session.currentDirectory)
@@ -202,7 +207,7 @@ private struct SessionSummaryView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(session.directory.lastPathComponent, systemImage: "rectangle.stack")
+            Label(session.displayName, systemImage: "rectangle.stack")
         } description: {
             Text("已选择该会话。当前多终端运行时正在独立开发，接入后将在这里切换对应终端。")
         } actions: {
