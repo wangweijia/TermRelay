@@ -119,6 +119,19 @@ test('routes validated terminal commands through the command relay', async () =>
   assert.deepEqual(commands.routed, [commandId]);
 });
 
+test('sends WebSocket ping frames to connected browsers', () => {
+  const gateway = new BrowserGateway(
+    new BrowserProtocolValidator(),
+    new FakeSessionsService() as unknown as SessionsService,
+  );
+  const socket = new FakeSocket();
+  gateway.handleConnection(socket.asWebSocket());
+
+  (gateway as unknown as { pingBrowsers(): void }).pingBrowsers();
+
+  assert.equal(socket.pings, 1);
+});
+
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
@@ -215,6 +228,11 @@ interface SentMessage {
 class FakeSocket {
   readonly messages: SentMessage[] = [];
   readonly closed: Array<{ code: number; reason: string }> = [];
+  pings = 0;
+
+  ping(): void {
+    this.pings += 1;
+  }
 
   send(data: string): void {
     this.messages.push(JSON.parse(data) as SentMessage);

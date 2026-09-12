@@ -50,5 +50,6 @@ swift run TermRelay
 - Server S3 已实现工作区/会话注册、terminal/structured runtime 边界、终端输出连续 seq 校验与幂等落库，以及 Session/Event 只读 API。
 - Server S4 已实现 Browser Session 订阅、无丢包历史接续与实时广播。
 - S5 已接入真实 Mac `URLSessionWebSocketTask` Client、自动重连、注册/心跳、工作区/Session 同步、终端输出上传和 16 MiB 离线输出缓冲。
+- Web 已通过 Cloudflare Access 与现有 Jetson Tunnel 发布到 `https://termrelay.wqyhomes.com`；Mac App 继续使用局域网 WebSocket。
 - Web xterm.js 已支持远程输入、resize、Ctrl-C 和停止；Server 校验 Session 归属后转发，Mac 返回带幂等 `commandId` 的 ACK。
-- 事件级确认与完整断线补传、命令持久化、Cloudflare Access、应用签名和生产分发尚未完成。
+- 事件级确认与完整断线补传、命令持久化和终端事件物理清理尚未完成；个人使用版本不计划正式签名或公证。

@@ -54,7 +54,12 @@ export class BrowserGateway
     'WEB_MAX_REPLAY_EVENTS',
     10_000,
   );
+  private readonly pingIntervalMs = readPositiveInteger(
+    'WEB_SOCKET_PING_INTERVAL_MS',
+    25_000,
+  );
   private unsubscribeEvents?: () => void;
+  private pingTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly validator: BrowserProtocolValidator,
@@ -66,11 +71,15 @@ export class BrowserGateway
     this.unsubscribeEvents = this.sessions.subscribe((notification) => {
       this.broadcast(notification);
     });
+    this.pingTimer = setInterval(() => this.pingBrowsers(), this.pingIntervalMs);
+    this.pingTimer.unref();
   }
 
   onModuleDestroy(): void {
     this.unsubscribeEvents?.();
     this.unsubscribeEvents = undefined;
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = undefined;
   }
 
   handleConnection(client: WebSocket): void {
@@ -80,6 +89,16 @@ export class BrowserGateway
 
   handleDisconnect(client: WebSocket): void {
     this.browsers.delete(client);
+  }
+
+  private pingBrowsers(): void {
+    for (const client of this.browsers.keys()) {
+      try {
+        client.ping();
+      } catch {
+        this.browsers.delete(client);
+      }
+    }
   }
 
   @SubscribeMessage('message')
