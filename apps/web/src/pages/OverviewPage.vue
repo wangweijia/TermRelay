@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TerminalView from '../components/TerminalView.vue';
+import StructuredAgentView from '../components/StructuredAgentView.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -147,7 +148,7 @@ onBeforeUnmount(() => {
             <span>seq {{ relay.selectedSession.stateVersion }}</span>
             <span>{{ relay.selectedSessionInteractive ? '可交互' : '不可操作' }}</span>
           </div>
-          <div class="terminal-actions">
+          <div v-if="relay.selectedSession.runtimeMode === 'terminal'" class="terminal-actions">
             <button
               type="button"
               :disabled="!relay.selectedSessionInteractive"
@@ -164,16 +165,25 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="relay.loadingHistory" class="terminal-placeholder">正在加载终端历史…</div>
+        <div v-if="relay.loadingHistory" class="terminal-placeholder">正在加载会话历史…</div>
         <TerminalView
-          v-else-if="relay.selectedSession"
+          v-else-if="relay.selectedSession?.runtimeMode === 'terminal'"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
           @input="relay.sendTerminalInput"
           @resize="relay.resizeTerminal"
         />
-        <div v-else class="terminal-placeholder">选择一个会话查看终端输出</div>
+        <StructuredAgentView
+          v-else-if="relay.selectedSession?.runtimeMode === 'structured'"
+          :key="relay.selectedSession.id"
+          :events="relay.selectedEvents"
+          :interactive="relay.selectedSessionInteractive"
+          @start-turn="relay.startToolTurn"
+          @interrupt="relay.interruptToolTurn"
+          @resolve-approval="relay.resolveApproval"
+        />
+        <div v-else class="terminal-placeholder">选择一个会话查看内容</div>
         <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>
       </section>
     </section>

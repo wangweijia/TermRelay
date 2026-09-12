@@ -204,6 +204,24 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 }
 .terminal-view .xterm { height: 100%; }
 .terminal-view .xterm-viewport { scrollbar-color: #344454 #0c1117; }
+.agent-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.agent-timeline { flex: 1; height: clamp(380px, calc(100vh - 370px), 560px); overflow: auto; padding: 18px; }
+.agent-event { margin-bottom: 12px; padding: 12px 14px; border: 1px solid #26323e; border-radius: 8px; background: #10171e; }
+.agent-event > small { color: #708091; font: 10px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
+.agent-event p { margin-top: 7px; color: #c4ced8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-event pre { margin: 8px 0 0; padding: 10px; overflow: auto; border-radius: 6px; color: #dce7f0; background: #080c10; white-space: pre-wrap; }
+.agent-event[data-kind="assistant.delta"] { border-left: 3px solid #72e0a5; }
+.agent-event[data-kind="reasoning.delta"] { border-left: 3px solid #6aa7e8; opacity: .88; }
+.agent-event[data-kind="error"] { border-color: #6c3438; }
+.approval-card { display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid #765a25; border-radius: 7px; background: #211c12; }
+.approval-card[data-risk="high"], .approval-card[data-risk="critical"] { border-color: #914048; background: #251719; }
+.approval-actions, .agent-composer > div { display: flex; justify-content: flex-end; gap: 8px; }
+.approval-actions button, .agent-composer button { padding: 7px 11px; border: 1px solid #3b4856; border-radius: 6px; color: #c8d2dc; background: #18212b; cursor: pointer; }
+.approval-actions button.approve, .agent-composer button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
+.approval-actions button:disabled, .agent-composer button:disabled { opacity: .45; cursor: not-allowed; }
+.agent-composer { display: grid; gap: 10px; padding: 14px 18px 20px; border-top: 1px solid #27313d; background: #0d1218; }
+.agent-composer textarea { width: 100%; resize: vertical; padding: 11px; border: 1px solid #344251; border-radius: 7px; color: #e2eaf1; background: #121a22; font: 13px/1.5 inherit; }
+.agent-composer textarea:focus { outline: 1px solid #72e0a5; border-color: #72e0a5; }
 .command-status { position: absolute; right: 16px; bottom: 7px; z-index: 2; color: #718096; font: 10px/1.2 ui-monospace, monospace; pointer-events: none; }
 
 .modal-backdrop {

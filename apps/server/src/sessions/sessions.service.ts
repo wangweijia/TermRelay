@@ -3,6 +3,7 @@ import type {
   SessionEndedPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
+  ToolEventPayload,
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
 import { DevicesService } from '../devices/devices.service';
@@ -150,6 +151,19 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         seq,
         payload,
       );
+      this.publishAccepted(deviceId, sessionId, result);
+      return mapSessionWrite(result);
+    });
+  }
+
+  appendToolEvent(
+    deviceId: string,
+    sessionId: string,
+    seq: number,
+    payload: ToolEventPayload,
+  ): Promise<ClientEventResult> {
+    return this.serialize(deviceId, async () => {
+      const result = await this.sessions.appendToolEvent(deviceId, sessionId, seq, payload);
       this.publishAccepted(deviceId, sessionId, result);
       return mapSessionWrite(result);
     });

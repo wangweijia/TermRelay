@@ -153,12 +153,19 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
                   envelope.sessionId!,
                   message.envelope.payload,
                 )
-            : await this.sessions.appendTerminalOutput(
+            : message.type === 'terminal.output'
+              ? await this.sessions.appendTerminalOutput(
                 envelope.deviceId,
                 envelope.sessionId!,
                 envelope.seq!,
                 message.envelope.payload,
-              );
+              )
+              : await this.sessions.appendToolEvent(
+                  envelope.deviceId,
+                  envelope.sessionId!,
+                  envelope.seq!,
+                  message.envelope.payload,
+                );
 
       if (result.status === 'error') {
         this.sendProtocolError(

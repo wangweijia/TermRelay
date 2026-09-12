@@ -170,7 +170,9 @@ starting → running → stopping → finished
 
 ### 阶段 3：管理页面联动
 
-Mac 与管理页面的实时终端和远程输入已经完成；结构化消息、工具事件和审批尚未接入跨端 Contract。
+Mac 与管理页面的实时终端已完成。结构化 Agent 最小纵向闭环也已接通：Mac 可创建
+Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并执行“仅允许一次/拒绝”审批。
+尚缺 Server event ACK、Mac 磁盘 Journal 和断线窗口的无歧义补传。
 
 ### 结构化 Agent 当前进度
 
@@ -180,6 +182,8 @@ Mac 与管理页面的实时终端和远程输入已经完成；结构化消息�
 - `codex-cli 0.153.4` 的真实 `initialize` 与 ephemeral `thread/start` 已通过，无模型调用。
 - 已映射助手/reasoning/plan 增量、命令、文件变化、审批、turn completion 和 error。
 - 审批仅提供单次允许和拒绝；停止、未知请求和关联不匹配均不会自动批准。
+- `LocalStructuredAgentSession` 已接入 App 会话列表与本地 UI，Terminal/Structured runtime 可并存。
+- `tool.event`、`tool.turn.start`、`tool.turn.interrupt`、`tool.approval.resolve` 已接入 RemoteClient。
 
 ### 阶段 4：发布与加固
 

@@ -40,8 +40,21 @@ struct RelaySessionStarted: Encodable, Sendable {
     let workspaceId: String
     let toolKey: String
     let displayName: String
-    let runtimeMode = "terminal"
+    let runtimeMode: String
     let startedAt: String
+}
+
+struct RelayToolEvent: Encodable, Sendable {
+    let kind: String
+    let occurredAt: String
+    let correlation: RelayToolCorrelation
+    let data: [String: JSONValue]
+}
+
+struct RelayToolCorrelation: Encodable, Sendable {
+    let turnId: String?
+    let itemId: String?
+    let approvalId: String?
 }
 
 struct RelaySessionEnded: Encodable, Sendable {
@@ -124,18 +137,25 @@ enum RemoteTerminalCommand: Sendable {
     case resize(commandId: UUID, sessionId: UUID, columns: Int, rows: Int)
     case interrupt(commandId: UUID, sessionId: UUID)
     case stop(commandId: UUID, sessionId: UUID)
+    case startTurn(commandId: UUID, sessionId: UUID, text: String)
+    case interruptTurn(commandId: UUID, sessionId: UUID)
+    case resolveApproval(commandId: UUID, sessionId: UUID, approvalId: String, turnId: String, decision: ApprovalDecision)
 
     var commandId: UUID {
         switch self {
         case .input(let id, _, _), .resize(let id, _, _, _),
-             .interrupt(let id, _), .stop(let id, _): id
+             .interrupt(let id, _), .stop(let id, _),
+             .startTurn(let id, _, _), .interruptTurn(let id, _),
+             .resolveApproval(let id, _, _, _, _): id
         }
     }
 
     var sessionId: UUID {
         switch self {
         case .input(_, let id, _), .resize(_, let id, _, _),
-             .interrupt(_, let id), .stop(_, let id): id
+             .interrupt(_, let id), .stop(_, let id),
+             .startTurn(_, let id, _), .interruptTurn(_, let id),
+             .resolveApproval(_, let id, _, _, _): id
         }
     }
 }

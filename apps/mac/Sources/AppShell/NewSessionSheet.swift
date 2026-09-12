@@ -11,7 +11,7 @@ struct NewSessionSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("创建新会话")
                         .font(.title2.weight(.semibold))
-                    Text("命名会话，然后选择工作目录和要运行的终端工具。")
+                    Text("命名会话，然后选择终端或结构化 Agent 模式。")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -64,6 +64,22 @@ struct NewSessionSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 9) {
+                Text("运行模式")
+                    .font(.headline)
+                Picker("运行模式", selection: $appModel.selectedRuntimeMode) {
+                    Text("终端").tag(SessionRuntimeMode.terminal)
+                    Text("结构化 Agent").tag(SessionRuntimeMode.structured)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                Text(appModel.selectedRuntimeMode == .structured
+                     ? "通过 Codex App Server 获取结构化事件，并支持远程审批。"
+                     : "启动独立 PTY，可在本机和 Web 中直接操作。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
                 Text("终端工具")
                     .font(.headline)
                 Picker("终端工具", selection: $appModel.selectedTool) {
@@ -74,6 +90,10 @@ struct NewSessionSheet: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
+                .disabled(appModel.selectedRuntimeMode == .structured)
+                .onChange(of: appModel.selectedRuntimeMode) { _, mode in
+                    if mode == .structured { appModel.selectedTool = .codex }
+                }
 
                 Label(
                     appModel.selectedToolAvailability.detail,
@@ -102,7 +122,8 @@ struct NewSessionSheet: View {
                     if appModel.errorMessage == nil { dismiss() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!appModel.selectedToolAvailability.isAvailable)
+                .disabled(!appModel.selectedToolAvailability.isAvailable
+                          || (appModel.selectedRuntimeMode == .structured && appModel.selectedTool != .codex))
             }
         }
         .padding(24)

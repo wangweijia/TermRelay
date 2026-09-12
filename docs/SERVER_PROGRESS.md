@@ -182,20 +182,20 @@ Server S4 read-only terminal relay probe passed.
 | `sessions` | 已接入 terminal/structured runtime、状态与版本持久化 |
 | `commands` | 已实现内存路由、ACK 与超时；数据库持久化尚未接入 |
 | `events` | 已接入 `session.started` 和 `terminal.output` 有序持久化；`session.ended` 更新会话状态 |
-| `approvals` | 尚未接入 |
+| `approvals` | 已接入结构化审批请求/决策投影；身份列由 migration 0005 增加 |
 | `audit_logs` | 尚未接入 |
 
 生产运行账户保持最小业务权限，migration 管理权限与应用运行权限分离。凭据只通过环境变量注入，不进入仓库。
 
 ## 协议状态
 
-当前 17 个 JSON Schema 均已通过检查；包含 Terminal Input/Resize、Session Interrupt/Stop 和 Session Ended。
+当前 21 个 JSON Schema 均已通过检查；新增归一化 `tool.event`、Turn 控制和审批决策协议。
 
 运行时校验已经接入 Server。仍有一项协议技术债：TypeScript/Swift 的 `generated` 类型目前是手写引导版本，尚未建立从 JSON Schema 自动生成并在 CI 检查无漂移的正式流程。
 
 ## 自动化与实测
 
-当前 Server 自动化测试共 47 项，Mac 自动化测试共 6 项，覆盖：
+当前 Server 自动化测试共 49 项，Mac 自动化测试共 16 项（其中 2 项真实 Codex 探针默认跳过），覆盖：
 
 - AppModule 无数据库模式依赖注入与生命周期。
 - 协议 Envelope/payload 校验。
@@ -209,6 +209,7 @@ Server S4 read-only terminal relay probe passed.
 - Session Controller 列表、详情、事件分页、404 与非法参数。
 - Browser 协议校验、Session 归属验证、历史快照、初始化缓冲、实时推送、去重和取消订阅。
 - 双向命令 Schema、Session/Device 路由、离线拒绝、Mac ACK 归属与幂等命令解码。
+- 结构化 Agent event 校验、runtime 隔离、Turn/审批命令校验及 Web 历史/实时呈现。
 
 已实测：
 
@@ -243,9 +244,9 @@ Server S4 read-only terminal relay probe passed.
 
 ## 下一步优先级
 
-1. 结构化 Agent 优先：固定 Codex Schema fixture，完成最小 `tool.*` Contract、Server/Web 审批闭环。
-2. 为 terminal/structured event 增加 Server ACK 和 Mac 已确认 seq Journal，实现统一断线补传。
-3. 持久化 command 和 approval 状态，并补测超时、重复 ACK 与串会话防护。
+1. 为 terminal/structured event 增加 Server ACK 和 Mac 已确认 seq Journal，实现统一断线补传。
+2. 完成 command 数据库持久化，并补测超时、重连、重复 ACK 与串会话防护。
+3. 为审批增加过期任务、身份来源和审计日志，随后做真实 Mac/Web 人工闭环验收。
 4. 在真实 Mac GUI 上完成人工验收，包括结构化 turn、中断、允许和拒绝审批。
 5. 实现 Event 物理过期清理、每会话配额和慢浏览器背压保护。
 6. 建立 JSON Schema 到 TypeScript/Swift 的正式代码生成。
@@ -275,7 +276,7 @@ pnpm --filter @termrelay/server probe:s5
 明确未完成：
 
 - terminal output 的 Server ACK、已确认 seq Journal 与完整断线补传。
-- command 数据库持久化、Session 结束/失败状态同步。
+- command 数据库持久化、审批过期任务和审计日志。
 - 真实 Mac GUI 与浏览器的人工实机验收。
 - 正式 Schema 代码生成。
 - Cloudflare Access、设备认证、限流和生产网络加固。

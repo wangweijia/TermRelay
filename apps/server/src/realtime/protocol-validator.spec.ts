@@ -92,6 +92,36 @@ test('accepts workspace, session, and terminal events with required context', ()
   assert.equal(ended.ok, true);
 });
 
+test('accepts normalized structured Agent events and rejects incomplete approvals', () => {
+  const validator = new ProtocolValidator();
+  const accepted = validator.validate({
+    ...envelope('tool.event', {
+      kind: 'approval.requested',
+      occurredAt: new Date().toISOString(),
+      correlation: { turnId: 'turn-1', approvalId: 'approval-1' },
+      data: {
+        approvalId: 'approval-1', turnId: 'turn-1', kind: 'command', risk: 'high',
+        title: 'Run command', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+    }),
+    sessionId: 'session-a',
+    seq: 1,
+  });
+  assert.equal(accepted.ok, true);
+
+  const rejected = validator.validate({
+    ...envelope('tool.event', {
+      kind: 'approval.requested',
+      occurredAt: new Date().toISOString(),
+      correlation: {},
+      data: { approvalId: 'approval-1' },
+    }),
+    sessionId: 'session-a',
+    seq: 1,
+  });
+  assert.equal(rejected.ok, false);
+});
+
 test('rejects session events without context and malformed base64', () => {
   const missingContext = validator.validate(
     envelope('session.started', {

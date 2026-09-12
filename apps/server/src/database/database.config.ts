@@ -7,6 +7,7 @@ import { InitialSchema1788966000000 } from './migrations/1788966000000-initial-s
 import { SessionRuntimeMode1789056300000 } from './migrations/1789056300000-session-runtime-mode';
 import { SessionSoftDelete1789178400000 } from './migrations/1789178400000-session-soft-delete';
 import { SessionDisplayName1789264800000 } from './migrations/1789264800000-session-display-name';
+import { StructuredApprovalIdentity1789351200000 } from './migrations/1789351200000-structured-approval-identity';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -27,6 +28,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       SessionRuntimeMode1789056300000,
       SessionSoftDelete1789178400000,
       SessionDisplayName1789264800000,
+      StructuredApprovalIdentity1789351200000,
     ],
     entities: [DeviceEntity, WorkspaceEntity, SessionEntity, SessionEventEntity],
   };

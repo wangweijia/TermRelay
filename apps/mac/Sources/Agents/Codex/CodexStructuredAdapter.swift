@@ -222,6 +222,16 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 id: pending.rpcID,
                 result: .object(["decision": .string(decision)])
             )
+            emit(
+                .approvalResolved(
+                    approvalID: resolution.approvalID,
+                    turnID: resolution.turnID,
+                    decision: resolution.decision
+                ),
+                turnID: resolution.turnID,
+                itemID: pending.itemID,
+                approvalID: resolution.approvalID
+            )
         }
     }
 

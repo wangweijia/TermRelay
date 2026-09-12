@@ -9,7 +9,10 @@ export type RemoteCommandType =
   | 'terminal.input'
   | 'terminal.resize'
   | 'session.interrupt'
-  | 'session.stop';
+  | 'session.stop'
+  | 'tool.turn.start'
+  | 'tool.turn.interrupt'
+  | 'tool.approval.resolve';
 
 export interface CommandRouteError {
   ok: false;
@@ -65,6 +68,17 @@ export class CommandRelayService implements OnModuleDestroy {
         ok: false,
         code: 'conflict',
         detail: `Session is ${session.status} and cannot accept commands.`,
+      };
+    }
+    const sessionRuntime = session.runtimeMode ?? 'terminal';
+    const commandRuntime = envelope.type === 'session.stop'
+      ? undefined
+      : envelope.type.startsWith('tool.') ? 'structured' : 'terminal';
+    if (commandRuntime && commandRuntime !== sessionRuntime) {
+      return {
+        ok: false,
+        code: 'conflict',
+        detail: `${envelope.type} is not valid for a ${sessionRuntime} session.`,
       };
     }
     if (this.pending.has(commandId)) {

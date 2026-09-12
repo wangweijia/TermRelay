@@ -64,4 +64,47 @@ final class RemoteClientTests: XCTestCase {
         let result = await client.decodeCommand(malformed)
         XCTAssertNil(result)
     }
+
+    func testDecodesStructuredTurnAndApprovalCommands() async {
+        let client = RemoteClient(
+            deviceID: UUID(),
+            stateHandler: { _, _ in },
+            commandHandler: { _ in .completed }
+        )
+        let sessionID = UUID()
+        func envelope(type: String, payload: JSONValue) -> IncomingRelayEnvelope {
+            IncomingRelayEnvelope(
+                type: type,
+                protocolVersion: "1",
+                messageId: UUID(),
+                deviceId: "device",
+                sessionId: sessionID.uuidString,
+                commandId: UUID(),
+                payload: payload
+            )
+        }
+        let turn = await client.decodeCommand(envelope(
+            type: "tool.turn.start",
+            payload: .object(["text": .string("fix the tests")])
+        ))
+        guard case .startTurn(_, _, let text) = turn else {
+            return XCTFail("Expected structured turn command")
+        }
+        XCTAssertEqual(text, "fix the tests")
+
+        let approval = await client.decodeCommand(envelope(
+            type: "tool.approval.resolve",
+            payload: .object([
+                "approvalId": .string("approval-1"),
+                "turnId": .string("turn-1"),
+                "decision": .string("allowOnce"),
+            ])
+        ))
+        guard case .resolveApproval(_, _, let approvalID, let turnID, let decision) = approval else {
+            return XCTFail("Expected approval command")
+        }
+        XCTAssertEqual(approvalID, "approval-1")
+        XCTAssertEqual(turnID, "turn-1")
+        XCTAssertEqual(decision, .allowOnce)
+    }
 }

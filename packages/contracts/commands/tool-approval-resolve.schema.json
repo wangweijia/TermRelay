@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-approval-resolve.schema.json",
+  "title": "tool.approval.resolve payload",
+  "type": "object",
+  "required": ["approvalId", "turnId", "decision"],
+  "properties": {
+    "approvalId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "turnId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "decision": { "enum": ["allowOnce", "deny"] }
+  },
+  "additionalProperties": false
+}

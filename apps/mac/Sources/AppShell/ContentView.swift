@@ -11,6 +11,7 @@ struct ContentView: View {
             SessionSidebar(
                 sessions: visibleSessions,
                 terminalSessions: appModel.terminalSessions,
+                structuredSessions: appModel.structuredSessions,
                 selection: $selectedSessionID,
                 addAction: { isPresentingNewSession = true },
                 closeAction: requestCloseSession
@@ -22,7 +23,7 @@ struct ContentView: View {
         .frame(minWidth: 900, minHeight: 600)
         .sheet(isPresented: $isPresentingNewSession) {
             NewSessionSheet {
-                if let sessionID = appModel.startLocalTerminal() {
+                if let sessionID = appModel.startLocalSession() {
                     selectedSessionID = sessionID
                 }
             }
@@ -64,6 +65,11 @@ struct ContentView: View {
                 session: session,
                 displayName: selectedSession?.displayName ?? session.title
             )
+        } else if let session = selectedStructuredSession {
+            StructuredAgentSessionView(
+                session: session,
+                displayName: selectedSession?.displayName ?? "Codex Agent"
+            )
         } else if let selectedSession {
             SessionSummaryView(session: selectedSession) {
                 isPresentingNewSession = true
@@ -85,6 +91,11 @@ struct ContentView: View {
         return visibleSessions.first { $0.id == selectedSessionID }
     }
 
+    private var selectedStructuredSession: LocalStructuredAgentSession? {
+        guard let selectedSessionID else { return nil }
+        return appModel.structuredSession(id: selectedSessionID)
+    }
+
     private var visibleSessions: [ManagedSession] {
         appModel.sessions
     }
@@ -98,6 +109,117 @@ struct ContentView: View {
         sessionPendingClose = nil
         appModel.closeLocalTerminal(id: sessionID)
         selectedSessionID = visibleSessions.last?.id
+    }
+}
+
+private struct StructuredAgentSessionView: View {
+    @ObservedObject var session: LocalStructuredAgentSession
+    let displayName: String
+    @State private var prompt = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName).font(.headline)
+                    Text(session.directory.path).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(session.state.rawValue).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Button("中断") { Task { _ = await session.interrupt() } }
+                    .disabled(session.state != .running && session.state != .awaitingApproval)
+            }
+            .padding()
+            .background(.bar)
+
+            List(session.events, id: \.sequence) { event in
+                StructuredEventRow(event: event, session: session)
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                TextEditor(text: $prompt)
+                    .font(.body)
+                    .frame(minHeight: 56, maxHeight: 110)
+                    .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+                Button("发送") {
+                    let text = prompt
+                    prompt = ""
+                    Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.state != .ready)
+            }
+            .padding()
+        }
+    }
+}
+
+private struct StructuredEventRow: View {
+    let event: ToolEvent
+    @ObservedObject var session: LocalStructuredAgentSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.caption.monospaced()).foregroundStyle(.secondary)
+            Text(detail).textSelection(.enabled)
+            if case .approvalRequested(let approval) = event.payload {
+                HStack {
+                    Button("拒绝", role: .destructive) {
+                        resolve(approval, .deny)
+                    }
+                    Button("仅允许一次") {
+                        resolve(approval, .allowOnce)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func resolve(_ approval: ApprovalRequest, _ decision: ApprovalDecision) {
+        Task {
+            _ = await session.resolveApproval(
+                approvalID: approval.approvalID,
+                turnID: approval.turnID,
+                decision: decision
+            )
+        }
+    }
+
+    private var label: String {
+        switch event.payload {
+        case .sessionStarted: "Provider ready"
+        case .turnStarted: "Turn started"
+        case .assistantTextDelta: "Assistant"
+        case .reasoningDelta: "Reasoning"
+        case .commandStarted: "Command"
+        case .commandOutput: "Command output"
+        case .commandCompleted: "Command completed"
+        case .fileChanged: "File changed"
+        case .approvalRequested: "Approval required"
+        case .approvalResolved: "Approval resolved"
+        case .planUpdated: "Plan"
+        case .turnCompleted: "Turn completed"
+        case .warning: "Warning"
+        case .failed: "Error"
+        }
+    }
+
+    private var detail: String {
+        switch event.payload {
+        case .sessionStarted(let reference): reference.opaqueID
+        case .turnStarted(let id): id
+        case .assistantTextDelta(let text), .reasoningDelta(let text), .planUpdated(let text): text
+        case .commandStarted(_, let command): command
+        case .commandOutput(_, let text): text
+        case .commandCompleted(_, let code): "exit \(code.map(String.init) ?? "—")"
+        case .fileChanged(_, let summary): summary
+        case .approvalRequested(let approval): approval.detail ?? approval.title
+        case .approvalResolved(_, _, let decision): decision.rawValue
+        case .turnCompleted(_, let status): status.rawValue
+        case .warning(_, let message), .failed(_, let message): message
+        }
     }
 }
 

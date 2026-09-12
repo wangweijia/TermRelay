@@ -3,8 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type {
   SessionStartedPayload,
   TerminalOutputPayload,
+  ToolEventPayload,
 } from '@termrelay/contracts';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
 import { SessionEventEntity } from './session-event.entity';
 import { SessionEntity, type SessionStatus } from './session.entity';
 
@@ -129,6 +130,26 @@ export class SessionRepository {
     seq: number,
     payload: TerminalOutputPayload,
   ): Promise<SessionWriteResult> {
+    return this.appendEvent(deviceId, sessionId, seq, 'terminal.output', payload, 'terminal');
+  }
+
+  async appendToolEvent(
+    deviceId: string,
+    sessionId: string,
+    seq: number,
+    payload: ToolEventPayload,
+  ): Promise<SessionWriteResult> {
+    return this.appendEvent(deviceId, sessionId, seq, 'tool.event', payload, 'structured');
+  }
+
+  private async appendEvent(
+    deviceId: string,
+    sessionId: string,
+    seq: number,
+    type: 'terminal.output' | 'tool.event',
+    payload: TerminalOutputPayload | ToolEventPayload,
+    runtimeMode: SessionEntity['runtimeMode'],
+  ): Promise<SessionWriteResult> {
     if (!this.dataSource) {
       return { status: 'conflict', detail: 'Database is disabled.' };
     }
@@ -143,11 +164,14 @@ export class SessionRepository {
       if (!session || session.deviceId !== deviceId) {
         return { status: 'unknown_session' };
       }
+      if (session.runtimeMode !== runtimeMode) {
+        return { status: 'conflict', detail: `${type} is not valid for a ${session.runtimeMode} session.` };
+      }
 
       const events = manager.getRepository(SessionEventEntity);
       const existing = await events.findOneBy({ sessionId, seq: String(seq) });
       if (existing) {
-        return sameEvent(existing, 'terminal.output', payload)
+        return sameEvent(existing, type, payload)
           ? { status: 'duplicate' }
           : {
               status: 'conflict',
@@ -167,11 +191,14 @@ export class SessionRepository {
       await events.insert({
         sessionId,
         seq: String(seq),
-        type: 'terminal.output',
+        type,
         payload: { ...payload },
         createdAt,
         expiresAt: new Date(Date.now() + this.terminalEventTtlMs),
       });
+      if (type === 'tool.event') {
+        await persistApprovalProjection(manager, sessionId, payload as ToolEventPayload);
+      }
       await sessions.update(
         { id: sessionId },
         { stateVersion: String(seq) },
@@ -180,7 +207,7 @@ export class SessionRepository {
         status: 'accepted',
         event: {
           seq,
-          type: 'terminal.output',
+          type,
           payload: { ...payload },
           createdAt: createdAt.toISOString(),
         },
@@ -298,6 +325,42 @@ export class SessionRepository {
   private get repository(): Repository<SessionEntity> {
     if (!this.dataSource) throw new Error('Database is disabled.');
     return this.dataSource.getRepository(SessionEntity);
+  }
+}
+
+async function persistApprovalProjection(
+  manager: EntityManager,
+  sessionId: string,
+  payload: ToolEventPayload,
+): Promise<void> {
+  const data = payload.data;
+  if (payload.kind === 'approval.requested') {
+    await manager.query(
+      `INSERT INTO approvals
+        (session_id, approval_key, turn_ref, item_ref, risk, request, decision, expires_at)
+       VALUES (?, ?, ?, ?, ?, CAST(? AS JSON), 'pending', ?)
+       ON DUPLICATE KEY UPDATE
+        turn_ref = VALUES(turn_ref), item_ref = VALUES(item_ref), risk = VALUES(risk),
+        request = VALUES(request), expires_at = VALUES(expires_at)`,
+      [
+        sessionId,
+        data.approvalId,
+        data.turnId,
+        data.itemId ?? null,
+        data.risk,
+        JSON.stringify(data),
+        new Date(String(data.expiresAt)),
+      ],
+    );
+    return;
+  }
+  if (payload.kind === 'approval.resolved') {
+    const decision = data.decision === 'allowOnce' ? 'approved' : 'denied';
+    await manager.query(
+      `UPDATE approvals SET decision = ?, decided_by = 'remote-user', decided_at = CURRENT_TIMESTAMP(3)
+       WHERE session_id = ? AND approval_key = ? AND decision = 'pending'`,
+      [decision, sessionId, data.approvalId],
+    );
   }
 }
 

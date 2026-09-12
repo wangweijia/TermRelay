@@ -230,7 +230,7 @@ export const useRelayStore = defineStore('relay', {
     },
 
     sendCommand(
-      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop',
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve',
       payload: Record<string, unknown>,
     ): void {
       const session = this.selectedSession;
@@ -283,6 +283,20 @@ export const useRelayStore = defineStore('relay', {
       this.sendCommand('session.stop', {});
     },
 
+    startToolTurn(text: string): void {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      this.sendCommand('tool.turn.start', { text: trimmed });
+    },
+
+    interruptToolTurn(): void {
+      this.sendCommand('tool.turn.interrupt', {});
+    },
+
+    resolveApproval(approvalId: string, turnId: string, decision: 'allowOnce' | 'deny'): void {
+      this.sendCommand('tool.approval.resolve', { approvalId, turnId, decision });
+    },
+
     handleSocketMessage(message: MessageEvent): void {
       try {
         const wire = JSON.parse(String(message.data)) as {
@@ -321,7 +335,7 @@ export const useRelayStore = defineStore('relay', {
           return;
         }
         if (
-          envelope.type === 'terminal.output' &&
+          (envelope.type === 'terminal.output' || envelope.type === 'tool.event') &&
           envelope.sessionId &&
           envelope.seq !== undefined
         ) {

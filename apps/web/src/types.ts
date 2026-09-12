@@ -27,6 +27,19 @@ export interface SessionEventRecord {
   createdAt: string;
 }
 
+export type ToolEventKind =
+  | 'turn.started' | 'assistant.delta' | 'reasoning.delta'
+  | 'command.started' | 'command.output' | 'command.completed'
+  | 'file.changed' | 'approval.requested' | 'approval.resolved'
+  | 'plan.updated' | 'turn.completed' | 'warning' | 'error';
+
+export interface ToolEventPayload {
+  kind: ToolEventKind;
+  occurredAt: string;
+  correlation: { turnId?: string; itemId?: string; approvalId?: string };
+  data: Record<string, unknown>;
+}
+
 export interface WireEnvelope<TPayload = Record<string, unknown>> {
   type: string;
   protocolVersion: '1';

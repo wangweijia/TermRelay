@@ -1,10 +1,13 @@
 # TermRelay 结构化智能体适配层设计
 
-> 文档状态：设计基线
+> 文档状态：设计基线；最小 Codex 跨端闭环已实现
 >
 > 版本：1.0
 >
 > 日期：2026-09-10
+
+> 实现更新：2026-09-12。Mac、Server、Web 已通过中立 `tool.*` Contract 接通 Turn、
+> 结构化事件和单次审批；恢复性 ACK/Journal 与完整审计加固仍在后续阶段。
 >
 > 关联决策：[ADR-001：Codex 结构化集成使用官方 App Server Protocol](ADR-001-CODEX-APP-SERVER.md)
 

@@ -135,6 +135,7 @@ enum ToolEventPayload: Sendable, Equatable {
     case commandCompleted(commandID: String, exitCode: Int?)
     case fileChanged(itemID: String, summary: String)
     case approvalRequested(ApprovalRequest)
+    case approvalResolved(approvalID: String, turnID: String, decision: ApprovalDecision)
     case planUpdated(text: String)
     case turnCompleted(turnID: String, status: TurnCompletionStatus)
     case warning(code: String, message: String)

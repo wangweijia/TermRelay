@@ -84,6 +84,7 @@ actor RemoteClient {
         workspaceId: String,
         toolKey: String,
         displayName: String,
+        runtimeMode: SessionRuntimeMode = .terminal,
         startedAt: String
     ) async {
         let sent = await send(
@@ -94,6 +95,7 @@ actor RemoteClient {
                 workspaceId: workspaceId,
                 toolKey: toolKey,
                 displayName: displayName,
+                runtimeMode: runtimeMode.rawValue,
                 startedAt: startedAt
             )
         )
@@ -131,6 +133,17 @@ actor RemoteClient {
             payload: RelayTerminalOutput(data: batch.bytes.base64EncodedString())
         )
         if !sent { enqueue(batch) }
+    }
+
+    func publishToolEvent(_ event: ToolEvent) async {
+        // Sequence zero is represented by session.started in the relay protocol.
+        guard event.sequence > 0 else { return }
+        _ = await send(
+            type: "tool.event",
+            sessionId: event.sessionID.uuidString.lowercased(),
+            seq: event.sequence,
+            payload: RelayToolEvent(event)
+        )
     }
 
     private func connectionLoop(generation expectedGeneration: Int) async {
@@ -236,6 +249,24 @@ actor RemoteClient {
             return .resize(commandId: commandId, sessionId: sessionId, columns: columns, rows: rows)
         case "session.interrupt": return .interrupt(commandId: commandId, sessionId: sessionId)
         case "session.stop": return .stop(commandId: commandId, sessionId: sessionId)
+        case "tool.turn.start":
+            guard let text = payload["text"]?.string,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return .startTurn(commandId: commandId, sessionId: sessionId, text: text)
+        case "tool.turn.interrupt":
+            return .interruptTurn(commandId: commandId, sessionId: sessionId)
+        case "tool.approval.resolve":
+            guard let approvalId = payload["approvalId"]?.string,
+                  let turnId = payload["turnId"]?.string,
+                  let rawDecision = payload["decision"]?.string,
+                  let decision = ApprovalDecision(rawValue: rawDecision) else { return nil }
+            return .resolveApproval(
+                commandId: commandId,
+                sessionId: sessionId,
+                approvalId: approvalId,
+                turnId: turnId,
+                decision: decision
+            )
         default: return nil
         }
     }
@@ -382,5 +413,59 @@ actor RemoteClient {
         )
         let bytes = try JSONEncoder().encode(RelaySocketPacket(data: envelope))
         try await socket.send(.data(bytes))
+    }
+}
+
+private extension RelayToolEvent {
+    init(_ event: ToolEvent) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        occurredAt = formatter.string(from: event.occurredAt)
+        correlation = RelayToolCorrelation(
+            turnId: event.correlation.turnID,
+            itemId: event.correlation.itemID,
+            approvalId: event.correlation.approvalID
+        )
+        switch event.payload {
+        case .sessionStarted(let reference):
+            kind = "warning"
+            data = ["code": .string("provider_session_started"), "message": .string(reference.opaqueID)]
+        case .turnStarted(let turnID):
+            kind = "turn.started"; data = ["turnId": .string(turnID)]
+        case .assistantTextDelta(let text):
+            kind = "assistant.delta"; data = ["text": .string(text)]
+        case .reasoningDelta(let text):
+            kind = "reasoning.delta"; data = ["text": .string(text)]
+        case .commandStarted(let commandID, let command):
+            kind = "command.started"; data = ["commandId": .string(commandID), "command": .string(command)]
+        case .commandOutput(let commandID, let text):
+            kind = "command.output"; data = ["commandId": .string(commandID), "text": .string(text)]
+        case .commandCompleted(let commandID, let exitCode):
+            kind = "command.completed"
+            data = ["commandId": .string(commandID), "exitCode": exitCode.map { .number(Double($0)) } ?? .null]
+        case .fileChanged(let itemID, let summary):
+            kind = "file.changed"; data = ["itemId": .string(itemID), "summary": .string(summary)]
+        case .approvalRequested(let request):
+            kind = "approval.requested"
+            var value: [String: JSONValue] = [
+                "approvalId": .string(request.approvalID), "turnId": .string(request.turnID),
+                "kind": .string(request.kind), "risk": .string(request.risk.rawValue),
+                "title": .string(request.title), "expiresAt": .string(formatter.string(from: request.expiresAt)),
+            ]
+            if let itemID = request.itemID { value["itemId"] = .string(itemID) }
+            if let detail = request.detail { value["detail"] = .string(detail) }
+            data = value
+        case .approvalResolved(let approvalID, let turnID, let decision):
+            kind = "approval.resolved"
+            data = ["approvalId": .string(approvalID), "turnId": .string(turnID), "decision": .string(decision.rawValue)]
+        case .planUpdated(let text):
+            kind = "plan.updated"; data = ["text": .string(text)]
+        case .turnCompleted(let turnID, let status):
+            kind = "turn.completed"; data = ["turnId": .string(turnID), "status": .string(status.rawValue)]
+        case .warning(let code, let message):
+            kind = "warning"; data = ["code": .string(code), "message": .string(message)]
+        case .failed(let code, let message):
+            kind = "error"; data = ["code": .string(code), "message": .string(message)]
+        }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct SessionSidebar: View {
     let sessions: [ManagedSession]
     let terminalSessions: [UUID: LocalTerminalSession]
+    let structuredSessions: [UUID: LocalStructuredAgentSession]
     @Binding var selection: UUID?
     let addAction: () -> Void
     let closeAction: (UUID) -> Void
@@ -42,6 +43,7 @@ struct SessionSidebar: View {
                     ClosableSessionSidebarRow(
                         session: session,
                         terminalSession: terminalSessions[session.id],
+                        structuredSession: structuredSessions[session.id],
                         isSelected: selection == session.id,
                         closeAction: { closeAction(session.id) }
                     )
@@ -68,13 +70,18 @@ struct SessionSidebar: View {
 private struct ClosableSessionSidebarRow: View {
     let session: ManagedSession
     let terminalSession: LocalTerminalSession?
+    let structuredSession: LocalStructuredAgentSession?
     let isSelected: Bool
     let closeAction: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 4) {
-            SessionSidebarRow(session: session, terminalSession: terminalSession)
+            SessionSidebarRow(
+                session: session,
+                terminalSession: terminalSession,
+                structuredSession: structuredSession
+            )
             Spacer(minLength: 4)
             Button(action: closeAction) {
                 Image(systemName: "xmark")
@@ -95,11 +102,14 @@ private struct ClosableSessionSidebarRow: View {
 private struct SessionSidebarRow: View {
     let session: ManagedSession
     let terminalSession: LocalTerminalSession?
+    let structuredSession: LocalStructuredAgentSession?
 
     @ViewBuilder
     var body: some View {
         if let terminalSession {
             ActiveSessionSidebarRow(session: session, activeSession: terminalSession)
+        } else if let structuredSession {
+            StructuredSessionSidebarRow(session: session, activeSession: structuredSession)
         } else {
             SessionSidebarRowContent(
                 session: session,
@@ -107,6 +117,19 @@ private struct SessionSidebarRow: View {
                 state: session.state
             )
         }
+    }
+}
+
+private struct StructuredSessionSidebarRow: View {
+    let session: ManagedSession
+    @ObservedObject var activeSession: LocalStructuredAgentSession
+
+    var body: some View {
+        SessionSidebarRowContent(
+            session: session,
+            title: session.displayName,
+            state: activeSession.state.sidebarState
+        )
     }
 }
 
@@ -120,6 +143,17 @@ private struct ActiveSessionSidebarRow: View {
             title: session.displayName,
             state: activeSession.state
         )
+    }
+}
+
+private extension StructuredSessionState {
+    var sidebarState: SessionState {
+        switch self {
+        case .created, .starting: .starting
+        case .ready, .running, .awaitingApproval, .interrupting, .degraded: .running
+        case .finished: .finished
+        case .failed: .failed
+        }
     }
 }
 

@@ -7,6 +7,7 @@ import type {
   SessionEndedPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
+  ToolEventPayload,
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
 import {
@@ -17,6 +18,7 @@ import {
   sessionEndedSchema,
   sessionStartedSchema,
   terminalOutputSchema,
+  toolEventSchema,
   workspaceRegisteredSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
@@ -31,6 +33,7 @@ export type ValidClientMessage =
   | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
   | { type: 'session.ended'; envelope: Envelope<SessionEndedPayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
+  | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
 
 export type ProtocolValidationResult =
@@ -61,6 +64,7 @@ export class ProtocolValidator {
       ['session.started', ajv.compile(sessionStartedSchema)],
       ['session.ended', ajv.compile(sessionEndedSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
+      ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
     ]);
   }
@@ -121,12 +125,16 @@ export class ProtocolValidator {
           'session.ended requires sessionId and must not include seq.',
         );
       }
-    } else if (envelope.type === 'terminal.output') {
+    } else if (envelope.type === 'terminal.output' || envelope.type === 'tool.event') {
       if (!envelope.sessionId || envelope.seq === undefined) {
         return invalidContext(
           envelope,
-          'terminal.output requires sessionId and seq.',
+          `${envelope.type} requires sessionId and seq.`,
         );
+      }
+      if (envelope.type === 'tool.event') {
+        const semanticError = validateToolEvent(envelope.payload as unknown as ToolEventPayload);
+        if (semanticError) return invalidContext(envelope, semanticError);
       }
     } else if (envelope.type === 'command.ack') {
       const payload = envelope.payload as unknown as CommandAckPayload;
@@ -204,6 +212,14 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
           envelope: envelope as unknown as Envelope<TerminalOutputPayload>,
         },
       };
+    case 'tool.event':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<ToolEventPayload>,
+        },
+      };
     case 'command.ack':
       return {
         ok: true,
@@ -214,6 +230,40 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
       };
     default:
       throw new Error(`Payload validator missing for ${envelope.type}.`);
+  }
+}
+
+function validateToolEvent(payload: ToolEventPayload): string | undefined {
+  const data = payload.data;
+  const stringField = (name: string, required = true): boolean =>
+    typeof data[name] === 'string' && (!required || (data[name] as string).length > 0);
+  switch (payload.kind) {
+    case 'turn.started':
+      return stringField('turnId') ? undefined : 'tool.event turn.started requires data.turnId.';
+    case 'assistant.delta': case 'reasoning.delta': case 'plan.updated':
+      return stringField('text', false) ? undefined : `tool.event ${payload.kind} requires data.text.`;
+    case 'command.output':
+      return stringField('commandId') && stringField('text', false)
+        ? undefined : 'tool.event command.output requires commandId and text.';
+    case 'command.started':
+      return stringField('commandId') && stringField('command') ? undefined : 'tool.event command.started requires commandId and command.';
+    case 'command.completed':
+      return stringField('commandId') ? undefined : 'tool.event command.completed requires commandId.';
+    case 'file.changed':
+      return stringField('itemId') && stringField('summary') ? undefined : 'tool.event file.changed requires itemId and summary.';
+    case 'approval.requested':
+      return stringField('approvalId') && stringField('turnId') && stringField('kind')
+        && ['low', 'medium', 'high', 'critical'].includes(String(data.risk))
+        && stringField('title') && stringField('expiresAt') && !Number.isNaN(Date.parse(String(data.expiresAt)))
+        ? undefined : 'tool.event approval.requested is incomplete.';
+    case 'approval.resolved':
+      return stringField('approvalId') && stringField('turnId') && ['allowOnce', 'deny'].includes(String(data.decision))
+        ? undefined : 'tool.event approval.resolved is incomplete.';
+    case 'turn.completed':
+      return stringField('turnId') && ['completed', 'interrupted', 'failed'].includes(String(data.status))
+        ? undefined : 'tool.event turn.completed requires turnId and a valid status.';
+    case 'warning': case 'error':
+      return stringField('code') && stringField('message') ? undefined : `tool.event ${payload.kind} requires code and message.`;
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-turn-interrupt.schema.json",
+  "title": "tool.turn.interrupt payload",
+  "type": "object",
+  "maxProperties": 0,
+  "additionalProperties": false
+}

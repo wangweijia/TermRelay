@@ -170,6 +170,33 @@ export interface TerminalOutputPayload {
   data: string;
 }
 
+export interface ToolEventCorrelation {
+  turnId?: string;
+  itemId?: string;
+  approvalId?: string;
+}
+
+export type ToolEventKind =
+  | 'turn.started' | 'assistant.delta' | 'reasoning.delta'
+  | 'command.started' | 'command.output' | 'command.completed'
+  | 'file.changed' | 'approval.requested' | 'approval.resolved' | 'plan.updated'
+  | 'turn.completed' | 'warning' | 'error';
+
+export interface ToolEventPayload {
+  kind: ToolEventKind;
+  occurredAt: string;
+  correlation: ToolEventCorrelation;
+  data: Record<string, unknown>;
+}
+
+export interface ToolTurnStartPayload { text: string; }
+export type ToolTurnInterruptPayload = Record<string, never>;
+export interface ToolApprovalResolvePayload {
+  approvalId: string;
+  turnId: string;
+  decision: 'allowOnce' | 'deny';
+}
+
 export interface TerminalInputPayload {
   encoding: 'base64';
   data: string;
@@ -205,6 +232,49 @@ export const terminalOutputSchema = {
       pattern:
         '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
     },
+  },
+  additionalProperties: false,
+} as const;
+
+export const toolEventSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/tool-event.schema.json',
+  title: 'tool.event payload',
+  type: 'object',
+  required: ['kind', 'occurredAt', 'correlation', 'data'],
+  properties: {
+    kind: { enum: ['turn.started', 'assistant.delta', 'reasoning.delta', 'command.started', 'command.output', 'command.completed', 'file.changed', 'approval.requested', 'approval.resolved', 'plan.updated', 'turn.completed', 'warning', 'error'] },
+    occurredAt: { type: 'string', format: 'date-time' },
+    correlation: {
+      type: 'object',
+      properties: {
+        turnId: { type: 'string', minLength: 1, maxLength: 256 },
+        itemId: { type: 'string', minLength: 1, maxLength: 256 },
+        approvalId: { type: 'string', minLength: 1, maxLength: 256 },
+      },
+      additionalProperties: false,
+    },
+    data: { type: 'object' },
+  },
+  additionalProperties: false,
+} as const;
+
+export const toolTurnStartSchema = {
+  type: 'object', required: ['text'],
+  properties: { text: { type: 'string', minLength: 1, maxLength: 65_536 } },
+  additionalProperties: false,
+} as const;
+
+export const toolTurnInterruptSchema = {
+  type: 'object', maxProperties: 0, additionalProperties: false,
+} as const;
+
+export const toolApprovalResolveSchema = {
+  type: 'object', required: ['approvalId', 'turnId', 'decision'],
+  properties: {
+    approvalId: { type: 'string', minLength: 1, maxLength: 256 },
+    turnId: { type: 'string', minLength: 1, maxLength: 256 },
+    decision: { enum: ['allowOnce', 'deny'] },
   },
   additionalProperties: false,
 } as const;

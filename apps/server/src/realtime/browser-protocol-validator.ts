@@ -7,6 +7,9 @@ import type {
   SessionStopPayload,
   TerminalInputPayload,
   TerminalResizePayload,
+  ToolApprovalResolvePayload,
+  ToolTurnInterruptPayload,
+  ToolTurnStartPayload,
 } from '@termrelay/contracts';
 import {
   envelopeSchema,
@@ -16,6 +19,9 @@ import {
   sessionUnsubscribeSchema,
   terminalInputSchema,
   terminalResizeSchema,
+  toolApprovalResolveSchema,
+  toolTurnInterruptSchema,
+  toolTurnStartSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
@@ -28,7 +34,10 @@ export type ValidBrowserMessage =
   | { type: 'terminal.input'; envelope: Envelope<TerminalInputPayload> }
   | { type: 'terminal.resize'; envelope: Envelope<TerminalResizePayload> }
   | { type: 'session.interrupt'; envelope: Envelope<SessionInterruptPayload> }
-  | { type: 'session.stop'; envelope: Envelope<SessionStopPayload> };
+  | { type: 'session.stop'; envelope: Envelope<SessionStopPayload> }
+  | { type: 'tool.turn.start'; envelope: Envelope<ToolTurnStartPayload> }
+  | { type: 'tool.turn.interrupt'; envelope: Envelope<ToolTurnInterruptPayload> }
+  | { type: 'tool.approval.resolve'; envelope: Envelope<ToolApprovalResolvePayload> };
 
 export type BrowserValidationResult =
   | { ok: true; message: ValidBrowserMessage }
@@ -58,6 +67,9 @@ export class BrowserProtocolValidator {
       ['terminal.resize', ajv.compile(terminalResizeSchema)],
       ['session.interrupt', ajv.compile(sessionInterruptSchema)],
       ['session.stop', ajv.compile(sessionStopSchema)],
+      ['tool.turn.start', ajv.compile(toolTurnStartSchema)],
+      ['tool.turn.interrupt', ajv.compile(toolTurnInterruptSchema)],
+      ['tool.approval.resolve', ajv.compile(toolApprovalResolveSchema)],
     ]);
   }
 
@@ -117,6 +129,12 @@ function asValidBrowserMessage(envelope: Envelope): BrowserValidationResult {
       return valid(envelope.type, envelope as unknown as Envelope<SessionInterruptPayload>);
     case 'session.stop':
       return valid(envelope.type, envelope as unknown as Envelope<SessionStopPayload>);
+    case 'tool.turn.start':
+      return valid(envelope.type, envelope as unknown as Envelope<ToolTurnStartPayload>);
+    case 'tool.turn.interrupt':
+      return valid(envelope.type, envelope as unknown as Envelope<ToolTurnInterruptPayload>);
+    case 'tool.approval.resolve':
+      return valid(envelope.type, envelope as unknown as Envelope<ToolApprovalResolvePayload>);
     default:
       throw new Error(`Payload validator missing for ${envelope.type}.`);
   }
@@ -130,7 +148,7 @@ function valid<TType extends ValidBrowserMessage['type']>(
 }
 
 function isRemoteCommand(type: string): boolean {
-  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop'].includes(type);
+  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop', 'tool.turn.start', 'tool.turn.interrupt', 'tool.approval.resolve'].includes(type);
 }
 
 function invalid(

@@ -31,6 +31,17 @@ test('accepts terminal commands only with command context', () => {
   }
 });
 
+test('accepts structured turn and approval commands with command context', () => {
+  const validator = new BrowserProtocolValidator();
+  for (const [type, payload] of [
+    ['tool.turn.start', { text: 'Inspect the failing tests' }],
+    ['tool.turn.interrupt', {}],
+    ['tool.approval.resolve', { approvalId: 'approval-1', turnId: 'turn-1', decision: 'allowOnce' }],
+  ] as const) {
+    assert.equal(validator.validate({ ...envelope(type, payload), commandId: randomUUID() }).ok, true);
+  }
+});
+
 test('rejects missing sessions, invalid payloads, and unknown messages', () => {
   const missingSession = envelope('session.subscribe', {});
   const { sessionId: _sessionId, ...withoutSession } = missingSession;
