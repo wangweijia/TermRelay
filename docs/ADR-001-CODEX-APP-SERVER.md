@@ -200,11 +200,12 @@ tool.approval.resolve
 
 ## 版本与兼容策略
 
-App Server 仍在快速迭代，必须把协议版本兼容作为功能的一部分：
+App Server 仍在快速迭代。Codex CLI 的发布频率高于 TermRelay App，因此版本号只用于诊断，
+不能作为启动白名单：
 
 1. 记录并展示实际 `codex --version`。
-2. 维护“最低验证版本 / 当前验证版本 / 不兼容版本”支持矩阵。
-3. 对每个正式支持的 Codex 版本执行：
+2. 不设置 CLI 版本号上限，也不因未验证的新版本阻止会话启动。
+3. 更新协议 fixture 时执行：
 
    ```bash
    codex app-server generate-json-schema --out <temporary-output>
@@ -213,8 +214,9 @@ App Server 仍在快速迭代，必须把协议版本兼容作为功能的一部
 4. 生成物只描述 Codex 本地协议，不放入 `packages/contracts` 作为跨端事实源。
 5. 默认不设置 `experimentalApi: true`；只有具体功能有测试和回退方案时才能启用。
 6. JSON-RPC Client 必须忽略未知 notification 和未知可选字段；缺少必需字段时产生可诊断错误。
-7. 依赖具体 App Server 版本的测试 fixture 必须标注 Codex 版本。
-8. 正式构建固定已验证版本范围；发现不兼容时禁用结构化模式并提示升级或回退 PTY。
+7. 依赖具体 App Server 版本的测试 fixture 必须标注生成它的 Codex 版本，但该版本不是运行时白名单。
+8. 兼容性由实际 App Server 启动、WebSocket/JSON-RPC 握手和所用方法的响应决定；失败时展示
+   可复制的完整诊断并允许用户回退终端模式。
 
 回退只允许发生在创建 thread/turn 之前。turn 已经开始后，不能静默在 PTY 中重新发送同一个
 prompt。

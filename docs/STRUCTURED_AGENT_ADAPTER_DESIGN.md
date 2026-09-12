@@ -705,7 +705,7 @@ enum AgentError: Error, Sendable {
 - [x] 完成 initialize、thread start/resume、turn start/interrupt。
 - [ ] 生成并固定当前 Codex Schema fixture。
 - [x] 映射文本、command、file change、approval、completion 和 error。
-- [x] 增加不兼容版本检测；PTY 回退提示待接入创建会话 UI。
+- [x] 记录 Provider 版本但不以版本白名单阻断启动；PTY 回退提示待接入创建会话 UI。
 
 完成条件：没有 TermRelay Server 时，Mac 测试宿主可以完成本地结构化 turn 和审批闭环。
 
@@ -781,14 +781,14 @@ StructuredAgentAdapter
 任一 Structured Agent Adapter 标记为“已接入”前必须满足：
 
 - [ ] detect 不产生工作区副作用。
-- [ ] capability 来自实际探测和受支持版本，不是硬编码 UI 假设。
+- [ ] capability 来自实际协议探测，不是 CLI 版本号或硬编码 UI 假设。
 - [ ] Provider 原始类型没有泄漏到 SessionCore、Server 或 Web。
 - [ ] turn、interrupt、completion 和 failure 生命周期完整。
 - [ ] 审批缺失或异常时默认拒绝。
 - [ ] 子进程/连接能可靠关闭，不遗留孤儿任务。
 - [ ] 网络阻塞不会阻塞 Provider stdout 或本地 UI。
 - [ ] 不会在恢复或回退时重复执行 prompt。
-- [ ] 不支持版本提供明确诊断和安全回退。
+- [ ] 协议协商失败时提供明确诊断和安全回退，不因未知 CLI 版本提前阻断。
 - [ ] 单元、fixture、集成和端到端测试均记录实际 Provider 版本。
 - [ ] 文档、能力表、Schema 和 `docs/MAC_PROGRESS.md` 已同步更新。
 

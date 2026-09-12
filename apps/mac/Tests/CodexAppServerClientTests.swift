@@ -184,12 +184,6 @@ final class CodexAppServerClientTests: XCTestCase {
         await coordinator.stop()
     }
 
-    func testVersionSupportIsExplicit() {
-        XCTAssertTrue(CodexVersionSupport.evaluate("codex-cli 0.153.4").supported)
-        XCTAssertTrue(CodexVersionSupport.evaluate("codex-cli 0.153.9").supported)
-        XCTAssertFalse(CodexVersionSupport.evaluate("codex-cli 0.154.0").supported)
-    }
-
     func testRealCodexInitializeWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["TERMRELAY_RUN_CODEX_INTEGRATION"] == "1" else {
             throw XCTSkip("Set TERMRELAY_RUN_CODEX_INTEGRATION=1 for the real local probe")

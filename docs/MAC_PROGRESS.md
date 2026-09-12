@@ -184,6 +184,7 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 - FakeAgentAdapter 已验证 turn、审批关联、事件序号和幂等停止。
 - Codex App Server stdio Process 与 JSON-RPC 请求关联、超时和反向 request 已实现。
 - `codex-cli 0.153.4` 的真实 `initialize` 与 ephemeral `thread/start` 已通过，无模型调用。
+- CLI 版本仅记录到诊断，不设严格版本白名单；兼容性由 App Server 实际握手和方法响应决定。
 - 已映射助手/reasoning/plan 增量、命令、文件变化、审批、turn completion 和 error。
 - 审批仅提供单次允许和拒绝；停止、未知请求和关联不匹配均不会自动批准。
 - `LocalStructuredAgentSession` 已接入 App 会话列表与本地 UI，Terminal/Structured runtime 可并存。

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SessionSidebar: View {
@@ -213,6 +214,7 @@ private struct SessionSidebarRowContent: View {
 
 private struct ConnectionFooter: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var isShowingErrorDetail = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -223,10 +225,24 @@ private struct ConnectionFooter: View {
                 Text("Server \(appModel.connectionState.label)")
                     .font(.caption.weight(.medium))
                 if let errorMessage = appModel.errorMessage {
-                    Text(errorMessage)
+                    Button {
+                        isShowingErrorDetail = true
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(errorMessage)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
                         .font(.caption2)
                         .foregroundStyle(.red)
-                        .lineLimit(2)
+                    }
+                    .buttonStyle(.plain)
+                    .help("点击查看并复制完整错误信息")
+                    .popover(isPresented: $isShowingErrorDetail, arrowEdge: .bottom) {
+                        ErrorDiagnosticPopover(message: errorMessage)
+                    }
                 }
             }
             Spacer()
@@ -237,5 +253,36 @@ private struct ConnectionFooter: View {
             .help("Server 设置")
         }
         .padding(12)
+    }
+}
+
+private struct ErrorDiagnosticPopover: View {
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("错误详情", systemImage: "xmark.octagon.fill")
+                    .font(.headline)
+                    .foregroundStyle(.red)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(message, forType: .string)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+            }
+
+            ScrollView {
+                Text(message)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .frame(width: 460, height: 240)
     }
 }

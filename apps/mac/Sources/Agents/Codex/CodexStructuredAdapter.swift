@@ -16,12 +16,11 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
             throw AgentError.providerUnavailable("找不到 codex 可执行程序")
         }
         let version = try readVersion(executable)
-        let support = CodexVersionSupport.evaluate(version)
         return AgentInstallation(
             executableURL: executable,
             version: version,
-            supported: support.supported,
-            unsupportedReason: support.reason
+            supported: true,
+            unsupportedReason: nil
         )
     }
 
@@ -70,27 +69,6 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
             throw AgentError.providerUnavailable("Codex 未返回版本")
         }
         return value
-    }
-}
-
-enum CodexVersionSupport {
-    static let verified = "0.153.4"
-
-    static func evaluate(_ output: String) -> (supported: Bool, reason: String?) {
-        guard let version = output.split(separator: " ").last.map(String.init) else {
-            return (false, "无法解析 Codex 版本：\(output)")
-        }
-        let pieces = version.split(separator: ".").compactMap { Int($0) }
-        guard pieces.count >= 3 else {
-            return (false, "无法解析 Codex 版本：\(output)")
-        }
-        guard pieces[0] == 0, pieces[1] == 153, pieces[2] >= 4 else {
-            return (
-                false,
-                "当前仅验证 codex-cli 0.153.4～0.153.x；检测到 \(version)，请使用终端模式。"
-            )
-        }
-        return (true, nil)
     }
 }
 
