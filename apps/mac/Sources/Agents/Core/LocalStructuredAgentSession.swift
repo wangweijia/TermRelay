@@ -8,6 +8,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     let webDisplayMode: AgentWebDisplayMode
     @Published private(set) var state: StructuredSessionState = .created
     @Published private(set) var events: [ToolEvent] = []
+    @Published private(set) var failureMessage: String?
 
     private let adapter: any StructuredAgentAdapter
     private let environment: [String: String]
@@ -67,6 +68,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             }
             await refreshState()
         } catch {
+            failureMessage = error.localizedDescription
             eventTask?.cancel()
             eventTask = nil
             await coordinator?.stop()

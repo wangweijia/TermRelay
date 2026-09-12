@@ -68,6 +68,19 @@ final class ToolProxyConfigurationTests: XCTestCase {
             "resume", "--remote", "unix:///private/tmp/termrelay-test.sock",
             "--no-alt-screen", "-C", "/private/tmp/project", "thread-a",
         ])
+        XCTAssertEqual(
+            launch.environment["PATH"]?.split(separator: ":").first.map(String.init),
+            executable.deletingLastPathComponent().path
+        )
+    }
+
+    func testExecutableSearchIncludesInstalledNVMNodeVersions() {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let paths = ExecutableLocator.searchDirectories()
+
+        if FileManager.default.fileExists(atPath: "\(home)/.nvm/versions/node") {
+            XCTAssertTrue(paths.contains { $0.hasPrefix("\(home)/.nvm/versions/node/") })
+        }
     }
 
     @MainActor

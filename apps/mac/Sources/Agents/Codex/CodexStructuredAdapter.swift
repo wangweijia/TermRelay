@@ -55,15 +55,17 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
         let output = Pipe()
         process.executableURL = executable
         process.arguments = ["--version"]
+        process.environment = TerminalEnvironment.make(executableURL: executable)
         process.standardOutput = output
         process.standardError = output
         try process.run()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw AgentError.providerUnavailable("无法读取 Codex 版本")
-        }
         let value = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard process.terminationStatus == 0 else {
+            let detail = value.isEmpty ? "退出码 \(process.terminationStatus)" : value
+            throw AgentError.providerUnavailable("无法读取 Codex 版本：\(detail)")
+        }
         guard !value.isEmpty else {
             throw AgentError.providerUnavailable("Codex 未返回版本")
         }

@@ -77,7 +77,7 @@ struct LoginShellAdapter: CLIToolAdapter {
             executableURL: shell,
             arguments: [],
             directory: directory,
-            environment: TerminalEnvironment.make(proxy: proxy),
+            environment: TerminalEnvironment.make(proxy: proxy, executableURL: shell),
             executableName: "-\(shell.lastPathComponent)"
         )
     }
@@ -127,7 +127,7 @@ struct CodexAdapter: CLIToolAdapter {
             executableURL: executable,
             arguments: [],
             directory: directory,
-            environment: TerminalEnvironment.make(proxy: proxy),
+            environment: TerminalEnvironment.make(proxy: proxy, executableURL: executable),
             executableName: nil
         )
     }
@@ -147,7 +147,7 @@ struct CodexAdapter: CLIToolAdapter {
                 "resume", "--remote", endpoint, "--no-alt-screen", "-C", directory.path, threadID,
             ],
             directory: directory,
-            environment: TerminalEnvironment.make(proxy: proxy),
+            environment: TerminalEnvironment.make(proxy: proxy, executableURL: executable),
             executableName: nil
         )
     }
@@ -169,9 +169,44 @@ enum ToolLaunchError: LocalizedError, Equatable {
 
 enum ExecutableLocator {
     static func find(named name: String) -> URL? {
-        let environmentPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for directory in searchDirectories() {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    static func searchDirectories(preferredExecutableURL: URL? = nil) -> [String] {
+        let environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let nvmRoot = URL(fileURLWithPath: home)
+            .appendingPathComponent(".nvm/versions/node", isDirectory: true)
+        let nvmPaths = (try? FileManager.default.contentsOfDirectory(
+            at: nvmRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ))?
+            .sorted {
+                $0.lastPathComponent.compare(
+                    $1.lastPathComponent,
+                    options: .numeric
+                ) == .orderedDescending
+            }
+            .map { $0.appendingPathComponent("bin", isDirectory: true).path } ?? []
+        let preferredPaths = [
+            preferredExecutableURL?.deletingLastPathComponent().path,
+            environment["NVM_BIN"],
+        ].compactMap { $0 }
+        let environmentPaths = (environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
         let fallbackPaths = [
+            "\(home)/.volta/bin",
+            "\(home)/.asdf/shims",
+            "\(home)/.local/share/mise/shims",
+            "\(home)/.bun/bin",
             "\(home)/.local/bin",
             "/opt/homebrew/bin",
             "/usr/local/bin",
@@ -180,32 +215,23 @@ enum ExecutableLocator {
             "/usr/sbin",
             "/sbin",
         ]
-        let directories = (environmentPath.split(separator: ":").map(String.init) + fallbackPaths)
-            .reduce(into: [String]()) { result, value in
-                if !value.isEmpty, !result.contains(value) { result.append(value) }
-            }
-
-        for directory in directories {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
-            }
+        let paths = preferredPaths + environmentPaths + nvmPaths + fallbackPaths
+        return paths.reduce(into: [String]()) { result, value in
+            if !value.isEmpty, !result.contains(value) { result.append(value) }
         }
-        return nil
     }
 }
 
 enum TerminalEnvironment {
-    static func make(proxy: ToolProxyConfiguration = .inherited) -> [String: String] {
+    static func make(
+        proxy: ToolProxyConfiguration = .inherited,
+        executableURL: URL? = nil
+    ) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let fallbackPaths = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-        let existingPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        environment["PATH"] = (existingPaths + fallbackPaths)
-            .reduce(into: [String]()) { result, value in
-                if !value.isEmpty, !result.contains(value) { result.append(value) }
-            }
-            .joined(separator: ":")
+        environment["PATH"] = ExecutableLocator.searchDirectories(
+            preferredExecutableURL: executableURL
+        ).joined(separator: ":")
         environment["HOME"] = environment["HOME"] ?? home
         environment["SHELL"] = environment["SHELL"] ?? "/bin/zsh"
         environment["TERM"] = "xterm-256color"

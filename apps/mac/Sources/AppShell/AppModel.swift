@@ -220,7 +220,7 @@ final class AppModel: ObservableObject {
         }
         let sessionID = UUID()
         let sessionDirectory = workingDirectory
-        let environment = TerminalEnvironment.make(proxy: proxy)
+        let environment = TerminalEnvironment.make(proxy: proxy, executableURL: executableURL)
         let host = CodexAppServerHost(
             executableURL: executableURL,
             directory: sessionDirectory,
@@ -470,6 +470,9 @@ final class AppModel: ObservableObject {
     private func handleStructuredSessionState(id: UUID, state: StructuredSessionState) {
         updateActiveSessionCount()
         guard state == .finished || state == .failed, let remoteClient else { return }
+        if state == .failed {
+            errorMessage = structuredSessions[id]?.failureMessage ?? "Codex 会话启动失败"
+        }
         if terminalSessions[id]?.state.isActive == true {
             terminalSessions[id]?.terminate()
         }
