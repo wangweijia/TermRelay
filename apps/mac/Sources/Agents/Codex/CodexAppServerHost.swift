@@ -48,6 +48,7 @@ final class CodexAppServerHost: @unchecked Sendable {
         do {
             try lock.withLock {
                 guard process == nil else { return }
+                CodexActiveRuntimeRegistry.shared.register(socketPath)
                 try FileManager.default.createDirectory(
                     at: runtimeDirectory,
                     withIntermediateDirectories: true
@@ -133,10 +134,6 @@ final class CodexAppServerHost: @unchecked Sendable {
         Task { await CodexRuntimeJanitor.shared.begin() }
     }
 
-    static func waitForStartupCleanup() async {
-        await CodexRuntimeJanitor.shared.waitUntilFinished()
-    }
-
     static func cleanupAbandonedRuntimes(
         runtimeRoot: URL = defaultRuntimeRoot,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
@@ -154,9 +151,15 @@ final class CodexAppServerHost: @unchecked Sendable {
             let metadataURL = entry.appendingPathComponent("runtime.json")
             guard let data = try? Data(contentsOf: metadataURL),
                   let metadata = try? JSONDecoder.iso8601.decode(RuntimeMetadata.self, from: data) else {
-                try? FileManager.default.removeItem(at: entry)
+                // A concurrently starting host creates its directory before
+                // writing metadata. Only remove malformed directories that
+                // are old enough to be unquestionably abandoned.
+                if isOlderThanStartupGracePeriod(entry) {
+                    try? FileManager.default.removeItem(at: entry)
+                }
                 continue
             }
+            guard !CodexActiveRuntimeRegistry.shared.contains(metadata.socketPath) else { continue }
             if processCommand(pid: metadata.pid).map({ command in
                 command.contains("codex") && command.contains("app-server")
                     && command.contains("unix://\(metadata.socketPath)")
@@ -203,6 +206,7 @@ final class CodexAppServerHost: @unchecked Sendable {
     }
 
     private func cleanupOwnedFiles() {
+        CodexActiveRuntimeRegistry.shared.unregister(socketPath)
         try? FileManager.default.removeItem(atPath: socketPath)
         try? FileManager.default.removeItem(at: runtimeDirectory)
     }
@@ -226,6 +230,7 @@ final class CodexAppServerHost: @unchecked Sendable {
             guard command.contains("codex"),
                   (command.contains("app-server") || command.contains("--remote")),
                   let socket = unixSocketArgument(in: command),
+                  !CodexActiveRuntimeRegistry.shared.contains(socket),
                   isTermRelaySocket(socket, runtimeRoot: defaultRuntimeRoot, temporaryDirectory: temporaryDirectory)
             else { continue }
             terminate(pid: pid)
@@ -239,6 +244,7 @@ final class CodexAppServerHost: @unchecked Sendable {
                 includingPropertiesForKeys: nil
             ) else { continue }
             for entry in entries where isLegacySocketName(entry.lastPathComponent) {
+                guard !CodexActiveRuntimeRegistry.shared.contains(entry.path) else { continue }
                 try? FileManager.default.removeItem(at: entry)
             }
         }
@@ -251,6 +257,12 @@ final class CodexAppServerHost: @unchecked Sendable {
     ) {
         guard isTermRelaySocket(path, runtimeRoot: runtimeRoot, temporaryDirectory: temporaryDirectory) else { return }
         try? FileManager.default.removeItem(atPath: path)
+    }
+
+    private static func isOlderThanStartupGracePeriod(_ url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        guard let date = values?.creationDate ?? values?.contentModificationDate else { return false }
+        return date < Date().addingTimeInterval(-60)
     }
 
     private static func isTermRelaySocket(
@@ -292,9 +304,12 @@ final class CodexAppServerHost: @unchecked Sendable {
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return nil }
+        // Drain concurrently with `ps`; waiting first deadlocks when its output
+        // grows beyond the pipe buffer.
+        let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return String(decoding: data, as: UTF8.self)
     }
 
     private static func processCommand(pid: Int32) -> String? {
@@ -317,6 +332,25 @@ final class CodexAppServerHost: @unchecked Sendable {
     }
 }
 
+private final class CodexActiveRuntimeRegistry: @unchecked Sendable {
+    static let shared = CodexActiveRuntimeRegistry()
+
+    private let lock = NSLock()
+    private var socketPaths = Set<String>()
+
+    func register(_ socketPath: String) {
+        lock.withLock { _ = socketPaths.insert(socketPath) }
+    }
+
+    func unregister(_ socketPath: String) {
+        lock.withLock { _ = socketPaths.remove(socketPath) }
+    }
+
+    func contains(_ socketPath: String) -> Bool {
+        lock.withLock { socketPaths.contains(socketPath) }
+    }
+}
+
 private actor CodexRuntimeJanitor {
     static let shared = CodexRuntimeJanitor()
     private var cleanupTask: Task<Void, Never>?
@@ -328,10 +362,6 @@ private actor CodexRuntimeJanitor {
         }
     }
 
-    func waitUntilFinished() async {
-        begin()
-        await cleanupTask?.value
-    }
 }
 
 private extension JSONDecoder {

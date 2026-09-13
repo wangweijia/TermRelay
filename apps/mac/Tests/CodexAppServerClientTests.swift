@@ -236,6 +236,10 @@ final class CodexAppServerClientTests: XCTestCase {
         try await transport.respondToRequest(at: 0, result: [:])
         let threadStart = try await transport.waitForSentMessage(at: 2)
         XCTAssertEqual(threadStart["method"] as? String, "thread/start")
+        XCTAssertEqual(
+            (threadStart["params"] as? [String: Any])?["sandbox"] as? String,
+            "workspace-write"
+        )
         XCTAssertFalse(transport.sentMethods.contains("thread/resume"))
         try await transport.respondToRequest(at: 2, result: ["thread": ["id": "thread-new"]])
         try await starting.value

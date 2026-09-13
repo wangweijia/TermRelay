@@ -204,8 +204,23 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 }
 .terminal-view .xterm { height: 100%; }
 .terminal-view .xterm-viewport { scrollbar-color: #344454 #0c1117; }
-.agent-view { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.agent-timeline { flex: 1; min-height: 0; overflow: auto; padding: 18px; }
+.agent-view {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  height: clamp(460px, calc(100dvh - 260px), 650px);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.agent-timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 18px;
+}
 .agent-view-approval { height: clamp(460px, calc(100vh - 260px), 650px); }
 .agent-view-full > .terminal-view { flex: 0 0 auto; width: 100%; }
 .agent-view-full > .agent-timeline {
@@ -235,8 +250,8 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .user-input-card label small { color: #8f9ca9; font-weight: 400; }
 .user-input-card input, .user-input-card select { width: 100%; padding: 8px 10px; border: 1px solid #3b4856; border-radius: 6px; color: #e2eaf1; background: #111820; }
 .user-input-card > button { justify-self: end; padding: 7px 11px; border: 1px solid #327453; border-radius: 6px; color: #a8f0c8; background: #173025; cursor: pointer; }
-.agent-composer { display: grid; gap: 10px; padding: 14px 18px 20px; border-top: 1px solid #27313d; background: #0d1218; }
-.agent-composer textarea { width: 100%; resize: vertical; padding: 11px; border: 1px solid #344251; border-radius: 7px; color: #e2eaf1; background: #121a22; font: 13px/1.5 inherit; }
+.agent-composer { display: grid; flex: 0 0 auto; gap: 10px; padding: 14px 18px 20px; border-top: 1px solid #27313d; background: #0d1218; }
+.agent-composer textarea { width: 100%; resize: none; padding: 11px; border: 1px solid #344251; border-radius: 7px; color: #e2eaf1; background: #121a22; font: 13px/1.5 inherit; }
 .agent-composer textarea:focus { outline: 1px solid #72e0a5; border-color: #72e0a5; }
 .command-status { position: absolute; right: 16px; bottom: 7px; z-index: 2; color: #718096; font: 10px/1.2 ui-monospace, monospace; pointer-events: none; }
 
@@ -295,6 +310,6 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   .relay-layout { grid-template-columns: 1fr; }
   .session-panel { border-right: 0; border-bottom: 1px solid #27313d; }
   .session-list { max-height: 240px; }
-  .terminal-view { height: clamp(400px, 60vh, 520px); }
+  .terminal-view, .agent-view { height: clamp(400px, 60dvh, 520px); }
   .terminal-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
 }

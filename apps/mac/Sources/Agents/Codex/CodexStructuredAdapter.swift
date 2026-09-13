@@ -34,7 +34,6 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
             )
         }
         if let host {
-            await CodexAppServerHost.waitForStartupCleanup()
             try await host.start()
         }
         let transport: any CodexAppServerTransport = if let host {
@@ -155,7 +154,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
             "cwd": .string(workspaceURL.path),
             "approvalPolicy": .string("on-request"),
             "approvalsReviewer": .string("user"),
-            "sandbox": .string("workspaceWrite"),
+            "sandbox": .string("workspace-write"),
             "ephemeral": .bool(true),
             "serviceName": .string("termrelay"),
         ]))
