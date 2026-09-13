@@ -92,7 +92,7 @@ function envelope(
 ): Envelope<Record<string, unknown>> {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId: 'device-a',
     sessionId: 'session-a',
@@ -107,7 +107,7 @@ class FakeSessions {
 
   async findById(id: string) {
     return id === 'session-a'
-      ? { id, deviceId: 'device-a', status: 'running' }
+      ? { id, deviceId: 'device-a', status: 'running', runtimeMode: 'pty' }
       : undefined;
   }
 

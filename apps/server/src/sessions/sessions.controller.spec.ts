@@ -110,7 +110,7 @@ function record(): SessionRecord {
     workspaceId: 'workspace-a',
     toolKey: 'codex',
     displayName: 'API 调试',
-    runtimeMode: 'terminal',
+    runtimeMode: 'pty',
     status: 'running',
     stateVersion: 1,
     startedAt: timestamp,

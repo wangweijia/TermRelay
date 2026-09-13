@@ -7,7 +7,7 @@
   "properties": {
     "approvalId": { "type": "string", "minLength": 1, "maxLength": 256 },
     "turnId": { "type": "string", "minLength": 1, "maxLength": 256 },
-    "decision": { "enum": ["allowOnce", "deny"] }
+    "decision": { "enum": ["allowOnce", "allowSession", "allowPolicy", "deny", "cancel"] }
   },
   "additionalProperties": false
 }

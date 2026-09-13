@@ -12,7 +12,8 @@ export type RemoteCommandType =
   | 'session.stop'
   | 'tool.turn.start'
   | 'tool.turn.interrupt'
-  | 'tool.approval.resolve';
+  | 'tool.approval.resolve'
+  | 'tool.user-input.resolve';
 
 export interface CommandRouteError {
   ok: false;
@@ -70,10 +71,10 @@ export class CommandRelayService implements OnModuleDestroy {
         detail: `Session is ${session.status} and cannot accept commands.`,
       };
     }
-    const sessionRuntime = session.runtimeMode ?? 'terminal';
+    const sessionRuntime = session.runtimeMode;
     const commandRuntime = envelope.type === 'session.stop'
       ? undefined
-      : envelope.type.startsWith('tool.') ? 'structured' : 'terminal';
+      : envelope.type.startsWith('tool.') ? 'acp' : 'pty';
     if (commandRuntime && commandRuntime !== sessionRuntime) {
       return {
         ok: false,
@@ -163,7 +164,7 @@ export class CommandRelayService implements OnModuleDestroy {
     };
     send(pending.browser, {
       type: 'command.ack',
-      protocolVersion: '1',
+      protocolVersion: '2',
       messageId: randomUUID(),
       deviceId: pending.deviceId,
       sessionId: pending.sessionId,

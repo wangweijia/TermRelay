@@ -17,7 +17,7 @@ mac.send(wire(base('workspace.registered', {
   workspaceId, displayName: 'S5 Workspace', available: true, remoteStartAllowed: false,
 })));
 mac.send(wire({ ...base('session.started', {
-  workspaceId, toolKey: 'shell', runtimeMode: 'terminal', startedAt: new Date().toISOString(),
+  workspaceId, toolKey: 'shell', runtimeMode: 'pty', startedAt: new Date().toISOString(),
 }), sessionId, seq: 0 }));
 
 const browser = await connect(browserEndpoint);
@@ -50,7 +50,7 @@ console.log('Server S5 bidirectional command relay probe passed.');
 
 function base(type, payload) {
   return {
-    type, protocolVersion: '1', messageId: randomUUID(), deviceId,
+    type, protocolVersion: '2', messageId: randomUUID(), deviceId,
     sentAt: new Date().toISOString(), payload,
   };
 }

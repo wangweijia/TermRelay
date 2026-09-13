@@ -38,7 +38,7 @@ socket.send(
     sessionEnvelope('session.started', 0, {
       workspaceId,
       toolKey: 'codex',
-      runtimeMode: 'terminal',
+      runtimeMode: 'pty',
       startedAt: new Date().toISOString(),
     }),
   ),
@@ -65,7 +65,7 @@ socket.send(wireMessage(sessionEnvelope('terminal.output', 3, third)));
 const session = await pollForSessionVersion(3);
 assert(session.deviceId === deviceId, 'expected session device');
 assert(session.workspaceId === workspaceId, 'expected session workspace');
-assert(session.runtimeMode === 'terminal', 'expected terminal runtime mode');
+assert(session.runtimeMode === 'pty', 'expected PTY runtime mode');
 assert(session.status === 'running', 'expected running session');
 
 const eventsResponse = await fetch(
@@ -121,7 +121,7 @@ async function pollForSessionVersion(expectedVersion) {
 function envelope(type, payload) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId,
     sentAt: new Date().toISOString(),

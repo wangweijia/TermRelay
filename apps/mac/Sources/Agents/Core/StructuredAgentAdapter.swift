@@ -16,7 +16,6 @@ protocol StructuredAgentRuntime: Actor {
 
     func start() async throws
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference
-    func resumeSession(_ reference: AgentSessionReference) async throws
     func send(_ action: ToolAction) async throws
     func stop() async
 }

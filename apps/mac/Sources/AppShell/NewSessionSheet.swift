@@ -11,7 +11,7 @@ struct NewSessionSheet: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("创建新会话")
                         .font(.title2.weight(.semibold))
-                    Text("命名会话，然后选择终端或结构化 Agent 模式。")
+                    Text("命名会话，选择工具以及交互模式。")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -89,17 +89,17 @@ struct NewSessionSheet: View {
 
             if appModel.selectedTool == .codex {
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("Web 展示")
+                    Text("Codex 交互模式")
                         .font(.headline)
-                    Picker("Web 展示", selection: $appModel.agentWebDisplayMode) {
-                        Text("仅审批").tag(AgentWebDisplayMode.approval)
-                        Text("终端（完整流）").tag(AgentWebDisplayMode.full)
+                    Picker("Codex 交互模式", selection: $appModel.codexInteractionMode) {
+                        Text("PTY").tag(CodexInteractionMode.pty)
+                        Text("ACP").tag(CodexInteractionMode.acp)
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    Text(appModel.agentWebDisplayMode == .approval
-                         ? "Web 只显示审批、警告和错误；Mac 仍显示完整过程。"
-                         : "Web 显示完整 Agent 活动流，并始终独立显示审批。")
+                    Text(appModel.codexInteractionMode == .pty
+                         ? "运行普通 Codex 终端界面，Mac 和 Web 都使用终端渲染。"
+                         : "通过 Codex App Server 运行；Mac 和 Web 都使用原生 Agent 界面，不启动终端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -7,7 +7,7 @@
 > 日期：2026-09-10
 
 > 实现更新：2026-09-12。Mac、Server、Web 已通过中立 `tool.*` Contract 接通 Turn、
-> 结构化事件和单次审批；恢复性 ACK/Journal 与完整审计加固仍在后续阶段。
+> 结构化事件和单次审批；可靠 ACK/Journal 补传与完整审计加固仍在后续阶段。
 >
 > 关联决策：[ADR-001：Codex 结构化集成使用官方 App Server Protocol](ADR-001-CODEX-APP-SERVER.md)
 
@@ -21,7 +21,7 @@ Mac 会话核心、TermRelay Server 或 Web UI 依赖某个厂商的原始协议
 1. 保持 PTY 是所有 CLI 的通用基础能力。
 2. 把 Codex、ACP 或其他厂商协议封装在独立 Adapter 内。
 3. 用最小、稳定的内部模型表达跨智能体共有能力。
-4. 用 capability 描述差异，不假设所有智能体都支持审批、恢复或 steering。
+4. 用 capability 描述差异，不假设所有智能体都支持审批或 steering。
 5. Mac 端完成厂商协议到 TermRelay Contract 的转换。
 6. 新增智能体时不修改终端渲染、Server 连接和会话核心。
 7. 协议失败时保持 PTY 可用，并避免重复执行用户请求。
@@ -205,7 +205,6 @@ protocol StructuredAgentRuntime: AnyObject, Sendable {
 
     func start() async throws
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference
-    func resumeSession(_ reference: AgentSessionReference) async throws
     func send(_ action: ToolAction) async throws
     func stop() async
 }
@@ -251,8 +250,6 @@ struct AgentCapabilities: OptionSet, Codable, Sendable {
     static let approvals           = Self(rawValue: 1 << 5)
     static let plans               = Self(rawValue: 1 << 6)
     static let steering            = Self(rawValue: 1 << 7)
-    static let sessionResume       = Self(rawValue: 1 << 8)
-    static let sessionFork         = Self(rawValue: 1 << 9)
     static let images              = Self(rawValue: 1 << 10)
     static let subagents           = Self(rawValue: 1 << 11)
     static let usage               = Self(rawValue: 1 << 12)
@@ -273,7 +270,6 @@ Capability 来源：
 | --- | --- |
 | `approvals` | 显示结构化审批；缺失时不得从终端文本猜测审批 |
 | `steering` | 运行中允许追加输入，否则禁用该动作 |
-| `sessionResume` | 允许展示恢复入口，否则进程丢失后结束会话 |
 | `reasoning` | 显示独立、可折叠 reasoning 区域 |
 | `plans` | 显示计划视图；不把普通助手文本解析为计划 |
 | `subagents` | 显示父子会话；缺失时把相关工具调用作为普通事件 |
@@ -444,12 +440,12 @@ Provider Reference 必须带 `provider_id` 和版本，不允许把 Codex thread
 
 ```text
 detect codex
-  -> validate version
-  -> spawn app-server stdio
-  -> initialize
-  -> initialized
-  -> read capabilities/model list if needed
-  -> thread/start or thread/resume
+  -> record version
+  -> spawn per-window app-server Unix socket
+  -> initialize TermRelay listener
+  -> launch TUI with codex --remote (new thread only)
+  -> discover the single loaded thread
+  -> attach listener to that live thread
   -> runtime ready
 ```
 
@@ -462,7 +458,7 @@ detect codex
 | Codex 概念 | Adapter 操作/事件 | TermRelay 结果 |
 | --- | --- | --- |
 | initialize | Runtime 启动 | `AgentDescriptor`/capabilities |
-| thread start/resume | create/resume session | 保存 opaque thread reference |
+| TUI thread start | create one-time session | 保存仅用于当前窗口的 opaque thread reference |
 | turn start | `ToolAction.startTurn` | `turnStarted` |
 | turn steer | `ToolAction.steer` | 无即时成功语义，等待事件 |
 | turn interrupt | `ToolAction.interrupt` | turn 完成或中断结果 |
@@ -494,8 +490,9 @@ PTY 和 Structured Agent 仍是职责独立的组件，但 Codex 产品会话会
 | --- | --- | --- |
 | 原始 ANSI 输出和键盘输入 | PTY | PTY 中的远程 Codex TUI |
 | resize/鼠标报告 | PTY | PTY |
-| 助手消息、工具和审批语义 | 无 | App Server 监听连接 |
-| Provider Thread | 无 | TUI 与监听连接共享同一 Thread |
+| 助手消息和工具画面 | 无 | PTY 中的 Codex TUI |
+| 审批与 turn 生命周期 | 无 | 同步 Hook Bridge |
+| Provider Thread | 无 | TUI 创建并保持唯一交互订阅 |
 | 通用 CLI 支持 | 是 | 仅 Codex |
 
 `full` 与 `approval` 在创建会话时确定，但它们只是 Web 展示策略，不会切换或重启底层
@@ -505,7 +502,7 @@ runtime。两种展示策略都持续接收终端和结构化事件，避免漏�
 
 - App Server turn 启动前失败：允许用户创建新的 PTY 会话。
 - turn 已启动后失败：标记 `degraded/failed`，禁止自动把原 prompt 发给 PTY。
-- 恢复失败：展示诊断并要求用户明确选择恢复、新建或 PTY。
+- TUI 或 App Server 失效：当前窗口进入终态；用户只能明确新建窗口或改用 PTY。
 
 ## 13. TermRelay Contract
 
@@ -611,14 +608,14 @@ enum AgentError: Error, Sendable {
     case invalidState
     case unauthorizedWorkspace
     case approvalExpired
-    case recoveryFailed
+    case providerDisconnected
 }
 ```
 
 错误对外分为：
 
 - 用户可处理：升级 Codex、重新登录、选择 PTY、重新授权工作区。
-- 可重试：临时启动失败、连接中断、可恢复 thread。
+- 可重试：创建新窗口前的临时启动失败或 TermRelay Server 网络连接中断。
 - 不可自动重试：协议不兼容、审批关联失败、turn 状态未知、工作区未授权。
 
 日志必须带 session ID、provider、provider version、错误类别和 correlation ID，但不能包含 Token、
@@ -671,7 +668,7 @@ enum AgentError: Error, Sendable {
 - 在临时 Git 仓库启动真实 `codex app-server` 并完成握手。
 - 使用无副作用 prompt 完成一轮 turn。
 - 中断长 turn。
-- 模拟子进程崩溃和重启恢复。
+- 模拟子进程崩溃并验证窗口进入终态、子进程与 rollout 被清理。
 - TermRelay Server 断线时本地消费不阻塞，重连后 ACK/Journal 正常。
 - 不支持版本在执行 prompt 前安全失败并允许创建 PTY 会话。
 
@@ -702,7 +699,7 @@ enum AgentError: Error, Sendable {
 ### Phase SA-1：Codex 本地协议探针
 
 - [x] 实现 Process 和 JSON-RPC Client。
-- [x] 完成 initialize、thread start/resume、turn start/interrupt。
+- [x] 完成 initialize、TUI thread start、实时监听附着、thread delete、turn start/interrupt。
 - [ ] 生成并固定当前 Codex Schema fixture。
 - [x] 映射文本、command、file change、approval、completion 和 error。
 - [x] 记录 Provider 版本但不以版本白名单阻断启动；PTY 回退提示待接入创建会话 UI。
@@ -713,7 +710,7 @@ enum AgentError: Error, Sendable {
 
 - [ ] 选择必须跨端的最小 ToolEvent/ToolAction。
 - [ ] 增加 JSON Schema 和生成 DTO。
-- [ ] 定义大小、分块、幂等、seq、ACK 和恢复规则。
+- [ ] 定义大小、分块、幂等、seq、ACK 和断线补传规则。
 - [ ] 增加 Swift/TypeScript schema validation 测试。
 
 完成条件：Fake Adapter 事件可以经过 Mac encoder、Server validator 再被 Web 类型安全消费。
@@ -723,15 +720,15 @@ enum AgentError: Error, Sendable {
 - [ ] Server 增加结构化事件路由、审批和有限元数据持久化。
 - [ ] Web 增加结构化会话、消息、工具、diff、plan 和审批组件。
 - [ ] 完成 turn、steer、interrupt、approval 的远程动作。
-- [ ] 实现重连状态快照和未决审批恢复。
+- [ ] 实现 TermRelay Server 重连后的状态快照和当前未决审批补传。
 
 完成条件：浏览器可发起一轮 Codex turn、观察工具/文件事件并处理审批，且不能控制错误 session。
 
 ### Phase SA-4：版本、安全与发布
 
-- [ ] 维护 Codex 版本支持矩阵。
-- [ ] 在至少两个支持版本运行 Schema 和端到端回归。
-- [ ] 完成日志脱敏、输出配额、审批超时和异常恢复测试。
+- [ ] 维护 Codex CLI 升级回归记录，不增加运行时版本白名单。
+- [ ] 在至少两个 CLI 版本运行 Schema 和端到端回归。
+- [ ] 完成日志脱敏、输出配额、审批超时和异常清理测试。
 - [ ] 通过 feature flag 灰度启用结构化模式。
 - [ ] 验证禁用结构化模式时 PTY 功能完全不受影响。
 
@@ -787,12 +784,12 @@ StructuredAgentAdapter
 - [ ] 审批缺失或异常时默认拒绝。
 - [ ] 子进程/连接能可靠关闭，不遗留孤儿任务。
 - [ ] 网络阻塞不会阻塞 Provider stdout 或本地 UI。
-- [ ] 不会在恢复或回退时重复执行 prompt。
+- [ ] 网络重连或终端回退时不会恢复旧 Thread 或重复执行 prompt。
 - [ ] 协议协商失败时提供明确诊断和安全回退，不因未知 CLI 版本提前阻断。
 - [ ] 单元、fixture、集成和端到端测试均记录实际 Provider 版本。
 - [ ] 文档、能力表、Schema 和 `docs/MAC_PROGRESS.md` 已同步更新。
 
 ## 24. 当前下一步
 
-Phase SA-0 已完成。当前 `codex-cli 0.153.4` 已通过真实 `initialize` 和 ephemeral
+Phase SA-0 已完成。当前 `codex-cli 0.153.4` 已通过真实 `initialize` 和
 `thread/start` 探针，下一步固定 Schema fixture，并进入 Phase SA-2 的最小跨端 Contract。

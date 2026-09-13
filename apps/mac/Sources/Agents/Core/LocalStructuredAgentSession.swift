@@ -5,16 +5,16 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     let id: UUID
     let directory: URL
     let startedAt: String
-    let webDisplayMode: AgentWebDisplayMode
     @Published private(set) var state: StructuredSessionState = .created
     @Published private(set) var events: [ToolEvent] = []
+    @Published private(set) var timeline: [AgentTimelineItem] = []
     @Published private(set) var failureMessage: String?
 
     private let adapter: any StructuredAgentAdapter
     private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
-    private let referenceHandler: @MainActor (AgentSessionReference) -> Void
+    private let runtimeReadyHandler: @MainActor @Sendable () throws -> Void
     private var coordinator: StructuredSessionCoordinator?
     private var eventTask: Task<Void, Never>?
 
@@ -22,20 +22,18 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         id: UUID = UUID(),
         directory: URL,
         adapter: any StructuredAgentAdapter,
-        webDisplayMode: AgentWebDisplayMode = .full,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
-        referenceHandler: @escaping @MainActor (AgentSessionReference) -> Void = { _ in }
+        runtimeReadyHandler: @escaping @MainActor @Sendable () throws -> Void = {}
     ) {
         self.id = id
         self.directory = directory
         self.adapter = adapter
-        self.webDisplayMode = webDisplayMode
         self.environment = environment
         self.eventHandler = eventHandler
         self.stateHandler = stateHandler
-        self.referenceHandler = referenceHandler
+        self.runtimeReadyHandler = runtimeReadyHandler
         startedAt = RelayDate.now()
     }
 
@@ -55,6 +53,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 for await event in stream {
                     guard !Task.isCancelled, let self else { return }
                     self.events.append(event)
+                    AgentTimelineProjector.apply(event, to: &self.timeline)
                     self.eventHandler(event)
                     await self.refreshState()
                 }
@@ -62,10 +61,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             try await coordinator.start(request: AgentSessionRequest(
                 sessionID: id,
                 workspaceURL: directory
-            ))
-            if let reference = await coordinator.snapshot().reference {
-                referenceHandler(reference)
-            }
+            ), afterRuntimeStart: runtimeReadyHandler)
             await refreshState()
         } catch {
             failureMessage = error.localizedDescription
@@ -92,6 +88,18 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             approvalID: approvalID,
             turnID: turnID,
             decision: decision
+        )))
+    }
+
+    func resolveUserInput(
+        requestID: String,
+        turnID: String,
+        answers: [String: [String]]
+    ) async -> RemoteCommandResult {
+        await send(.resolveUserInput(UserInputResolution(
+            requestID: requestID,
+            turnID: turnID,
+            answers: answers
         )))
     }
 

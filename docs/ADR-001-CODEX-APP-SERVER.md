@@ -21,9 +21,9 @@ TermRelay 的 Codex 结构化集成直接使用 Codex 官方 `app-server` 协议
 - PTY 是所有 CLI 工具的基础能力，也是 Codex 的稳定回退路径。
 - App Server 是 Codex 专属的可选结构化增强，不替代通用 PTY 和 TermRelay 自有协议。
 - 每个 Codex 会话独占一个本地 `codex app-server` 和 Unix Socket。
-- Codex TUI 与 TermRelay 结构化监听连接作为两个客户端，共享该会话的同一 Thread。
-- TermRelay 监听端通过 `codex app-server proxy --sock` 建立 WebSocket-over-Unix 连接，TUI
-  通过 `codex resume --remote unix://...` 接入。
+- Codex TUI 是新 Thread 的唯一交互订阅客户端；TermRelay 不使用 `thread/resume` 模拟订阅。
+- TermRelay 通过会话级同步 Hook 获取审批和 turn 生命周期，通过独立 App Server 控制连接
+  执行显式控制；TUI 通过 `codex --remote unix://...` 创建全新 Thread。
 - Mac App 将 App Server 事件转换为 TermRelay 的语言无关事件；Server 和 Web 不直接依赖 Codex 原始协议。
 - 不把 App Server 的 WebSocket 端口暴露给 TermRelay Server、局域网或公网。
 - 当前不引入 ACP；达到本文定义的重新评估条件后再决定是否增加 ACP Adapter。
@@ -35,9 +35,9 @@ TermRelay 的 Codex 结构化集成直接使用 Codex 官方 `app-server` 协议
 Web <-> TermRelay Server <-> Mac App <-> PTY <-> Shell / Codex TUI / 其他 CLI
 
 Codex 结构化模式：
-                                          /-> PTY <-> Codex TUI
+                                          /-> PTY <-> Codex TUI（唯一交互订阅）
 Web <-> TermRelay Server <-> Mac App <-> 每会话独立 Unix Socket <-> codex app-server
-                                          \-> WebSocket proxy（结构化监听/审批响应）
+                                          \-> Hook Bridge（审批）+ 控制连接
 ```
 
 ## 背景
@@ -92,12 +92,12 @@ Shell 仍是纯终端会话。Codex 会话则同时拥有 TUI 终端流和结构
 
 | Web 模式 | 本地进程 | UI | 远程数据 |
 | --- | --- | --- | --- |
-| `full` | 独立 App Server + PTY 中的远程 TUI + JSONL 监听 | 完整 TUI，审批卡片悬浮显示 | ANSI 字节及规范化审批事件 |
+| `full` | 独立 App Server + PTY 中的远程 TUI + Hook Bridge | 完整 TUI，审批卡片悬浮显示 | ANSI 字节及规范化审批事件 |
 | `approval` | 与 `full` 相同 | 只显示审批、警告和错误 | 仍持续接收终端流和结构化事件 |
 
-每个会话使用不同 Unix Socket、App Server、Thread、PTY 和 TermRelay 监听连接；窗口之间不
-共享运行时状态。2026-09-12 已用 Codex CLI 0.153.4 实测：TUI 发起的 turn 和审批请求会同步
-到第二个监听客户端，TUI 处理结果也会广播给监听端。
+每个会话使用不同 Unix Socket、App Server、Thread、PTY、控制连接和 Hook Bridge；窗口之间
+不共享运行时状态。同步 Hook 负责审批闭环，避免在首个 turn 前调用只能读取已物化 rollout
+的 `thread/resume`。
 
 ### 2. Mac 端组件
 
@@ -160,41 +160,47 @@ tool.approval.resolve
 ### 启动
 
 1. 使用与 PTY Adapter 相同的可执行文件发现逻辑定位 `codex`。
-2. 读取 `codex --version`，与支持矩阵比较。
+2. 读取并记录 `codex --version`，但不设置版本白名单。
 3. 使用已授权工作区作为 `cwd`，启动仅限本机的每会话 Unix Socket：
 
    ```bash
    codex app-server --listen unix:///private/tmp/termrelay-<session>.sock
    ```
 
-4. TermRelay 通过 `codex app-server proxy --sock <path>` 转发 Unix Socket 字节，并完成标准
-   HTTP WebSocket Upgrade；每个 WebSocket 文本帧承载一条 JSON-RPC 消息。不能把 JSONL
-   直接写入该 proxy。
-5. 发送 `initialize` 请求，收到成功响应后发送 `initialized` notification。
-6. 未完成握手前禁止创建 thread 或 turn。
-7. 创建 Thread 后，在 PTY 中运行
-   `codex resume --remote unix://<path> --no-alt-screen -C <cwd> <thread-id>`。
+4. 启动时通过 App Server 的会话级配置注入同步 `SessionStart`、`UserPromptSubmit`、
+   `PermissionRequest`、`Stop` 和 `Interrupt` Hook；Hook 只通过权限为 `0700` 的临时目录与
+   TermRelay 通信。
+5. TermRelay 的控制连接完成 `initialize` / `initialized`，但不对新 Thread 调用
+   `thread/resume`。Codex 在第一次 turn 前尚未物化 rollout，而 `thread/resume` 只适用于
+   已保存历史，不能作为第二客户端订阅 API。
+6. 启动 PTY 中的 `codex --remote unix://<path> --no-alt-screen -C <cwd>`；TUI 负责创建全新
+   Thread，不传历史 Thread ID，并保持该 Thread 唯一的交互订阅。
+7. TermRelay 从 Hook 获得本次 Codex session/turn 标识和审批请求；控制连接仅用于显式
+   turn、interrupt 与结束时删除本次 rollout，不承担实时事件订阅。
 
 ### 新会话
 
-1. 调用 `thread/start`，明确传入已授权 `cwd` 和支持的模型配置。
-2. 记录 `session_id <-> thread_id` 映射。
+1. TUI 调用 `thread/start` 创建全新 Thread。
+2. `SessionStart` Hook 只记录当前进程生命周期内的 `session_id <-> thread_id` 映射。
 3. 调用 `turn/start` 发送用户输入。
-4. 持续消费 item、工具、审批和 turn notification，并映射为 `ToolEvent`。
-5. 收到 turn 完成或失败事件后更新 TermRelay 会话状态。
+4. 同步 Hook 把 prompt、审批、完成和中断生命周期映射为 `ToolEvent`；完整画面仍由 PTY
+   终端流提供。
+5. 收到完成或中断 Hook 后更新 TermRelay 会话状态。
 
-### 恢复会话
+### 一次性生命周期
 
-1. Mac 重连 Server 后先恢复 TermRelay 的 ACK、Journal 和状态快照。
-2. Codex App Server 进程仍存活时，继续使用现有连接和 thread。
-3. 进程重启后，通过 `thread/read` 或 `thread/resume` 验证 thread 是否可恢复。
-4. 恢复失败时将会话标为 `degraded`，由用户明确选择新 thread 或 PTY 模式。
-5. 不得自动重放未确认的用户 prompt，避免同一任务重复执行命令或修改文件。
+1. 每次新建窗口都创建新的 App Server、TUI 和 Thread，不读取或恢复历史 Thread。
+2. Mac 与 TermRelay Server 的网络短暂重连只补传当前仍存活窗口的 Relay Journal，不创建、
+   恢复或重放 Codex Thread。
+3. TUI、Hook Bridge、控制连接或 App Server 任一关键组件结束时，该窗口进入终态，不自动重启。
+4. 用户停止/关闭窗口时先终止 TUI，再调用 `thread/delete` 删除 rollout，最后关闭控制连接、
+   App Server 和 Unix Socket。
+5. 退出整个 Mac App 时等待所有窗口完成上述清理后再退出。
 
 ### 审批
 
-1. App Server 发出审批请求后，Mac 创建带关联 ID 和过期时间的 TermRelay 审批事件。
-2. 本地 UI 和已授权 Web 用户都可以显示请求，但最终响应由 Mac Adapter 写回 App Server。
+1. `PermissionRequest` Hook 触发后，Mac 创建带关联 ID 和过期时间的 TermRelay 审批事件。
+2. 本地 UI 和已授权 Web 用户都可以显示请求，最终结果由同步 Hook 返回给 Codex。
 3. 断线、超时、未知审批类型或会话状态不一致时默认拒绝，不自动批准。
 4. 审批内容和结果进入审计；命令输出和环境变量按脱敏规则处理。
 
@@ -264,7 +270,7 @@ App Server 集成不阻塞当前最小 PTY 纵向闭环，按以下顺序实施�
 
 - [ ] 增加 `CodexAppServerProcess`，仅使用 stdio。
 - [ ] 实现 initialize/initialized 握手和 JSON-RPC 请求关联。
-- [ ] 实现 thread start/read/resume 和 turn start/interrupt。
+- [ ] 实现 TUI thread start、活动 Thread 发现/监听附着、thread delete 和 turn start/interrupt。
 - [ ] 捕获助手 delta、命令、文件变化、审批、完成和错误事件。
 - [ ] 验证进程退出、取消、超时和不完整 JSONL。
 - [ ] 保存受测 Codex 版本和 Schema fixture。
@@ -274,7 +280,7 @@ App Server 集成不阻塞当前最小 PTY 纵向闭环，按以下顺序实施�
 - [ ] 按适配层详细设计定义 `StructuredAgentAdapter` 与 `ToolEvent`，保持 Session 层与 Codex 解耦。
 - [ ] 将最小 `tool.*` 事件和动作加入 `packages/contracts`。
 - [ ] 生成 Swift/TypeScript DTO，并增加兼容性检查。
-- [ ] 实现 `session_id`、`thread_id`、`turn_id`、审批 ID 的关联与恢复。
+- [ ] 实现当前窗口内 `session_id`、`thread_id`、`turn_id`、审批 ID 的关联与终态清理。
 - [ ] 增加事件大小、背压、幂等和敏感字段规则。
 
 ### D. 接入 Server 与 UI
@@ -287,11 +293,11 @@ App Server 集成不阻塞当前最小 PTY 纵向闭环，按以下顺序实施�
 
 ### E. 加固和发布
 
-- [ ] 建立 Codex 版本支持矩阵和升级回归任务。
-- [ ] 覆盖崩溃恢复、断网、重复 prompt、防误批准和子进程清理。
+- [ ] 建立 Codex CLI 升级回归任务，不增加运行时版本白名单。
+- [ ] 覆盖崩溃后的残留清理、断网、重复 prompt、防误批准和子进程清理；不恢复旧窗口。
 - [ ] 对 prompt、命令、diff、输出和日志执行脱敏、TTL 和配额测试。
 - [ ] 默认关闭实验能力；按功能逐项开放并保留 feature flag。
-- [ ] 在至少两个受支持 Codex 版本上通过端到端测试后再默认启用结构化模式。
+- [ ] 在至少两个 Codex CLI 版本上通过端到端测试后再默认启用结构化模式。
 
 ## 最小验收标准
 
@@ -301,8 +307,8 @@ App Server Adapter 达到可用状态必须同时满足：
 2. 文本增量、命令、文件变化、审批、完成和错误均能转换成稳定 `ToolEvent`。
 3. 用户可以中断 turn，审批能正确允许或拒绝且不会串到其他 session。
 4. App Server 崩溃不会导致 Mac App 崩溃或阻塞 PTY 会话。
-5. 断线或恢复流程不会自动重复发送 prompt。
-6. 不受支持版本会在执行前失败并提供 PTY 回退。
+5. 网络重连流程不会恢复旧 Thread 或自动重复发送 prompt。
+6. 未知 CLI 版本不被白名单阻断，实际协议失败时提供 PTY 回退。
 7. Server/Web 不包含 Codex 原始 JSON-RPC 解析逻辑。
 8. 关闭结构化 feature flag 后，现有 Shell 和 Codex PTY 行为不变。
 
@@ -313,7 +319,7 @@ App Server Adapter 达到可用状态必须同时满足：
 - TermRelay 已经需要结构化接入两个以上原生 ACP Agent。
 - 对外提供“任意 ACP Agent 即插即用”成为明确产品需求。
 - 维护多个厂商 Adapter 的成本已高于维护一个 ACP Client。
-- ACP 的 Swift SDK、会话恢复、审批和扩展能力达到项目生产要求。
+- ACP 的 Swift SDK、一次性会话、审批和扩展能力达到项目生产要求。
 - 某个目标 Agent 只提供 ACP，而没有质量相当的官方结构化接口。
 
 即使以后引入 ACP，也应把它实现为新的 `StructuredAgentAdapter`，而不是替换 PTY、

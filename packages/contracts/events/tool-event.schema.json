@@ -8,7 +8,9 @@
     "kind": {
       "enum": [
         "turn.started",
+        "user.message",
         "assistant.delta",
+        "assistant.completed",
         "reasoning.delta",
         "command.started",
         "command.output",
@@ -16,6 +18,8 @@
         "file.changed",
         "approval.requested",
         "approval.resolved",
+        "user-input.requested",
+        "user-input.resolved",
         "plan.updated",
         "turn.completed",
         "warning",
@@ -36,7 +40,7 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "kind": { "enum": ["assistant.delta", "reasoning.delta", "plan.updated"] } } },
+      "if": { "properties": { "kind": { "enum": ["assistant.delta", "assistant.completed", "reasoning.delta", "plan.updated"] } } },
       "then": {
         "properties": {
           "data": {
@@ -131,7 +135,7 @@
         "properties": {
           "data": {
             "type": "object",
-            "required": ["approvalId", "turnId", "kind", "risk", "title", "expiresAt"],
+            "required": ["approvalId", "turnId", "kind", "risk", "title", "availableDecisions", "expiresAt"],
             "properties": {
               "approvalId": { "type": "string", "minLength": 1, "maxLength": 256 },
               "turnId": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -140,6 +144,10 @@
               "risk": { "enum": ["low", "medium", "high", "critical"] },
               "title": { "type": "string", "minLength": 1, "maxLength": 256 },
               "detail": { "type": "string", "maxLength": 65536 },
+              "availableDecisions": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": { "enum": ["allowOnce", "allowSession", "allowPolicy", "deny", "cancel"] }
+              },
               "expiresAt": { "type": "string", "format": "date-time" }
             },
             "additionalProperties": false
@@ -173,7 +181,7 @@
             "properties": {
               "approvalId": { "type": "string", "minLength": 1, "maxLength": 256 },
               "turnId": { "type": "string", "minLength": 1, "maxLength": 256 },
-              "decision": { "enum": ["allowOnce", "deny"] }
+              "decision": { "enum": ["allowOnce", "allowSession", "allowPolicy", "deny", "cancel"] }
             },
             "additionalProperties": false
           }

@@ -10,8 +10,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published var selectedTool: BuiltInTool = .shell
-    @Published var agentWebDisplayMode: AgentWebDisplayMode {
-        didSet { defaults.set(agentWebDisplayMode.rawValue, forKey: Keys.agentWebDisplayMode) }
+    @Published var codexInteractionMode: CodexInteractionMode {
+        didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
     }
     @Published var sessionName = ""
     @Published var proxyConfigurations: [String: ToolProxyConfiguration] {
@@ -33,8 +33,8 @@ final class AppModel: ObservableObject {
         self.defaults = defaults
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
-        agentWebDisplayMode = defaults.string(forKey: Keys.agentWebDisplayMode)
-            .flatMap(AgentWebDisplayMode.init(rawValue:)) ?? .full
+        codexInteractionMode = defaults.string(forKey: Keys.codexInteractionMode)
+            .flatMap(CodexInteractionMode.init(rawValue:)) ?? .pty
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
         let storedServerURL = defaults.string(forKey: Keys.serverURL)
         if let storedServerURL, !Keys.legacyServerURLs.contains(storedServerURL) {
@@ -198,7 +198,9 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession() -> UUID? {
-        selectedTool == .codex ? startStructuredSession() : startLocalTerminal()
+        selectedTool == .codex && codexInteractionMode == .acp
+            ? startStructuredSession()
+            : startLocalTerminal()
     }
 
     @discardableResult
@@ -233,24 +235,12 @@ final class AppModel: ObservableObject {
                 configuredExecutableURL: executableURL,
                 host: host
             ),
-            webDisplayMode: agentWebDisplayMode,
             environment: environment,
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
             },
             stateHandler: { [weak self] id, state in
                 self?.handleStructuredSessionState(id: id, state: state)
-            },
-            referenceHandler: { [weak self] reference in
-                self?.startCodexTUI(
-                    sessionID: sessionID,
-                    directory: sessionDirectory,
-                    executableURL: executableURL,
-                    proxy: proxy,
-                    endpoint: host.endpoint,
-                    threadID: reference.opaqueID,
-                    remoteClient: remoteClient
-                )
             }
         )
         structuredSessions[session.id] = session
@@ -259,8 +249,7 @@ final class AppModel: ObservableObject {
             directory: workingDirectory,
             toolID: selectedTool.rawValue,
             displayName: displayName,
-            runtimeMode: .structured,
-            webDisplayMode: agentWebDisplayMode
+            runtimeMode: .acp
         ))
         let workspaceID = workspaceID(for: workingDirectory)
         Task {
@@ -271,8 +260,7 @@ final class AppModel: ObservableObject {
                 workspaceId: workspaceID,
                 toolKey: selectedTool.rawValue,
                 displayName: displayName,
-                runtimeMode: .structured,
-                webDisplayMode: agentWebDisplayMode,
+                runtimeMode: .acp,
                 startedAt: session.startedAt
             )
             await session.start()
@@ -280,46 +268,6 @@ final class AppModel: ObservableObject {
         errorMessage = nil
         sessionName = ""
         return session.id
-    }
-
-    private func startCodexTUI(
-        sessionID: UUID,
-        directory: URL,
-        executableURL: URL,
-        proxy: ToolProxyConfiguration,
-        endpoint: String,
-        threadID: String,
-        remoteClient: RemoteClient
-    ) {
-        guard structuredSessions[sessionID] != nil, terminalSessions[sessionID] == nil else { return }
-        do {
-            let adapter = CodexAdapter(configuredExecutableURL: executableURL)
-            let launch = try adapter.makeRemoteLaunchConfiguration(
-                directory: directory,
-                proxy: proxy,
-                endpoint: endpoint,
-                threadID: threadID
-            )
-            let terminal = try LocalTerminalSession(
-                id: sessionID,
-                directory: directory,
-                tool: .codex,
-                executableURL: executableURL,
-                proxy: proxy,
-                launchConfiguration: launch,
-                outputHandler: { batch in
-                    Task { await remoteClient.publishTerminalOutput(batch) }
-                },
-                stateHandler: { [weak self] id, state in
-                    self?.handleLocalSessionState(id: id, state: state)
-                }
-            )
-            terminalSessions[sessionID] = terminal
-            terminal.startIfNeeded()
-        } catch {
-            errorMessage = error.localizedDescription
-            Task { await structuredSessions[sessionID]?.stop() }
-        }
     }
 
     func terminalSession(id: UUID) -> LocalTerminalSession? {
@@ -348,10 +296,10 @@ final class AppModel: ObservableObject {
         updateActiveSessionCount()
     }
 
-    func terminateAllSessions() {
+    func terminateAllSessions() async {
         for session in terminalSessions.values { session.terminate() }
-        for session in structuredSessions.values { Task { await session.stop() } }
-        if let remoteClient { Task { await remoteClient.disconnect() } }
+        for session in structuredSessions.values { await session.stop() }
+        if let remoteClient { await remoteClient.disconnect() }
     }
 
     private func syncRemoteState() {
@@ -383,8 +331,7 @@ final class AppModel: ObservableObject {
                     workspaceId: workspaceID,
                     toolKey: BuiltInTool.codex.rawValue,
                     displayName: displayNames[session.id] ?? "Codex Agent — \(session.directory.lastPathComponent)",
-                    runtimeMode: .structured,
-                    webDisplayMode: session.webDisplayMode,
+                    runtimeMode: .acp,
                     startedAt: session.startedAt
                 )
                 for event in session.events { await remoteClient.publishToolEvent(event) }
@@ -409,8 +356,16 @@ final class AppModel: ObservableObject {
                 return .rejected("unknown_session", "The requested structured session is not active.")
             }
             return await session.resolveApproval(approvalID: approvalID, turnID: turnID, decision: decision)
+        case .resolveUserInput(_, let sessionID, let requestID, let turnID, let answers):
+            guard let session = structuredSessions[sessionID] else {
+                return .rejected("unknown_session", "The requested ACP session is not active.")
+            }
+            return await session.resolveUserInput(
+                requestID: requestID,
+                turnID: turnID,
+                answers: answers
+            )
         case .stop(_, let sessionID) where structuredSessions[sessionID] != nil:
-            terminalSessions[sessionID]?.terminate()
             await structuredSessions[sessionID]?.stop()
             updateActiveSessionCount()
             return .completed
@@ -429,7 +384,7 @@ final class AppModel: ObservableObject {
         case .stop:
             session.terminate()
             updateActiveSessionCount()
-        case .startTurn, .interruptTurn, .resolveApproval:
+        case .startTurn, .interruptTurn, .resolveApproval, .resolveUserInput:
             break
         }
         return .completed
@@ -473,9 +428,7 @@ final class AppModel: ObservableObject {
         if state == .failed {
             errorMessage = structuredSessions[id]?.failureMessage ?? "Codex 会话启动失败"
         }
-        if terminalSessions[id]?.state.isActive == true {
-            terminalSessions[id]?.terminate()
-        }
+        terminalSessions[id]?.terminate()
         Task {
             await remoteClient.publishSessionEnded(
                 id: id,
@@ -500,7 +453,7 @@ final class AppModel: ObservableObject {
         static let workspaceIDs = "workspaceIDs"
         static let proxyConfigurations = "toolProxyConfigurations"
         static let toolExecutablePaths = "toolExecutablePaths"
-        static let agentWebDisplayMode = "agentWebDisplayMode"
+        static let codexInteractionMode = "codexInteractionMode"
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",
@@ -537,7 +490,7 @@ private extension SessionState {
 private extension StructuredSessionState {
     var isActive: Bool {
         switch self {
-        case .created, .starting, .ready, .running, .awaitingApproval, .interrupting, .degraded: true
+        case .created, .starting, .ready, .running, .awaitingApproval, .awaitingUserInput, .interrupting, .degraded: true
         case .finished, .failed: false
         }
     }

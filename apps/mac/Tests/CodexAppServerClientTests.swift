@@ -103,7 +103,7 @@ final class CodexAppServerClientTests: XCTestCase {
         await client.stop()
     }
 
-    func testCodexRuntimeMapsTurnAndApprovalWithoutLeakingRPC() async throws {
+    func testCodexRuntimeMapsTurnAndApprovalOnDirectConnection() async throws {
         let sessionID = UUID()
         let workspace = URL(fileURLWithPath: "/tmp")
         let transport = FakeCodexTransport()
@@ -172,6 +172,32 @@ final class CodexAppServerClientTests: XCTestCase {
         )
 
         transport.receive([
+            "id": 901,
+            "method": "item/tool/requestUserInput",
+            "params": [
+                "threadId": "thread-a", "turnId": "turn-a", "itemId": "item-q",
+                "isBlocking": true,
+                "questions": [[
+                    "id": "strategy", "header": "方案", "question": "选择处理方式",
+                    "options": [["label": "修复", "description": "直接修复问题"]],
+                    "isOther": true, "isSecret": false,
+                ]],
+            ],
+        ])
+        try await Task.sleep(for: .milliseconds(20))
+        let inputState = await coordinator.state
+        XCTAssertEqual(inputState, .awaitingUserInput)
+        try await coordinator.send(.resolveUserInput(UserInputResolution(
+            requestID: "input:901", turnID: "turn-a", answers: ["strategy": ["修复"]]
+        )))
+        let inputResponse = try await transport.waitForSentMessage(at: 5)
+        XCTAssertEqual(inputResponse["id"] as? Int, 901)
+        let inputResult = try XCTUnwrap(inputResponse["result"] as? [String: Any])
+        let responseAnswers = try XCTUnwrap(inputResult["answers"] as? [String: Any])
+        let strategy = try XCTUnwrap(responseAnswers["strategy"] as? [String: Any])
+        XCTAssertEqual(strategy["answers"] as? [String], ["修复"])
+
+        transport.receive([
             "method": "turn/completed",
             "params": [
                 "threadId": "thread-a",
@@ -181,7 +207,86 @@ final class CodexAppServerClientTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(20))
         let finalState = await coordinator.state
         XCTAssertEqual(finalState, .ready)
-        await coordinator.stop()
+        let stopping = Task { await coordinator.stop() }
+        let deleteThread = try await transport.waitForSentMessage(at: 6)
+        XCTAssertEqual(deleteThread["method"] as? String, "thread/delete")
+        try await transport.respondToRequest(at: 6, result: [:])
+        await stopping.value
+    }
+
+    func testFreshACPThreadStartsOnceAndNeverResumes() async throws {
+        let sessionID = UUID()
+        let workspace = URL(fileURLWithPath: "/tmp")
+        let transport = FakeCodexTransport()
+        let client = CodexAppServerClient(transport: transport, timeout: .seconds(1))
+        let runtime = CodexStructuredRuntime(
+            sessionID: sessionID,
+            workspaceURL: workspace,
+            providerVersion: "codex-cli 0.154.0",
+            client: client
+        )
+        let coordinator = StructuredSessionCoordinator(runtime: runtime)
+        let starting = Task {
+            try await coordinator.start(request: AgentSessionRequest(
+                sessionID: sessionID,
+                workspaceURL: workspace
+            ))
+        }
+
+        try await transport.respondToRequest(at: 0, result: [:])
+        let threadStart = try await transport.waitForSentMessage(at: 2)
+        XCTAssertEqual(threadStart["method"] as? String, "thread/start")
+        XCTAssertFalse(transport.sentMethods.contains("thread/resume"))
+        try await transport.respondToRequest(at: 2, result: ["thread": ["id": "thread-new"]])
+        try await starting.value
+
+        let stopping = Task { await coordinator.stop() }
+        let deleteThread = try await transport.waitForSentMessage(at: 3)
+        XCTAssertEqual(deleteThread["method"] as? String, "thread/delete")
+        try await transport.respondToRequest(at: 3, result: [:])
+        await stopping.value
+    }
+
+    func testStoppingWindowInterruptsTurnBeforeDeletingThread() async throws {
+        let sessionID = UUID()
+        let workspace = URL(fileURLWithPath: "/tmp")
+        let transport = FakeCodexTransport()
+        let runtime = CodexStructuredRuntime(
+            sessionID: sessionID,
+            workspaceURL: workspace,
+            providerVersion: "codex-cli 0.154.0",
+            client: CodexAppServerClient(transport: transport, timeout: .seconds(1))
+        )
+        let coordinator = StructuredSessionCoordinator(runtime: runtime)
+        let starting = Task {
+            try await coordinator.start(request: AgentSessionRequest(
+                sessionID: sessionID,
+                workspaceURL: workspace
+            ))
+        }
+        try await transport.respondToRequest(at: 0, result: [:])
+        try await transport.respondToRequest(at: 2, result: ["thread": ["id": "thread-live"]])
+        try await starting.value
+
+        let turnStarting = Task {
+            try await coordinator.send(.startTurn(
+                TurnInput(text: "长任务"),
+                idempotencyKey: UUID()
+            ))
+        }
+        try await transport.respondToRequest(at: 3, result: [
+            "turn": ["id": "turn-live"],
+        ])
+        try await turnStarting.value
+
+        let stopping = Task { await coordinator.stop() }
+        let interrupt = try await transport.waitForSentMessage(at: 4)
+        XCTAssertEqual(interrupt["method"] as? String, "turn/interrupt")
+        try await transport.respondToRequest(at: 4, result: [:])
+        let deleteThread = try await transport.waitForSentMessage(at: 5)
+        XCTAssertEqual(deleteThread["method"] as? String, "thread/delete")
+        try await transport.respondToRequest(at: 5, result: [:])
+        await stopping.value
     }
 
     func testRealCodexInitializeWhenExplicitlyEnabled() async throws {
@@ -190,9 +295,15 @@ final class CodexAppServerClientTests: XCTestCase {
         }
         let installation = try await CodexStructuredAdapter().detect()
         XCTAssertTrue(installation.supported, installation.unsupportedReason ?? "unsupported")
+        let codexHome = URL(fileURLWithPath: "/private/tmp/termrelay-codex-home-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: codexHome) }
+        var environment = TerminalEnvironment.make(executableURL: installation.executableURL)
+        environment["CODEX_HOME"] = codexHome.path
         let transport = CodexAppServerProcess(
             executableURL: installation.executableURL,
-            directory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            directory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+            environment: environment
         )
         let client = CodexAppServerClient(transport: transport, timeout: .seconds(5))
         let response = try await client.start()
@@ -200,30 +311,45 @@ final class CodexAppServerClientTests: XCTestCase {
         await client.stop()
     }
 
-    func testRealCodexEphemeralThreadWhenExplicitlyEnabled() async throws {
+    func testRealFreshACPThroughUnixSocketWhenExplicitlyEnabled() async throws {
         guard ProcessInfo.processInfo.environment["TERMRELAY_RUN_CODEX_INTEGRATION"] == "1" else {
             throw XCTSkip("Set TERMRELAY_RUN_CODEX_INTEGRATION=1 for the real local probe")
         }
-        let sessionID = UUID()
         let workspace = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        let adapter = CodexStructuredAdapter()
-        let runtime = try await adapter.makeRuntime(configuration: AgentLaunchConfiguration(
+        let installation = try await CodexStructuredAdapter().detect()
+        let codexHome = URL(fileURLWithPath: "/private/tmp/termrelay-codex-home-\(UUID().uuidString)")
+        let runtimeRoot = URL(fileURLWithPath: "/private/tmp/termrelay-runtime-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: codexHome)
+            try? FileManager.default.removeItem(at: runtimeRoot)
+        }
+        var environment = TerminalEnvironment.make(executableURL: installation.executableURL)
+        environment["CODEX_HOME"] = codexHome.path
+        let host = CodexAppServerHost(
+            executableURL: installation.executableURL,
+            directory: workspace,
+            environment: environment,
+            runtimeRootDirectory: runtimeRoot
+        )
+        let sessionID = UUID()
+        let runtime = try await CodexStructuredAdapter(
+            configuredExecutableURL: installation.executableURL,
+            host: host
+        ).makeRuntime(configuration: AgentLaunchConfiguration(
             sessionID: sessionID,
             workspaceURL: workspace,
-            ephemeral: true
+            environment: environment
         ))
         let coordinator = StructuredSessionCoordinator(runtime: runtime)
-        try await coordinator.start(request: AgentSessionRequest(
-            sessionID: sessionID,
-            workspaceURL: workspace,
-            ephemeral: true
-        ))
-        let snapshot = await coordinator.snapshot()
-        XCTAssertEqual(snapshot.state, .ready)
-        XCTAssertEqual(snapshot.reference?.providerID, .codex)
-        XCTAssertFalse(snapshot.reference?.opaqueID.isEmpty ?? true)
+        try await coordinator.start(
+            request: AgentSessionRequest(sessionID: sessionID, workspaceURL: workspace)
+        )
+        let state = await coordinator.state
+        XCTAssertEqual(state, .ready)
         await coordinator.stop()
     }
+
 }
 
 private final class FakeCodexTransport: @unchecked Sendable, CodexAppServerTransport {
@@ -233,6 +359,14 @@ private final class FakeCodexTransport: @unchecked Sendable, CodexAppServerTrans
     private let lock = NSLock()
     private var sent: [Data] = []
     private(set) var stopCount = 0
+    var sentCount: Int { lock.withLock { sent.count } }
+    var sentMethods: [String] {
+        lock.withLock {
+            sent.compactMap { data in
+                (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["method"] as? String
+            }
+        }
+    }
 
     init() {
         let stream = AsyncThrowingStream<Data, Error>.makeStream()

@@ -3,7 +3,7 @@ import XCTest
 
 final class AppModelMultiSessionTests: XCTestCase {
     @MainActor
-    func testStartingSecondSessionKeepsFirstSessionRunning() throws {
+    func testStartingSecondSessionKeepsFirstSessionRunning() async throws {
         let suiteName = "AppModelMultiSessionTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -26,6 +26,6 @@ final class AppModelMultiSessionTests: XCTestCase {
         XCTAssertNotNil(model.terminalSession(id: secondID))
         XCTAssertEqual(model.sessions.last?.displayName, "测试窗口")
 
-        model.terminateAllSessions()
+        await model.terminateAllSessions()
     }
 }

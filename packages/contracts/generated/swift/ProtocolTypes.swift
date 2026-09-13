@@ -39,8 +39,8 @@ public struct WorkspaceRegisteredPayload: Codable, Sendable {
 }
 
 public enum SessionRuntimeMode: String, Codable, Sendable {
-    case terminal
-    case structured
+    case pty
+    case acp
 }
 
 public struct SessionStartedPayload: Codable, Sendable {
@@ -48,7 +48,6 @@ public struct SessionStartedPayload: Codable, Sendable {
     public let toolKey: String
     public let displayName: String?
     public let runtimeMode: SessionRuntimeMode
-    public let webDisplayMode: String?
     public let startedAt: String
 }
 

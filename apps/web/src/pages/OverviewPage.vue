@@ -150,7 +150,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="terminal-actions">
             <button
-              v-if="relay.selectedSession.runtimeMode === 'terminal' || relay.selectedSession.webDisplayMode === 'full'"
+              v-if="relay.selectedSession.runtimeMode === 'pty'"
               type="button"
               :disabled="!relay.selectedSessionInteractive"
               title="向当前 Shell 的前台程序发送 Ctrl-C，不关闭 Shell"
@@ -168,7 +168,7 @@ onBeforeUnmount(() => {
 
         <div v-if="relay.loadingHistory" class="terminal-placeholder">正在加载会话历史…</div>
         <TerminalView
-          v-else-if="relay.selectedSession?.runtimeMode === 'terminal'"
+          v-else-if="relay.selectedSession?.runtimeMode === 'pty'"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
@@ -176,14 +176,14 @@ onBeforeUnmount(() => {
           @resize="relay.resizeTerminal"
         />
         <StructuredAgentView
-          v-else-if="relay.selectedSession?.runtimeMode === 'structured'"
+          v-else-if="relay.selectedSession?.runtimeMode === 'acp'"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
-          :display-mode="relay.selectedSession.webDisplayMode ?? 'full'"
-          @input="relay.sendTerminalInput"
-          @resize="relay.resizeTerminal"
+          @start-turn="relay.startToolTurn"
+          @interrupt="relay.interruptToolTurn"
           @resolve-approval="relay.resolveApproval"
+          @resolve-user-input="relay.resolveUserInput"
         />
         <div v-else class="terminal-placeholder">选择一个会话查看内容</div>
         <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>

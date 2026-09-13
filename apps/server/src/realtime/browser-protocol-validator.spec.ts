@@ -37,6 +37,7 @@ test('accepts structured turn and approval commands with command context', () =>
     ['tool.turn.start', { text: 'Inspect the failing tests' }],
     ['tool.turn.interrupt', {}],
     ['tool.approval.resolve', { approvalId: 'approval-1', turnId: 'turn-1', decision: 'allowOnce' }],
+    ['tool.user-input.resolve', { requestId: 'input-1', turnId: 'turn-1', answers: { strategy: ['修复'] } }],
   ] as const) {
     assert.equal(validator.validate({ ...envelope(type, payload), commandId: randomUUID() }).ok, true);
   }
@@ -56,7 +57,7 @@ test('rejects missing sessions, invalid payloads, and unknown messages', () => {
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId: 'device-a',
     sessionId: 'session-a',

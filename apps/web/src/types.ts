@@ -4,8 +4,7 @@ export interface SessionRecord {
   workspaceId: string;
   toolKey: string;
   displayName: string | null;
-  runtimeMode: 'terminal' | 'structured';
-  webDisplayMode?: 'approval' | 'full';
+  runtimeMode: 'pty' | 'acp';
   status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
   stateVersion: number;
   startedAt: string | null;
@@ -29,9 +28,9 @@ export interface SessionEventRecord {
 }
 
 export type ToolEventKind =
-  | 'turn.started' | 'assistant.delta' | 'reasoning.delta'
+  | 'turn.started' | 'user.message' | 'assistant.delta' | 'assistant.completed' | 'reasoning.delta'
   | 'command.started' | 'command.output' | 'command.completed'
-  | 'file.changed' | 'approval.requested' | 'approval.resolved'
+  | 'file.changed' | 'approval.requested' | 'approval.resolved' | 'user-input.requested' | 'user-input.resolved'
   | 'plan.updated' | 'turn.completed' | 'warning' | 'error';
 
 export interface ToolEventPayload {
@@ -43,7 +42,7 @@ export interface ToolEventPayload {
 
 export interface WireEnvelope<TPayload = Record<string, unknown>> {
   type: string;
-  protocolVersion: '1';
+  protocolVersion: '2';
   messageId: string;
   deviceId: string;
   sessionId?: string;

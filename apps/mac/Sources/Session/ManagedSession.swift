@@ -6,7 +6,6 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
     let toolID: String
     let displayName: String
     let runtimeMode: SessionRuntimeMode
-    let webDisplayMode: AgentWebDisplayMode
     private(set) var state: SessionState
 
     init(
@@ -14,8 +13,7 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
         directory: URL,
         toolID: String,
         displayName: String? = nil,
-        runtimeMode: SessionRuntimeMode = .terminal,
-        webDisplayMode: AgentWebDisplayMode = .full,
+        runtimeMode: SessionRuntimeMode = .pty,
         state: SessionState = .starting
     ) {
         self.id = id
@@ -24,7 +22,6 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
         self.displayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty ?? directory.lastPathComponent
         self.runtimeMode = runtimeMode
-        self.webDisplayMode = webDisplayMode
         self.state = state
     }
 
@@ -37,13 +34,13 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
 }
 
 enum SessionRuntimeMode: String, Codable, Sendable {
-    case terminal
-    case structured
+    case pty
+    case acp
 }
 
-enum AgentWebDisplayMode: String, Codable, CaseIterable, Sendable {
-    case approval
-    case full
+enum CodexInteractionMode: String, Codable, CaseIterable, Sendable {
+    case pty
+    case acp
 }
 
 private extension String {

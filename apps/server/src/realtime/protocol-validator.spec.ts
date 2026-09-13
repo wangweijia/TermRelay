@@ -64,8 +64,7 @@ test('accepts workspace, session, and terminal events with required context', ()
       workspaceId: 'workspace-a',
       toolKey: 'codex',
       displayName: '后端服务',
-      runtimeMode: 'terminal',
-      webDisplayMode: 'full',
+      runtimeMode: 'pty',
       startedAt: new Date().toISOString(),
     }),
     sessionId: 'session-a',
@@ -102,7 +101,8 @@ test('accepts normalized structured Agent events and rejects incomplete approval
       correlation: { turnId: 'turn-1', approvalId: 'approval-1' },
       data: {
         approvalId: 'approval-1', turnId: 'turn-1', kind: 'command', risk: 'high',
-        title: 'Run command', expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        title: 'Run command', availableDecisions: ['allowOnce', 'allowSession', 'deny', 'cancel'],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
       },
     }),
     sessionId: 'session-a',
@@ -128,7 +128,7 @@ test('rejects session events without context and malformed base64', () => {
     envelope('session.started', {
       workspaceId: 'workspace-a',
       toolKey: 'codex',
-      runtimeMode: 'terminal',
+      runtimeMode: 'pty',
       startedAt: new Date().toISOString(),
     }),
   );
@@ -187,7 +187,7 @@ test('rejects malformed envelopes, unknown message types, and invalid payloads',
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId: 'device-test-1',
     sentAt: new Date().toISOString(),

@@ -151,7 +151,7 @@ private extension StructuredSessionState {
     var sidebarState: SessionState {
         switch self {
         case .created, .starting: .starting
-        case .ready, .running, .awaitingApproval, .interrupting, .degraded: .running
+        case .ready, .running, .awaitingApproval, .awaitingUserInput, .interrupting, .degraded: .running
         case .finished: .finished
         case .failed: .failed
         }

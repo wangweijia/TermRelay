@@ -22,8 +22,6 @@ struct AgentCapabilities: OptionSet, Codable, Sendable {
     static let approvals = Self(rawValue: 1 << 5)
     static let plans = Self(rawValue: 1 << 6)
     static let steering = Self(rawValue: 1 << 7)
-    static let sessionResume = Self(rawValue: 1 << 8)
-    static let sessionFork = Self(rawValue: 1 << 9)
     static let images = Self(rawValue: 1 << 10)
     static let subagents = Self(rawValue: 1 << 11)
     static let usage = Self(rawValue: 1 << 12)
@@ -47,18 +45,15 @@ struct AgentDescriptor: Sendable, Equatable {
 struct AgentLaunchConfiguration: Sendable {
     let sessionID: UUID
     let workspaceURL: URL
-    let ephemeral: Bool
     let environment: [String: String]
 
     init(
         sessionID: UUID,
         workspaceURL: URL,
-        ephemeral: Bool = false,
         environment: [String: String] = TerminalEnvironment.make()
     ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
-        self.ephemeral = ephemeral
         self.environment = environment
     }
 }
@@ -66,12 +61,10 @@ struct AgentLaunchConfiguration: Sendable {
 struct AgentSessionRequest: Sendable {
     let sessionID: UUID
     let workspaceURL: URL
-    let ephemeral: Bool
 
-    init(sessionID: UUID, workspaceURL: URL, ephemeral: Bool = false) {
+    init(sessionID: UUID, workspaceURL: URL) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
-        self.ephemeral = ephemeral
     }
 }
 
@@ -84,9 +77,12 @@ struct TurnInput: Sendable, Equatable {
     let text: String
 }
 
-enum ApprovalDecision: String, Codable, Sendable {
+enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
     case allowOnce
+    case allowSession
+    case allowPolicy
     case deny
+    case cancel
 }
 
 struct ApprovalResolution: Sendable, Equatable {
@@ -100,6 +96,7 @@ enum ToolAction: Sendable, Equatable {
     case steer(TurnInput)
     case interrupt
     case resolveApproval(ApprovalResolution)
+    case resolveUserInput(UserInputResolution)
 }
 
 struct AgentCorrelation: Sendable, Equatable {
@@ -123,7 +120,37 @@ struct ApprovalRequest: Sendable, Equatable {
     let risk: ApprovalRisk
     let title: String
     let detail: String?
+    let availableDecisions: [ApprovalDecision]
     let expiresAt: Date
+}
+
+struct UserInputOption: Codable, Sendable, Equatable {
+    let label: String
+    let description: String
+}
+
+struct UserInputQuestion: Codable, Sendable, Equatable {
+    let id: String
+    let header: String
+    let question: String
+    let options: [UserInputOption]
+    let allowsOther: Bool
+    let isSecret: Bool
+}
+
+struct UserInputRequest: Sendable, Equatable {
+    let requestID: String
+    let turnID: String
+    let itemID: String
+    let questions: [UserInputQuestion]
+    let isBlocking: Bool
+    let expiresAt: Date?
+}
+
+struct UserInputResolution: Sendable, Equatable {
+    let requestID: String
+    let turnID: String
+    let answers: [String: [String]]
 }
 
 enum TurnCompletionStatus: String, Codable, Sendable {
@@ -135,7 +162,9 @@ enum TurnCompletionStatus: String, Codable, Sendable {
 enum ToolEventPayload: Sendable, Equatable {
     case sessionStarted(reference: AgentSessionReference)
     case turnStarted(turnID: String)
+    case userMessage(messageID: String, text: String)
     case assistantTextDelta(text: String)
+    case assistantMessageCompleted(text: String)
     case reasoningDelta(text: String)
     case commandStarted(commandID: String, command: String)
     case commandOutput(commandID: String, text: String)
@@ -143,6 +172,8 @@ enum ToolEventPayload: Sendable, Equatable {
     case fileChanged(itemID: String, summary: String)
     case approvalRequested(ApprovalRequest)
     case approvalResolved(approvalID: String, turnID: String, decision: ApprovalDecision)
+    case userInputRequested(UserInputRequest)
+    case userInputResolved(requestID: String, turnID: String, answers: [String: [String]])
     case planUpdated(text: String)
     case turnCompleted(turnID: String, status: TurnCompletionStatus)
     case warning(code: String, message: String)
@@ -163,6 +194,7 @@ enum StructuredSessionState: String, Codable, Sendable {
     case ready
     case running
     case awaitingApproval
+    case awaitingUserInput
     case interrupting
     case degraded
     case finished

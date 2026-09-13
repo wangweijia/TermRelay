@@ -39,7 +39,7 @@ client.send(
     sessionEnvelope('session.started', 0, {
       workspaceId,
       toolKey: 'shell',
-      runtimeMode: 'terminal',
+      runtimeMode: 'pty',
       startedAt: new Date().toISOString(),
     }),
   ),
@@ -104,7 +104,7 @@ console.log('Server S4 read-only terminal relay probe passed.');
 function clientEnvelope(type, payload) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId,
     sentAt: new Date().toISOString(),
@@ -119,7 +119,7 @@ function sessionEnvelope(type, seq, payload) {
 function browserEnvelope(type, payload) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId,
     sessionId,

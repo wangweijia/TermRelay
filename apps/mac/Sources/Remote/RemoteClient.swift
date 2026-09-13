@@ -86,8 +86,7 @@ actor RemoteClient {
         workspaceId: String,
         toolKey: String,
         displayName: String,
-        runtimeMode: SessionRuntimeMode = .terminal,
-        webDisplayMode: AgentWebDisplayMode? = nil,
+        runtimeMode: SessionRuntimeMode = .pty,
         startedAt: String
     ) async {
         if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
@@ -100,7 +99,6 @@ actor RemoteClient {
                 toolKey: toolKey,
                 displayName: displayName,
                 runtimeMode: runtimeMode.rawValue,
-                webDisplayMode: webDisplayMode?.rawValue,
                 startedAt: startedAt
             )
         )
@@ -213,7 +211,7 @@ actor RemoteClient {
             @unknown default: continue
             }
             let packet = try JSONDecoder().decode(IncomingRelayPacket.self, from: data)
-            guard packet.event == "message", packet.data.protocolVersion == "1" else { continue }
+            guard packet.event == "message", packet.data.protocolVersion == "2" else { continue }
             await handle(packet.data)
         }
     }
@@ -289,6 +287,23 @@ actor RemoteClient {
                 approvalId: approvalId,
                 turnId: turnId,
                 decision: decision
+            )
+        case "tool.user-input.resolve":
+            guard let requestId = payload["requestId"]?.string,
+                  let turnId = payload["turnId"]?.string,
+                  let rawAnswers = payload["answers"]?.object else { return nil }
+            var answers: [String: [String]] = [:]
+            for (questionID, value) in rawAnswers {
+                guard let values = value.array?.compactMap(\.string), !values.isEmpty else { return nil }
+                answers[questionID] = values
+            }
+            guard !answers.isEmpty else { return nil }
+            return .resolveUserInput(
+                commandId: commandId,
+                sessionId: sessionId,
+                requestId: requestId,
+                turnId: turnId,
+                answers: answers
             )
         default: return nil
         }
@@ -439,7 +454,7 @@ actor RemoteClient {
         guard let socket else { throw URLError(.notConnectedToInternet) }
         let envelope = RelayEnvelope(
             type: type,
-            protocolVersion: "1",
+            protocolVersion: "2",
             messageId: UUID(),
             deviceId: deviceID.uuidString.lowercased(),
             sessionId: sessionId,
@@ -509,8 +524,13 @@ private extension RelayToolEvent {
             data = ["code": .string("provider_session_started"), "message": .string(reference.opaqueID)]
         case .turnStarted(let turnID):
             kind = "turn.started"; data = ["turnId": .string(turnID)]
+        case .userMessage(let messageID, let text):
+            kind = "user.message"
+            data = ["messageId": .string(messageID), "text": .string(text)]
         case .assistantTextDelta(let text):
             kind = "assistant.delta"; data = ["text": .string(text)]
+        case .assistantMessageCompleted(let text):
+            kind = "assistant.completed"; data = ["text": .string(text)]
         case .reasoningDelta(let text):
             kind = "reasoning.delta"; data = ["text": .string(text)]
         case .commandStarted(let commandID, let command):
@@ -528,6 +548,7 @@ private extension RelayToolEvent {
                 "approvalId": .string(request.approvalID), "turnId": .string(request.turnID),
                 "kind": .string(request.kind), "risk": .string(request.risk.rawValue),
                 "title": .string(request.title), "expiresAt": .string(formatter.string(from: request.expiresAt)),
+                "availableDecisions": .array(request.availableDecisions.map { .string($0.rawValue) }),
             ]
             if let itemID = request.itemID { value["itemId"] = .string(itemID) }
             if let detail = request.detail { value["detail"] = .string(detail) }
@@ -535,6 +556,36 @@ private extension RelayToolEvent {
         case .approvalResolved(let approvalID, let turnID, let decision):
             kind = "approval.resolved"
             data = ["approvalId": .string(approvalID), "turnId": .string(turnID), "decision": .string(decision.rawValue)]
+        case .userInputRequested(let request):
+            kind = "user-input.requested"
+            let questions = request.questions.map { question in
+                JSONValue.object([
+                    "id": .string(question.id),
+                    "header": .string(question.header),
+                    "question": .string(question.question),
+                    "options": .array(question.options.map { option in
+                        .object(["label": .string(option.label), "description": .string(option.description)])
+                    }),
+                    "allowsOther": .bool(question.allowsOther),
+                    "isSecret": .bool(question.isSecret),
+                ])
+            }
+            var value: [String: JSONValue] = [
+                "requestId": .string(request.requestID),
+                "turnId": .string(request.turnID),
+                "itemId": .string(request.itemID),
+                "questions": .array(questions),
+                "isBlocking": .bool(request.isBlocking),
+            ]
+            if let expiresAt = request.expiresAt { value["expiresAt"] = .string(formatter.string(from: expiresAt)) }
+            data = value
+        case .userInputResolved(let requestID, let turnID, let answers):
+            kind = "user-input.resolved"
+            data = [
+                "requestId": .string(requestID),
+                "turnId": .string(turnID),
+                "answers": .object(answers.mapValues { .array($0.map(JSONValue.string)) }),
+            ]
         case .planUpdated(let text):
             kind = "plan.updated"; data = ["text": .string(text)]
         case .turnCompleted(let turnID, let status):

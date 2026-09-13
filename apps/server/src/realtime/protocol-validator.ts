@@ -73,11 +73,11 @@ export class ProtocolValidator {
     const record = asRecord(input);
     const relatedMessageId = readUuid(record?.messageId);
 
-    if (record && record.protocolVersion !== undefined && record.protocolVersion !== '1') {
+    if (record && record.protocolVersion !== undefined && record.protocolVersion !== '2') {
       return {
         ok: false,
         code: 'unsupported_version',
-        detail: 'Only protocol version 1 is supported.',
+        detail: 'Only protocol version 2 is supported.',
         ...(relatedMessageId ? { relatedMessageId } : {}),
       };
     }
@@ -240,7 +240,10 @@ function validateToolEvent(payload: ToolEventPayload): string | undefined {
   switch (payload.kind) {
     case 'turn.started':
       return stringField('turnId') ? undefined : 'tool.event turn.started requires data.turnId.';
-    case 'assistant.delta': case 'reasoning.delta': case 'plan.updated':
+    case 'user.message':
+      return stringField('messageId') && stringField('text', false)
+        ? undefined : 'tool.event user.message requires messageId and text.';
+    case 'assistant.delta': case 'assistant.completed': case 'reasoning.delta': case 'plan.updated':
       return stringField('text', false) ? undefined : `tool.event ${payload.kind} requires data.text.`;
     case 'command.output':
       return stringField('commandId') && stringField('text', false)
@@ -254,11 +257,30 @@ function validateToolEvent(payload: ToolEventPayload): string | undefined {
     case 'approval.requested':
       return stringField('approvalId') && stringField('turnId') && stringField('kind')
         && ['low', 'medium', 'high', 'critical'].includes(String(data.risk))
-        && stringField('title') && stringField('expiresAt') && !Number.isNaN(Date.parse(String(data.expiresAt)))
+        && stringField('title') && Array.isArray(data.availableDecisions)
+        && data.availableDecisions.length > 0
+        && data.availableDecisions.every((value) => ['allowOnce', 'allowSession', 'allowPolicy', 'deny', 'cancel'].includes(String(value)))
+        && stringField('expiresAt') && !Number.isNaN(Date.parse(String(data.expiresAt)))
         ? undefined : 'tool.event approval.requested is incomplete.';
     case 'approval.resolved':
-      return stringField('approvalId') && stringField('turnId') && ['allowOnce', 'deny'].includes(String(data.decision))
+      return stringField('approvalId') && stringField('turnId') && ['allowOnce', 'allowSession', 'allowPolicy', 'deny', 'cancel'].includes(String(data.decision))
         ? undefined : 'tool.event approval.resolved is incomplete.';
+    case 'user-input.requested': {
+      const questions = data.questions;
+      const validQuestions = Array.isArray(questions) && questions.length > 0 && questions.every((value) => {
+        const question = asRecord(value);
+        return question && typeof question.id === 'string' && question.id.length > 0
+          && typeof question.header === 'string' && typeof question.question === 'string'
+          && Array.isArray(question.options) && typeof question.allowsOther === 'boolean'
+          && typeof question.isSecret === 'boolean';
+      });
+      return stringField('requestId') && stringField('turnId') && stringField('itemId')
+        && typeof data.isBlocking === 'boolean' && validQuestions
+        ? undefined : 'tool.event user-input.requested is incomplete.';
+    }
+    case 'user-input.resolved':
+      return stringField('requestId') && stringField('turnId') && asRecord(data.answers)
+        ? undefined : 'tool.event user-input.resolved is incomplete.';
     case 'turn.completed':
       return stringField('turnId') && ['completed', 'interrupted', 'failed'].includes(String(data.status))
         ? undefined : 'tool.event turn.completed requires turnId and a valid status.';

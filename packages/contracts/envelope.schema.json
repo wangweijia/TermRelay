@@ -6,7 +6,7 @@
   "required": ["type", "protocolVersion", "messageId", "deviceId", "sentAt", "payload"],
   "properties": {
     "type": { "type": "string", "minLength": 1 },
-    "protocolVersion": { "const": "1" },
+    "protocolVersion": { "const": "2" },
     "messageId": { "type": "string", "format": "uuid" },
     "deviceId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },

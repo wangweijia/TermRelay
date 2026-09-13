@@ -9,6 +9,7 @@ import { SessionSoftDelete1789178400000 } from './migrations/1789178400000-sessi
 import { SessionDisplayName1789264800000 } from './migrations/1789264800000-session-display-name';
 import { StructuredApprovalIdentity1789351200000 } from './migrations/1789351200000-structured-approval-identity';
 import { SessionWebDisplayMode1789437600000 } from './migrations/1789437600000-session-web-display-mode';
+import { AcpRuntimeMode1789524000000 } from './migrations/1789524000000-acp-runtime-mode';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -31,6 +32,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       SessionDisplayName1789264800000,
       StructuredApprovalIdentity1789351200000,
       SessionWebDisplayMode1789437600000,
+      AcpRuntimeMode1789524000000,
     ],
     entities: [DeviceEntity, WorkspaceEntity, SessionEntity, SessionEventEntity],
   };

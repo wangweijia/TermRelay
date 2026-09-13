@@ -41,7 +41,6 @@ struct RelaySessionStarted: Encodable, Sendable {
     let toolKey: String
     let displayName: String
     let runtimeMode: String
-    let webDisplayMode: String?
     let startedAt: String
 }
 
@@ -131,6 +130,14 @@ indirect enum JSONValue: Codable, Sendable {
     var integer: Int? {
         if case .number(let value) = self, value.rounded() == value { Int(value) } else { nil }
     }
+
+    var bool: Bool? {
+        if case .bool(let value) = self { value } else { nil }
+    }
+
+    var array: [JSONValue]? {
+        if case .array(let value) = self { value } else { nil }
+    }
 }
 
 enum RemoteTerminalCommand: Sendable {
@@ -141,13 +148,15 @@ enum RemoteTerminalCommand: Sendable {
     case startTurn(commandId: UUID, sessionId: UUID, text: String)
     case interruptTurn(commandId: UUID, sessionId: UUID)
     case resolveApproval(commandId: UUID, sessionId: UUID, approvalId: String, turnId: String, decision: ApprovalDecision)
+    case resolveUserInput(commandId: UUID, sessionId: UUID, requestId: String, turnId: String, answers: [String: [String]])
 
     var commandId: UUID {
         switch self {
         case .input(let id, _, _), .resize(let id, _, _, _),
              .interrupt(let id, _), .stop(let id, _),
              .startTurn(let id, _, _), .interruptTurn(let id, _),
-             .resolveApproval(let id, _, _, _, _): id
+             .resolveApproval(let id, _, _, _, _),
+             .resolveUserInput(let id, _, _, _, _): id
         }
     }
 
@@ -156,7 +165,8 @@ enum RemoteTerminalCommand: Sendable {
         case .input(_, let id, _), .resize(_, let id, _, _),
              .interrupt(_, let id), .stop(_, let id),
              .startTurn(_, let id, _), .interruptTurn(_, let id),
-             .resolveApproval(_, let id, _, _, _): id
+             .resolveApproval(_, let id, _, _, _),
+             .resolveUserInput(_, let id, _, _, _): id
         }
     }
 }

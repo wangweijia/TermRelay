@@ -3,16 +3,28 @@ import SwiftUI
 @MainActor
 final class TermRelayAppDelegate: NSObject, NSApplicationDelegate {
     weak var appModel: AppModel?
+    private var terminationCleanupStarted = false
+    private var terminationCleanupFinished = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CodexAppServerHost.cleanupAbandonedRuntimes()
         // `swift run TermRelay` launches a plain SwiftPM executable rather than
         // an application bundle, so opt into a foreground GUI process here.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        appModel?.terminateAllSessions()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationCleanupFinished { return .terminateNow }
+        if terminationCleanupStarted { return .terminateLater }
+        guard let appModel else { return .terminateNow }
+        terminationCleanupStarted = true
+        Task { @MainActor [weak self] in
+            await appModel.terminateAllSessions()
+            self?.terminationCleanupFinished = true
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 

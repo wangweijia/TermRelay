@@ -134,7 +134,8 @@ export class BrowserGateway
       result.message.type === 'session.stop' ||
       result.message.type === 'tool.turn.start' ||
       result.message.type === 'tool.turn.interrupt' ||
-      result.message.type === 'tool.approval.resolve'
+      result.message.type === 'tool.approval.resolve' ||
+      result.message.type === 'tool.user-input.resolve'
     ) {
       if (!this.commands) {
         this.sendProtocolError(client, 'internal_error', 'Command relay is unavailable.', envelope.messageId);
@@ -159,7 +160,7 @@ export class BrowserGateway
       this.browsers.get(client)?.delete(envelope.sessionId!);
       this.sendEnvelope(client, {
         type: 'session.unsubscribed',
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: randomUUID(),
         deviceId: envelope.deviceId,
         sessionId: envelope.sessionId,
@@ -238,7 +239,7 @@ export class BrowserGateway
       );
       this.sendEnvelope<SessionSubscribedPayload>(client, {
         type: 'session.subscribed',
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: randomUUID(),
         deviceId,
         sessionId,
@@ -307,7 +308,7 @@ export class BrowserGateway
     if (notification.event.seq <= subscription.lastSeq) return;
     this.sendEnvelope(client, {
       type: notification.event.type,
-      protocolVersion: '1',
+      protocolVersion: '2',
       messageId: randomUUID(),
       deviceId: notification.deviceId,
       sessionId: notification.sessionId,
@@ -322,7 +323,7 @@ export class BrowserGateway
     for (const client of this.browsers.keys()) {
       this.sendEnvelope(client, {
         type: 'session.updated',
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: randomUUID(),
         deviceId: session.deviceId,
         sessionId: session.id,
@@ -340,7 +341,7 @@ export class BrowserGateway
   ): void {
     this.sendEnvelope<ProtocolErrorPayload>(client, {
       type: 'protocol.error',
-      protocolVersion: '1',
+      protocolVersion: '2',
       messageId: randomUUID(),
       deviceId: 'web',
       sentAt: new Date().toISOString(),

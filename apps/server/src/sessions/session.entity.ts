@@ -28,18 +28,10 @@ export class SessionEntity {
   @Column({
     name: 'runtime_mode',
     type: 'enum',
-    enum: ['terminal', 'structured'],
-    default: 'terminal',
+    enum: ['pty', 'acp'],
+    default: 'pty',
   })
   runtimeMode!: SessionRuntimeMode;
-
-  @Column({
-    name: 'web_display_mode',
-    type: 'enum',
-    enum: ['approval', 'full'],
-    default: 'full',
-  })
-  webDisplayMode!: 'approval' | 'full';
 
   @Column({
     type: 'enum',

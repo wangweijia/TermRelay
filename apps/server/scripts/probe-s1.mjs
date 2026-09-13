@@ -83,7 +83,7 @@ async function probeUnsupportedVersion() {
 function envelope(deviceId, type, payload) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId,
     sentAt: new Date().toISOString(),

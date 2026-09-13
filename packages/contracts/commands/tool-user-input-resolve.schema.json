@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-user-input-resolve.schema.json",
+  "title": "tool.user-input.resolve payload",
+  "type": "object",
+  "required": ["requestId", "turnId", "answers"],
+  "properties": {
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "turnId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "answers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "array", "minItems": 1, "items": { "type": "string", "maxLength": 65536 } }
+    }
+  },
+  "additionalProperties": false
+}

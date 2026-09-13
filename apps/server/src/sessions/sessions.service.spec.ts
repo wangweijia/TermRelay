@@ -21,7 +21,7 @@ test('serializes workspace registration before session registration', async () =
   const sessionWrite = service.registerSession('device-a', 'session-a', {
     workspaceId: 'workspace-a',
     toolKey: 'codex',
-    runtimeMode: 'terminal',
+    runtimeMode: 'pty',
     startedAt: new Date().toISOString(),
   });
 
@@ -40,7 +40,7 @@ test('rejects sessions for unavailable workspaces', async () => {
   const result = await service.registerSession('device-a', 'session-a', {
     workspaceId: 'missing',
     toolKey: 'shell',
-    runtimeMode: 'terminal',
+    runtimeMode: 'pty',
     startedAt: new Date().toISOString(),
   });
 
@@ -70,11 +70,11 @@ test('maps sequence conflicts from terminal output persistence', async () => {
   if (result.status === 'error') assert.equal(result.code, 'conflict');
 });
 
-test('allows mixed terminal and tool events only for structured sessions', () => {
-  assert.equal(canAppendSessionEvent('terminal', 'terminal.output'), true);
-  assert.equal(canAppendSessionEvent('terminal', 'tool.event'), false);
-  assert.equal(canAppendSessionEvent('structured', 'terminal.output'), true);
-  assert.equal(canAppendSessionEvent('structured', 'tool.event'), true);
+test('strictly separates PTY output from ACP events', () => {
+  assert.equal(canAppendSessionEvent('pty', 'terminal.output'), true);
+  assert.equal(canAppendSessionEvent('pty', 'tool.event'), false);
+  assert.equal(canAppendSessionEvent('acp', 'terminal.output'), false);
+  assert.equal(canAppendSessionEvent('acp', 'tool.event'), true);
 });
 
 test('publishes accepted terminal events to realtime listeners', async () => {
@@ -250,7 +250,7 @@ class FakeSessionRepository {
       workspaceId: 'workspace-a',
       toolKey: 'shell',
       displayName: null,
-      runtimeMode: 'terminal' as const,
+      runtimeMode: 'pty' as const,
       status,
       stateVersion: 1,
       startedAt: new Date(1_000).toISOString(),

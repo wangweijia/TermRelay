@@ -157,7 +157,7 @@ test('broadcasts session state changes to connected browsers', () => {
 function envelope(type: string, payload: Record<string, unknown>) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId: 'device-a',
     sessionId: 'session-a',
@@ -182,7 +182,7 @@ class FakeSessionsService {
     workspaceId: 'workspace-a',
     toolKey: 'codex',
     displayName: 'API 调试',
-    runtimeMode: 'terminal',
+    runtimeMode: 'pty',
     status: 'running',
     stateVersion: 1,
     startedAt: new Date(1_000).toISOString(),

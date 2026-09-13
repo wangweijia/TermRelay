@@ -135,7 +135,7 @@ test('routes registered workspace and session events to the session service', as
       workspaceId: 'workspace-a',
       toolKey: 'codex',
       displayName: '后端服务',
-      runtimeMode: 'terminal',
+      runtimeMode: 'pty',
       startedAt: new Date().toISOString(),
     }),
   );
@@ -220,7 +220,7 @@ function envelope(
 ) {
   return {
     type,
-    protocolVersion: '1',
+    protocolVersion: '2',
     messageId: randomUUID(),
     deviceId,
     sentAt: new Date().toISOString(),

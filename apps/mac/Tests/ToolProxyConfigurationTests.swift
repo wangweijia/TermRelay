@@ -49,25 +49,17 @@ final class ToolProxyConfigurationTests: XCTestCase {
         XCTAssertNil(configuration.validationMessage)
     }
 
-    func testCodexRemoteLaunchResumesExactThreadThroughUnixSocket() throws {
+    func testCodexPTYLaunchUsesTheNormalCLIWithoutRemoteResume() throws {
         let executable = URL(fileURLWithPath: "/bin/echo")
         let directory = URL(fileURLWithPath: "/private/tmp/project")
         var proxy = ToolProxyConfiguration.inherited
         proxy.mode = .disabled
         let launch = try CodexAdapter(configuredExecutableURL: executable)
-            .makeRemoteLaunchConfiguration(
-                directory: directory,
-                proxy: proxy,
-                endpoint: "unix:///private/tmp/termrelay-test.sock",
-                threadID: "thread-a"
-            )
+            .makeLaunchConfiguration(directory: directory, proxy: proxy)
 
         XCTAssertEqual(launch.executableURL, executable)
         XCTAssertEqual(launch.directory, directory)
-        XCTAssertEqual(launch.arguments, [
-            "resume", "--remote", "unix:///private/tmp/termrelay-test.sock",
-            "--no-alt-screen", "-C", "/private/tmp/project", "thread-a",
-        ])
+        XCTAssertEqual(launch.arguments, [])
         XCTAssertEqual(
             launch.environment["PATH"]?.split(separator: ":").first.map(String.init),
             executable.deletingLastPathComponent().path

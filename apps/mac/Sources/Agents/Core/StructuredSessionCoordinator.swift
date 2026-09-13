@@ -11,6 +11,7 @@ actor StructuredSessionCoordinator {
     private(set) var activeTurnID: String?
     private var sessionID: UUID?
     private var pendingApprovals: [String: ApprovalRequest] = [:]
+    private var pendingUserInputs: [String: UserInputRequest] = [:]
     private var lastSequence: UInt64?
     private var stopped = false
 
@@ -21,7 +22,10 @@ actor StructuredSessionCoordinator {
         continuation = stream.continuation
     }
 
-    func start(request: AgentSessionRequest) async throws {
+    func start(
+        request: AgentSessionRequest,
+        afterRuntimeStart: @MainActor @Sendable () throws -> Void = {}
+    ) async throws {
         guard state == .created else {
             throw AgentError.invalidState(expected: "created", actual: state)
         }
@@ -30,6 +34,7 @@ actor StructuredSessionCoordinator {
         do {
             try await runtime.start()
             beginConsumingEvents()
+            try await afterRuntimeStart()
             reference = try await runtime.createSession(request)
             state = .ready
         } catch {
@@ -54,8 +59,8 @@ actor StructuredSessionCoordinator {
                 throw AgentError.unsupportedCapability("steering")
             }
         case .interrupt:
-            guard state == .running || state == .awaitingApproval else {
-                throw AgentError.invalidState(expected: "running/awaitingApproval", actual: state)
+            guard state == .running || state == .awaitingApproval || state == .awaitingUserInput else {
+                throw AgentError.invalidState(expected: "running/awaitingApproval/awaitingUserInput", actual: state)
             }
             state = .interrupting
         case .resolveApproval(let resolution):
@@ -71,6 +76,15 @@ actor StructuredSessionCoordinator {
             }
             pendingApprovals.removeValue(forKey: resolution.approvalID)
             state = .running
+        case .resolveUserInput(let resolution):
+            guard state == .awaitingUserInput || state == .running,
+                  let request = pendingUserInputs[resolution.requestID],
+                  request.turnID == resolution.turnID,
+                  activeTurnID == resolution.turnID else {
+                throw AgentError.correlationMismatch("用户问题、turn 或 session 不一致")
+            }
+            pendingUserInputs.removeValue(forKey: resolution.requestID)
+            if state == .awaitingUserInput { state = .running }
         }
 
         do {
@@ -87,6 +101,7 @@ actor StructuredSessionCoordinator {
         consumeTask?.cancel()
         consumeTask = nil
         pendingApprovals.removeAll()
+        pendingUserInputs.removeAll()
         await runtime.stop()
         if state != .failed { state = .finished }
         continuation.finish()
@@ -146,6 +161,17 @@ actor StructuredSessionCoordinator {
             }
             pendingApprovals[approval.approvalID] = approval
             state = .awaitingApproval
+        case .userInputRequested(let request):
+            guard request.turnID == activeTurnID else {
+                state = .degraded
+                continuation.yield(diagnosticEvent(
+                    after: event,
+                    error: .correlationMismatch("用户问题不属于当前 turn")
+                ))
+                return
+            }
+            pendingUserInputs[request.requestID] = request
+            if request.isBlocking { state = .awaitingUserInput }
         case .turnCompleted(let turnID, _):
             guard activeTurnID == nil || activeTurnID == turnID else {
                 state = .degraded
@@ -157,6 +183,7 @@ actor StructuredSessionCoordinator {
             }
             activeTurnID = nil
             pendingApprovals.removeAll()
+            pendingUserInputs.removeAll()
             state = .ready
         case .failed:
             state = .failed

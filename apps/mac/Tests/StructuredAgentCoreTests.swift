@@ -106,7 +106,7 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
         providerID: .fake,
         providerVersion: "1.0",
         protocolName: "fake",
-        protocolVersion: "1",
+        protocolVersion: "2",
         capabilities: [.streamingText, .approvals]
     )
     private let sessionID: UUID
@@ -127,8 +127,6 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference {
         AgentSessionReference(providerID: .fake, opaqueID: request.sessionID.uuidString)
     }
-
-    func resumeSession(_ reference: AgentSessionReference) async throws {}
 
     func send(_ action: ToolAction) async throws {
         actions.append(action)
@@ -152,6 +150,7 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
             risk: .high,
             title: "运行命令",
             detail: "echo test",
+            availableDecisions: [.allowOnce, .allowSession, .deny, .cancel],
             expiresAt: Date().addingTimeInterval(60)
         )), turnID: turnID, approvalID: approvalID)
     }

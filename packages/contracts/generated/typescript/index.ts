@@ -1,5 +1,5 @@
 // Generated-file boundary. Replace this bootstrap with schema code generation.
-export type ProtocolVersion = '1';
+export type ProtocolVersion = '2';
 
 export interface Envelope<TPayload = Record<string, unknown>> {
   type: string;
@@ -38,14 +38,13 @@ export interface WorkspaceRegisteredPayload {
   remoteStartAllowed: boolean;
 }
 
-export type SessionRuntimeMode = 'terminal' | 'structured';
+export type SessionRuntimeMode = 'pty' | 'acp';
 
 export interface SessionStartedPayload {
   workspaceId: string;
   toolKey: string;
   displayName?: string;
   runtimeMode: SessionRuntimeMode;
-  webDisplayMode?: 'approval' | 'full';
   startedAt: string;
 }
 
@@ -78,7 +77,7 @@ export const envelopeSchema = {
   required: ['type', 'protocolVersion', 'messageId', 'deviceId', 'sentAt', 'payload'],
   properties: {
     type: { type: 'string', minLength: 1 },
-    protocolVersion: { const: '1' },
+    protocolVersion: { const: '2' },
     messageId: { type: 'string', format: 'uuid' },
     deviceId: { type: 'string', minLength: 1, maxLength: 128 },
     sessionId: { type: 'string', minLength: 1, maxLength: 128 },
@@ -147,8 +146,7 @@ export const sessionStartedSchema = {
     workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
     toolKey: { type: 'string', minLength: 1, maxLength: 64 },
     displayName: { type: 'string', minLength: 1, maxLength: 128 },
-    runtimeMode: { enum: ['terminal', 'structured'] },
-    webDisplayMode: { enum: ['approval', 'full'] },
+    runtimeMode: { enum: ['pty', 'acp'] },
     startedAt: { type: 'string', format: 'date-time' },
   },
   additionalProperties: false,
@@ -179,9 +177,9 @@ export interface ToolEventCorrelation {
 }
 
 export type ToolEventKind =
-  | 'turn.started' | 'assistant.delta' | 'reasoning.delta'
+  | 'turn.started' | 'user.message' | 'assistant.delta' | 'assistant.completed' | 'reasoning.delta'
   | 'command.started' | 'command.output' | 'command.completed'
-  | 'file.changed' | 'approval.requested' | 'approval.resolved' | 'plan.updated'
+  | 'file.changed' | 'approval.requested' | 'approval.resolved' | 'user-input.requested' | 'user-input.resolved' | 'plan.updated'
   | 'turn.completed' | 'warning' | 'error';
 
 export interface ToolEventPayload {
@@ -196,7 +194,12 @@ export type ToolTurnInterruptPayload = Record<string, never>;
 export interface ToolApprovalResolvePayload {
   approvalId: string;
   turnId: string;
-  decision: 'allowOnce' | 'deny';
+  decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
+}
+export interface ToolUserInputResolvePayload {
+  requestId: string;
+  turnId: string;
+  answers: Record<string, string[]>;
 }
 
 export interface TerminalInputPayload {
@@ -245,7 +248,7 @@ export const toolEventSchema = {
   type: 'object',
   required: ['kind', 'occurredAt', 'correlation', 'data'],
   properties: {
-    kind: { enum: ['turn.started', 'assistant.delta', 'reasoning.delta', 'command.started', 'command.output', 'command.completed', 'file.changed', 'approval.requested', 'approval.resolved', 'plan.updated', 'turn.completed', 'warning', 'error'] },
+    kind: { enum: ['turn.started', 'user.message', 'assistant.delta', 'assistant.completed', 'reasoning.delta', 'command.started', 'command.output', 'command.completed', 'file.changed', 'approval.requested', 'approval.resolved', 'user-input.requested', 'user-input.resolved', 'plan.updated', 'turn.completed', 'warning', 'error'] },
     occurredAt: { type: 'string', format: 'date-time' },
     correlation: {
       type: 'object',
@@ -276,7 +279,20 @@ export const toolApprovalResolveSchema = {
   properties: {
     approvalId: { type: 'string', minLength: 1, maxLength: 256 },
     turnId: { type: 'string', minLength: 1, maxLength: 256 },
-    decision: { enum: ['allowOnce', 'deny'] },
+    decision: { enum: ['allowOnce', 'allowSession', 'allowPolicy', 'deny', 'cancel'] },
+  },
+  additionalProperties: false,
+} as const;
+
+export const toolUserInputResolveSchema = {
+  type: 'object', required: ['requestId', 'turnId', 'answers'],
+  properties: {
+    requestId: { type: 'string', minLength: 1, maxLength: 256 },
+    turnId: { type: 'string', minLength: 1, maxLength: 256 },
+    answers: {
+      type: 'object', minProperties: 1,
+      additionalProperties: { type: 'array', minItems: 1, items: { type: 'string', maxLength: 65_536 } },
+    },
   },
   additionalProperties: false,
 } as const;

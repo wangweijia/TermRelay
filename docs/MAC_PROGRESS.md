@@ -10,7 +10,7 @@
 
 macOS 端已经完成本地终端、Server WebSocket 闭环和同一 App 窗口内的多 Session。每个
 Shell Session 拥有独立 PTY；每个 Codex Session 拥有独立 App Server、Unix Socket、Thread、
-PTY TUI 和结构化监听连接。侧边栏可独立切换和停止；独立 macOS 原生窗口仍未实现。
+PTY TUI、控制连接和审批 Hook Bridge。侧边栏可独立切换和停止；独立 macOS 原生窗口仍未实现。
 
 - 工程骨架完成度：约 40%。
 - Mac MVP 功能完成度：约 25%～30%。
@@ -151,7 +151,7 @@ starting → running → stopping → finished
 | 多窗口和 ManagedSession | 部分完成 | 同一 App 窗口支持多个独立 PTY Session 并通过侧边栏切换；尚无独立 macOS 窗口 |
 | 菜单栏驻留 | 未实现 | 无 `MenuBarExtra` 或 AppKit 生命周期管理 |
 | 退出确认和进程清理 | 部分完成 | App 退出会终止进程，尚无会话数量确认框 |
-| 本地终端输入、停止和恢复 UI | 部分完成 | 输入、Ctrl-C、停止已完成；恢复未实现 |
+| 本地终端输入与停止 UI | 已完成 | 输入、Ctrl-C、停止已完成；窗口停止后进入终态，不提供恢复 |
 | 按工具配置启动代理 | 已完成 | 支持继承、禁用、自定义；同时注入大小写 HTTP/HTTPS/ALL/NO_PROXY |
 | 按工具配置可执行路径 | 已完成 | 设置页可输入或选择文件；留空时继续从 PATH 和常用目录查找 |
 
@@ -183,18 +183,22 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 - AgentCore、capability、action、event、状态机和错误边界已建立。
 - FakeAgentAdapter 已验证 turn、审批关联、事件序号和幂等停止。
 - Codex App Server stdio Process 与 JSON-RPC 请求关联、超时和反向 request 已实现。
-- `codex-cli 0.153.4` 的真实 `initialize` 与 ephemeral `thread/start` 已通过，无模型调用。
+- `codex-cli 0.153.4` 的真实 `initialize` 与 `thread/start` 探针已通过，无模型调用。
 - CLI 版本仅记录到诊断，不设严格版本白名单；兼容性由 App Server 实际握手和方法响应决定。
-- 已映射助手/reasoning/plan 增量、命令、文件变化、审批、turn completion 和 error。
+- App Server 协议映射器已覆盖助手/reasoning/plan 增量、命令、文件变化和 error；当前 TUI
+  共存模式使用同步 Hook 输出 turn 生命周期与审批，完整内容由终端流提供。
 - 审批仅提供单次允许和拒绝；停止、未知请求和关联不匹配均不会自动批准。
 - `LocalStructuredAgentSession` 已接入 App 会话列表与本地 UI，Terminal/Structured runtime 可并存。
 - `tool.event`、`tool.turn.start`、`tool.turn.interrupt`、`tool.approval.resolve` 已接入 RemoteClient。
 - Codex PTY 与 Codex App Server 使用同一份按工具代理配置快照；配置仅作用于新会话。
 - 新建会话只选择 Shell/Codex；Codex 的底层结构化 runtime 不再作为一级 UI 选项。
 - Codex 可选择 Web“仅审批/终端完整流”，两种模式都持续接收结构化审批事件。
-- 每个 Codex 会话独占 App Server Unix Socket、Thread、PTY TUI 和 TermRelay WebSocket 监听连接。
-- TUI 使用 `codex resume --remote unix://...` 进入监听端创建的同一 Thread；多会话互不影响。
-- 已用 Codex CLI 0.153.4 实测第二客户端可收到 TUI 发起的 turn、命令和审批 request。
+- 每个 Codex 会话独占 App Server Unix Socket、Thread、PTY TUI、控制连接和 Hook Bridge。
+- TUI 使用 `codex --remote unix://...` 创建全新 Thread并保持唯一交互订阅；TermRelay 不调用
+  `thread/resume`，审批通过同步 `PermissionRequest` Hook 转发，多会话互不影响。
+- 所有窗口均为一次性生命周期；停止/关闭时删除 Codex rollout，退出 App 会等待会话清理完成。
+- 已移除依赖第二客户端 `thread/resume` 的方案；Codex 在首个 turn 前延迟创建 rollout，
+  该调用会稳定返回 `-32600 no rollout found`。
 - Codex 会话的终端输出与结构化事件使用统一、稳定的 Relay 序号及同一断线内存队列。
 
 ### 阶段 4：发布与加固
@@ -208,7 +212,7 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 - App 图标和正式菜单。
 - Developer ID 签名与 Apple 公证。
 - 安装包或自动升级方案。
-- 崩溃恢复和生产日志。
+- 崩溃后的残留清理和生产日志；不恢复旧窗口。
 
 ## 当前运行效果
 
@@ -228,8 +232,8 @@ Codex App Server 会话，Web 可发起/中断 Turn、查看归一化事件并�
 ## MVP 验收情况
 
 PTY 和结构化审批的最小纵向闭环已经形成并通过自动化测试；Codex 0.153.4 的双客户端
-App Server 行为已实测。仍需 GUI 人工回归多 Codex 会话、远程审批后 TUI 状态同步，以及断网
-恢复期间的完整性。
+App Server 行为已实测。仍需 GUI 人工回归多 Codex 会话、远程审批后 TUI 状态同步，以及网络
+重连补传期间的完整性。
 
 ## 下一步优先级
 
@@ -238,7 +242,7 @@ App Server 行为已实测。仍需 GUI 人工回归多 Codex 会话、远程审
 3. 增加终端事件物理过期清理与单会话存储配额。
 4. 实测两个以上并发 Codex 组合会话、远程审批、长输出和慢浏览器背压。
 5. 从 JSON Schema 自动生成 Swift/TypeScript DTO，并在 CI 检查漂移。
-6. 完善结构化 Agent 的审计、恢复、通知和更多审批类型。
+6. 完善结构化 Agent 的审计、一次性生命周期清理、通知和更多审批类型。
 
 ## 维护方式
 

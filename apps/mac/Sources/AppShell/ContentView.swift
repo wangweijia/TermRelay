@@ -113,44 +113,51 @@ struct ContentView: View {
 }
 
 private struct StructuredAgentSessionView: View {
+    @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
     @State private var prompt = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayName).font(.headline)
                     Text(session.directory.path).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(session.state.rawValue).font(.caption.monospaced()).foregroundStyle(.secondary)
+                Label("ACP \(session.state.rawValue)", systemImage: "sparkles")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
                 Button("中断") { Task { _ = await session.interrupt() } }
-                    .disabled(session.state != .running && session.state != .awaitingApproval)
+                    .disabled(![.running, .awaitingApproval, .awaitingUserInput].contains(session.state))
+                Button("停止", role: .destructive) { appModel.stopLocalTerminal(id: session.id) }
+                    .disabled([.finished, .failed].contains(session.state))
             }
             .padding()
             .background(.bar)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(session.events, id: \.sequence) { event in
-                        StructuredEventRow(event: event, session: session)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(session.timeline) { item in
+                            AgentTimelineRow(item: item, session: session)
+                                .id(item.id)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+                .onChange(of: session.timeline.last?.id) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .bottom) }
+                }
             }
-            .background(Color(nsColor: NSColor(
-                calibratedRed: 0.035,
-                green: 0.05,
-                blue: 0.07,
-                alpha: 1
-            )))
+            .background(Color(nsColor: .textBackgroundColor))
 
             HStack(alignment: .bottom, spacing: 10) {
                 TextEditor(text: $prompt)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
                 Button("发送") {
@@ -166,86 +173,211 @@ private struct StructuredAgentSessionView: View {
     }
 }
 
-private struct StructuredEventRow: View {
-    let event: ToolEvent
+private struct AgentTimelineRow: View {
+    let item: AgentTimelineItem
+    @ObservedObject var session: LocalStructuredAgentSession
+
+    @ViewBuilder
+    var body: some View {
+        switch item {
+        case .message(let message):
+            HStack {
+                if message.role == .user { Spacer(minLength: 80) }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(message.role == .user ? "你" : "Codex")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(message.text).textSelection(.enabled)
+                }
+                .padding(12)
+                .background(message.role == .user ? Color.accentColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                if message.role == .assistant { Spacer(minLength: 30) }
+            }
+        case .reasoning(_, let text):
+            DisclosureGroup("思考过程") {
+                Text(text).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+            }
+            .padding(10).background(.quaternary).clipShape(RoundedRectangle(cornerRadius: 9))
+        case .plan(_, let text):
+            AgentCard(title: "计划", icon: "list.bullet.clipboard") {
+                Text(text).textSelection(.enabled)
+            }
+        case .command(let command):
+            AgentCard(
+                title: command.isRunning ? "命令执行中" : "命令已完成",
+                icon: command.isRunning ? "gearshape.2" : "terminal"
+            ) {
+                Text(command.command.isEmpty ? "等待命令详情…" : command.command)
+                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                if !command.output.isEmpty {
+                    ScrollView {
+                        Text(command.output)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 220)
+                }
+                if !command.isRunning { Text("退出码：\(command.exitCode.map(String.init) ?? "—")").font(.caption) }
+            }
+        case .fileChange(let file):
+            AgentCard(title: "文件变更", icon: "doc.badge.gearshape") {
+                Text(file.summary).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            }
+        case .approval(let approval):
+            AgentApprovalCard(value: approval, session: session)
+        case .userInput(let input):
+            AgentUserInputCard(value: input, session: session)
+        case .notice(_, let text, let isError):
+            Label(text, systemImage: isError ? "xmark.octagon.fill" : "checkmark.circle")
+                .font(.callout)
+                .foregroundStyle(isError ? Color.red : Color.secondary)
+        }
+    }
+}
+
+private struct AgentCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let content: Content
+
+    init(title: String, icon: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label(title, systemImage: icon).font(.headline)
+            content
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).stroke(.separator) }
+    }
+}
+
+private struct AgentApprovalCard: View {
+    let value: AgentApprovalViewState
     @ObservedObject var session: LocalStructuredAgentSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.caption.monospaced()).foregroundStyle(.secondary)
-            Text(detail)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundStyle(eventColor)
-                .textSelection(.enabled)
-            if case .approvalRequested(let approval) = event.payload {
+        AgentCard(title: value.request.title, icon: "checkmark.shield") {
+            if let detail = value.request.detail {
+                Text(detail).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            }
+            if let decision = value.decision {
+                Text("已处理：\(decisionLabel(decision))").font(.caption).foregroundStyle(.secondary)
+            } else {
                 HStack {
-                    Button("拒绝", role: .destructive) {
-                        resolve(approval, .deny)
+                    ForEach(value.request.availableDecisions, id: \.rawValue) { decision in
+                        if decision == .allowOnce {
+                            decisionButton(decision).buttonStyle(.borderedProminent)
+                        } else {
+                            decisionButton(decision).buttonStyle(.bordered)
+                        }
                     }
-                    Button("仅允许一次") {
-                        resolve(approval, .allowOnce)
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
             }
         }
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func resolve(_ approval: ApprovalRequest, _ decision: ApprovalDecision) {
-        Task {
-            _ = await session.resolveApproval(
-                approvalID: approval.approvalID,
-                turnID: approval.turnID,
-                decision: decision
-            )
+    private func decisionButton(_ decision: ApprovalDecision) -> some View {
+        Button(decisionLabel(decision), role: decision == .deny ? .destructive : nil) {
+            Task {
+                _ = await session.resolveApproval(
+                    approvalID: value.request.approvalID,
+                    turnID: value.request.turnID,
+                    decision: decision
+                )
+            }
         }
     }
 
-    private var label: String {
-        switch event.payload {
-        case .sessionStarted: "Provider ready"
-        case .turnStarted: "Turn started"
-        case .assistantTextDelta: "Assistant"
-        case .reasoningDelta: "Reasoning"
-        case .commandStarted: "Command"
-        case .commandOutput: "Command output"
-        case .commandCompleted: "Command completed"
-        case .fileChanged: "File changed"
-        case .approvalRequested: "Approval required"
-        case .approvalResolved: "Approval resolved"
-        case .planUpdated: "Plan"
-        case .turnCompleted: "Turn completed"
-        case .warning: "Warning"
-        case .failed: "Error"
+    private func decisionLabel(_ decision: ApprovalDecision) -> String {
+        switch decision {
+        case .allowOnce: "允许一次"
+        case .allowSession: "本会话允许"
+        case .allowPolicy: "允许并应用规则"
+        case .deny: "拒绝"
+        case .cancel: "取消"
+        }
+    }
+}
+
+private struct AgentUserInputCard: View {
+    let value: AgentUserInputViewState
+    @ObservedObject var session: LocalStructuredAgentSession
+    @State private var selected: [String: String] = [:]
+    @State private var custom: [String: String] = [:]
+
+    var body: some View {
+        AgentCard(title: "Codex 需要你的回答", icon: "questionmark.bubble") {
+            if let answers = value.answers {
+                ForEach(value.request.questions, id: \.id) { question in
+                    Text("\(question.header)：\(answers[question.id]?.joined(separator: "、") ?? "—")")
+                }
+            } else {
+                ForEach(value.request.questions, id: \.id) { question in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(question.header).font(.headline)
+                        Text(question.question).font(.callout)
+                        if !question.options.isEmpty {
+                            Picker(question.header, selection: binding(for: question.id)) {
+                                Text("请选择").tag("")
+                                ForEach(question.options, id: \.label) { option in
+                                    Text(option.label).tag(option.label)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                        if question.allowsOther || question.options.isEmpty {
+                            if question.isSecret {
+                                SecureField("输入回答", text: customBinding(for: question.id))
+                            } else {
+                                TextField("输入回答", text: customBinding(for: question.id))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                Button("提交回答") {
+                    let answers = Dictionary(uniqueKeysWithValues: value.request.questions.map { question in
+                        let answer = custom[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return (question.id, [answer?.isEmpty == false ? answer! : selected[question.id] ?? ""])
+                    })
+                    Task {
+                        _ = await session.resolveUserInput(
+                            requestID: value.request.requestID,
+                            turnID: value.request.turnID,
+                            answers: answers
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasAllAnswers)
+            }
         }
     }
 
-    private var detail: String {
-        switch event.payload {
-        case .sessionStarted(let reference): reference.opaqueID
-        case .turnStarted(let id): id
-        case .assistantTextDelta(let text), .reasoningDelta(let text), .planUpdated(let text): text
-        case .commandStarted(_, let command): command
-        case .commandOutput(_, let text): text
-        case .commandCompleted(_, let code): "exit \(code.map(String.init) ?? "—")"
-        case .fileChanged(_, let summary): summary
-        case .approvalRequested(let approval): approval.detail ?? approval.title
-        case .approvalResolved(_, _, let decision): decision.rawValue
-        case .turnCompleted(_, let status): status.rawValue
-        case .warning(_, let message), .failed(_, let message): message
+    private var hasAllAnswers: Bool {
+        value.request.questions.allSatisfy { question in
+            custom[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                || selected[question.id]?.isEmpty == false
         }
     }
 
-    private var eventColor: Color {
-        switch event.payload {
-        case .failed: .red
-        case .warning, .approvalRequested: .orange
-        case .assistantTextDelta: Color(nsColor: .textColor)
-        case .reasoningDelta: .secondary
-        default: Color(nsColor: .systemGreen)
-        }
+    private func binding(for id: String) -> Binding<String> {
+        Binding(get: { selected[id] ?? "" }, set: { selected[id] = $0 })
+    }
+
+    private func customBinding(for id: String) -> Binding<String> {
+        Binding(get: { custom[id] ?? "" }, set: { custom[id] = $0 })
     }
 }
 

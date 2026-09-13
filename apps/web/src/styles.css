@@ -231,6 +231,10 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .approval-actions button, .agent-composer button { padding: 7px 11px; border: 1px solid #3b4856; border-radius: 6px; color: #c8d2dc; background: #18212b; cursor: pointer; }
 .approval-actions button.approve, .agent-composer button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
 .approval-actions button:disabled, .agent-composer button:disabled { opacity: .45; cursor: not-allowed; }
+.user-input-card label { display: grid; gap: 3px; color: #e1e8ef; }
+.user-input-card label small { color: #8f9ca9; font-weight: 400; }
+.user-input-card input, .user-input-card select { width: 100%; padding: 8px 10px; border: 1px solid #3b4856; border-radius: 6px; color: #e2eaf1; background: #111820; }
+.user-input-card > button { justify-self: end; padding: 7px 11px; border: 1px solid #327453; border-radius: 6px; color: #a8f0c8; background: #173025; cursor: pointer; }
 .agent-composer { display: grid; gap: 10px; padding: 14px 18px 20px; border-top: 1px solid #27313d; background: #0d1218; }
 .agent-composer textarea { width: 100%; resize: vertical; padding: 11px; border: 1px solid #344251; border-radius: 7px; color: #e2eaf1; background: #121a22; font: 13px/1.5 inherit; }
 .agent-composer textarea:focus { outline: 1px solid #72e0a5; border-color: #72e0a5; }

@@ -13,7 +13,7 @@ final class RemoteClientTests: XCTestCase {
         let sessionID = UUID()
         let input = IncomingRelayEnvelope(
             type: "terminal.input",
-            protocolVersion: "1",
+            protocolVersion: "2",
             messageId: UUID(),
             deviceId: "device",
             sessionId: sessionID.uuidString,
@@ -33,7 +33,7 @@ final class RemoteClientTests: XCTestCase {
 
         let resize = IncomingRelayEnvelope(
             type: "terminal.resize",
-            protocolVersion: "1",
+            protocolVersion: "2",
             messageId: UUID(),
             deviceId: "device",
             sessionId: sessionID.uuidString,
@@ -54,7 +54,7 @@ final class RemoteClientTests: XCTestCase {
         )
         let malformed = IncomingRelayEnvelope(
             type: "terminal.input",
-            protocolVersion: "1",
+            protocolVersion: "2",
             messageId: UUID(),
             deviceId: "device",
             sessionId: UUID().uuidString,
@@ -75,7 +75,7 @@ final class RemoteClientTests: XCTestCase {
         func envelope(type: String, payload: JSONValue) -> IncomingRelayEnvelope {
             IncomingRelayEnvelope(
                 type: type,
-                protocolVersion: "1",
+                protocolVersion: "2",
                 messageId: UUID(),
                 deviceId: "device",
                 sessionId: sessionID.uuidString,
@@ -106,5 +106,19 @@ final class RemoteClientTests: XCTestCase {
         XCTAssertEqual(approvalID, "approval-1")
         XCTAssertEqual(turnID, "turn-1")
         XCTAssertEqual(decision, .allowOnce)
+
+        let userInput = await client.decodeCommand(envelope(
+            type: "tool.user-input.resolve",
+            payload: .object([
+                "requestId": .string("input-1"), "turnId": .string("turn-1"),
+                "answers": .object(["strategy": .array([.string("修复")])]),
+            ])
+        ))
+        guard case .resolveUserInput(_, _, let requestID, let inputTurnID, let answers) = userInput else {
+            return XCTFail("Expected requestUserInput resolution")
+        }
+        XCTAssertEqual(requestID, "input-1")
+        XCTAssertEqual(inputTurnID, "turn-1")
+        XCTAssertEqual(answers, ["strategy": ["修复"]])
     }
 }

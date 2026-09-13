@@ -70,7 +70,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       this.sendEnvelope<DeviceRegisteredPayload>(client, {
         type: 'device.registered',
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: randomUUID(),
         deviceId: device.deviceId,
         sentAt: new Date().toISOString(),
@@ -206,7 +206,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const deviceId = this.registry.getDeviceId(client) ?? 'unregistered';
     this.sendEnvelope<ProtocolErrorPayload>(client, {
       type: 'protocol.error',
-      protocolVersion: '1',
+      protocolVersion: '2',
       messageId: randomUUID(),
       deviceId,
       sentAt: new Date().toISOString(),

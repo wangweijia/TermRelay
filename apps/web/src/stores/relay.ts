@@ -219,7 +219,7 @@ export const useRelayStore = defineStore('relay', {
       if (this.socket?.readyState !== WebSocket.OPEN) return;
       const envelope: WireEnvelope = {
         type,
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: createUuid(),
         deviceId: session.deviceId,
         sessionId: session.id,
@@ -230,7 +230,7 @@ export const useRelayStore = defineStore('relay', {
     },
 
     sendCommand(
-      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve',
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
       payload: Record<string, unknown>,
     ): void {
       const session = this.selectedSession;
@@ -250,7 +250,7 @@ export const useRelayStore = defineStore('relay', {
       const commandId = createUuid();
       const envelope: WireEnvelope = {
         type,
-        protocolVersion: '1',
+        protocolVersion: '2',
         messageId: createUuid(),
         deviceId: session.deviceId,
         sessionId: session.id,
@@ -293,8 +293,12 @@ export const useRelayStore = defineStore('relay', {
       this.sendCommand('tool.turn.interrupt', {});
     },
 
-    resolveApproval(approvalId: string, turnId: string, decision: 'allowOnce' | 'deny'): void {
+    resolveApproval(approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {
       this.sendCommand('tool.approval.resolve', { approvalId, turnId, decision });
+    },
+
+    resolveUserInput(requestId: string, turnId: string, answers: Record<string, string[]>): void {
+      this.sendCommand('tool.user-input.resolve', { requestId, turnId, answers });
     },
 
     handleSocketMessage(message: MessageEvent): void {
@@ -304,7 +308,7 @@ export const useRelayStore = defineStore('relay', {
           data?: WireEnvelope;
         };
         const envelope = wire.data;
-        if (!envelope || envelope.protocolVersion !== '1') return;
+        if (!envelope || envelope.protocolVersion !== '2') return;
         if (envelope.type === 'protocol.error') {
           const payload = envelope.payload as { message?: string };
           this.error = payload.message ?? '实时订阅被 Server 拒绝。';

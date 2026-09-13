@@ -16,7 +16,6 @@ export interface SessionRecord {
   toolKey: string;
   displayName: string | null;
   runtimeMode: SessionEntity['runtimeMode'];
-  webDisplayMode?: SessionEntity['webDisplayMode'];
   status: SessionStatus;
   stateVersion: number;
   startedAt: string | null;
@@ -76,7 +75,6 @@ export class SessionRepository {
           existing.workspaceId === payload.workspaceId &&
           existing.toolKey === payload.toolKey &&
           existing.runtimeMode === payload.runtimeMode &&
-          existing.webDisplayMode === (payload.webDisplayMode ?? 'full') &&
           startEvent !== null &&
           sameEvent(startEvent, 'session.started', payload);
         if (sameIdentity) {
@@ -100,7 +98,6 @@ export class SessionRepository {
         toolKey: payload.toolKey,
         displayName: payload.displayName ?? null,
         runtimeMode: payload.runtimeMode,
-        webDisplayMode: payload.webDisplayMode ?? 'full',
         status: 'running',
         stateVersion: '0',
         startedAt: new Date(payload.startedAt),
@@ -334,9 +331,7 @@ export function canAppendSessionEvent(
   runtimeMode: SessionEntity['runtimeMode'],
   type: 'terminal.output' | 'tool.event',
 ): boolean {
-  return type === 'terminal.output'
-    ? runtimeMode === 'terminal' || runtimeMode === 'structured'
-    : runtimeMode === 'structured';
+  return type === 'terminal.output' ? runtimeMode === 'pty' : runtimeMode === 'acp';
 }
 
 async function persistApprovalProjection(
@@ -366,7 +361,8 @@ async function persistApprovalProjection(
     return;
   }
   if (payload.kind === 'approval.resolved') {
-    const decision = data.decision === 'allowOnce' ? 'approved' : 'denied';
+    const decision = ['allowOnce', 'allowSession', 'allowPolicy'].includes(String(data.decision))
+      ? 'approved' : 'denied';
     await manager.query(
       `UPDATE approvals SET decision = ?, decided_by = 'remote-user', decided_at = CURRENT_TIMESTAMP(3)
        WHERE session_id = ? AND approval_key = ? AND decision = 'pending'`,
@@ -405,7 +401,6 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     toolKey: session.toolKey,
     displayName: session.displayName,
     runtimeMode: session.runtimeMode,
-    webDisplayMode: session.webDisplayMode,
     status: session.status,
     stateVersion: Number(session.stateVersion),
     startedAt: session.startedAt?.toISOString() ?? null,
