@@ -2,10 +2,6 @@ import Darwin
 import Foundation
 
 final class CodexAppServerHost: @unchecked Sendable {
-    private static let startupCleanupTask = Task.detached(priority: .utility) {
-        cleanupAbandonedRuntimes()
-    }
-
     struct RuntimeMetadata: Codable, Sendable {
         let id: UUID
         let pid: Int32
@@ -134,11 +130,11 @@ final class CodexAppServerHost: @unchecked Sendable {
     /// Removes only processes and paths whose command line or metadata proves
     /// they were created by TermRelay. Other Codex app-server instances are untouched.
     static func beginStartupCleanup() {
-        _ = startupCleanupTask
+        Task { await CodexRuntimeJanitor.shared.begin() }
     }
 
     static func waitForStartupCleanup() async {
-        await startupCleanupTask.value
+        await CodexRuntimeJanitor.shared.waitUntilFinished()
     }
 
     static func cleanupAbandonedRuntimes(
@@ -318,6 +314,23 @@ final class CodexAppServerHost: @unchecked Sendable {
             usleep(50_000)
         }
         kill(pid, SIGKILL)
+    }
+}
+
+private actor CodexRuntimeJanitor {
+    static let shared = CodexRuntimeJanitor()
+    private var cleanupTask: Task<Void, Never>?
+
+    func begin() {
+        guard cleanupTask == nil else { return }
+        cleanupTask = Task.detached(priority: .utility) {
+            CodexAppServerHost.cleanupAbandonedRuntimes()
+        }
+    }
+
+    func waitUntilFinished() async {
+        begin()
+        await cleanupTask?.value
     }
 }
 

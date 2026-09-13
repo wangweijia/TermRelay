@@ -255,6 +255,8 @@ final class AppModel: ObservableObject {
         Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)
             await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+            await session.start()
+            guard session.state == .ready else { return }
             await remoteClient.publishSession(
                 id: session.id,
                 workspaceId: workspaceID,
@@ -263,7 +265,6 @@ final class AppModel: ObservableObject {
                 runtimeMode: .acp,
                 startedAt: session.startedAt
             )
-            await session.start()
         }
         errorMessage = nil
         sessionName = ""
