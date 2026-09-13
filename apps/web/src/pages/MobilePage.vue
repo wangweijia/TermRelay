@@ -82,8 +82,8 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
           <div><button v-if="relay.selectedSession.runtimeMode === 'pty'" :disabled="!relay.selectedSessionInteractive" @click="relay.interruptSession">Ctrl-C</button><button class="danger" :disabled="!relay.selectedSessionInteractive" @click="relay.stopSession">停止</button></div>
         </div>
         <div v-if="relay.loadingHistory" class="mobile-empty">加载历史中…</div>
-        <TerminalView v-else-if="relay.selectedSession.runtimeMode === 'pty'" :key="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" mobile-composer @input="relay.sendTerminalInput" @resize="relay.resizeTerminal" />
-        <StructuredAgentView v-else :key="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :shortcut-enabled="false" @start-turn="relay.startToolTurn" @interrupt="relay.interruptToolTurn" @resolve-approval="relay.resolveApproval" @resolve-user-input="relay.resolveUserInput" />
+        <TerminalView v-else-if="relay.selectedSession.runtimeMode === 'pty'" :key="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :scroll-revision="relay.scrollToLatestRevision" mobile-composer @input="relay.sendTerminalInput" @resize="relay.resizeTerminal" />
+        <StructuredAgentView v-else :key="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :scroll-revision="relay.scrollToLatestRevision" :shortcut-enabled="false" @start-turn="relay.startToolTurn" @interrupt="relay.interruptToolTurn" @resolve-approval="relay.resolveApproval" @resolve-user-input="relay.resolveUserInput" />
       </template>
       <div v-else class="mobile-empty"><button @click="activeTab = 'sessions'">选择会话</button></div>
     </section>

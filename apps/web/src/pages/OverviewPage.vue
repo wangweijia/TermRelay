@@ -177,6 +177,7 @@ onBeforeUnmount(() => {
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
+          :scroll-revision="relay.scrollToLatestRevision"
           @input="relay.sendTerminalInput"
           @resize="relay.resizeTerminal"
         />
@@ -185,6 +186,7 @@ onBeforeUnmount(() => {
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
+          :scroll-revision="relay.scrollToLatestRevision"
           @start-turn="relay.startToolTurn"
           @interrupt="relay.interruptToolTurn"
           @resolve-approval="relay.resolveApproval"

@@ -8,7 +8,8 @@ const props = withDefaults(defineProps<{
   events: SessionEventRecord[];
   interactive: boolean;
   mobileComposer?: boolean;
-}>(), { mobileComposer: false });
+  scrollRevision?: number;
+}>(), { mobileComposer: false, scrollRevision: 0 });
 const emit = defineEmits<{
   input: [data: Uint8Array];
   resize: [columns: number, rows: number];
@@ -20,6 +21,7 @@ let terminal: Terminal | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let lastSize: { columns: number; rows: number } | undefined;
 let resizeFrame: number | undefined;
+let terminalPinnedToBottom = true;
 
 onMounted(() => {
   terminal = new Terminal({
@@ -42,7 +44,11 @@ onMounted(() => {
   terminal.onData((value) => {
     if (props.interactive && !props.mobileComposer) emit('input', new TextEncoder().encode(value));
   });
-  renderEvents(props.events);
+  terminal.onScroll(() => {
+    if (!terminal) return;
+    terminalPinnedToBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
+  });
+  renderEvents(props.events, true);
   resizeObserver = new ResizeObserver(scheduleResize);
   resizeObserver.observe(container.value!);
   scheduleResize();
@@ -51,6 +57,11 @@ onMounted(() => {
 watch(
   () => props.events,
   (events) => renderEvents(events),
+);
+
+watch(
+  () => props.scrollRevision,
+  () => scrollToLatest(),
 );
 
 watch(
@@ -66,15 +77,29 @@ onBeforeUnmount(() => {
   terminal?.dispose();
 });
 
-function renderEvents(events: SessionEventRecord[]): void {
+function renderEvents(events: SessionEventRecord[], forceScroll = false): void {
   if (!terminal) return;
+  const shouldScroll = forceScroll || terminalPinnedToBottom;
+  const output: Uint8Array[] = [];
   for (const event of events) {
     if (event.type !== 'terminal.output' || rendered.has(event.seq)) continue;
     const data = event.payload.data;
     if (typeof data !== 'string') continue;
-    terminal.write(decodeBase64(data));
+    output.push(decodeBase64(data));
     rendered.add(event.seq);
   }
+  output.forEach((data, index) => {
+    const isLast = index === output.length - 1;
+    terminal?.write(data, isLast && shouldScroll ? scrollToLatest : undefined);
+  });
+  if (forceScroll && !output.length) scrollToLatest();
+}
+
+function scrollToLatest(): void {
+  requestAnimationFrame(() => {
+    terminal?.scrollToBottom();
+    terminalPinnedToBottom = true;
+  });
 }
 
 function scheduleResize(): void {

@@ -113,6 +113,8 @@ struct ContentView: View {
 }
 
 private struct StructuredAgentSessionView: View {
+    private static let timelineBottomID = "structured-agent-timeline-bottom"
+
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
@@ -144,13 +146,29 @@ private struct StructuredAgentSessionView: View {
                             AgentTimelineRow(item: item, session: session)
                                 .id(item.id)
                         }
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.timelineBottomID)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
                 }
+                .onAppear {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
+                    }
+                }
+                .onChange(of: appModel.connectionState) { _, state in
+                    guard state == .connected else { return }
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
+                    }
+                }
                 .onChange(of: session.timeline.last?.id) { _, id in
-                    guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .bottom) }
+                    guard id != nil else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
+                    }
                 }
             }
             .background(Color(nsColor: .textBackgroundColor))
@@ -426,7 +444,10 @@ private struct ActiveSessionView: View {
         VStack(spacing: 0) {
             SessionToolbar(session: session, displayName: displayName)
 
-            LocalTerminalPane(session: session)
+            LocalTerminalPane(
+                session: session,
+                connectionState: appModel.connectionState
+            )
                 .padding(14)
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -493,10 +514,11 @@ private struct SessionToolbar: View {
 
 private struct LocalTerminalPane: View {
     @ObservedObject var session: LocalTerminalSession
+    let connectionState: ConnectionState
 
     var body: some View {
         VStack(spacing: 8) {
-            TerminalContainerView(session: session)
+            TerminalContainerView(session: session, connectionState: connectionState)
                 .id(session.id)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay {

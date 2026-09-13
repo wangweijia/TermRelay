@@ -36,6 +36,7 @@ export const useRelayStore = defineStore('relay', {
     refreshTimer: undefined as number | undefined,
     reconnectAttempt: 0,
     selectionVersion: 0,
+    scrollToLatestRevision: 0,
     stopped: false,
     commandStatus: undefined as string | undefined,
   }),
@@ -366,6 +367,9 @@ export const useRelayStore = defineStore('relay', {
             payload.events,
           );
           this.lastSeqBySession[payload.session.id] = payload.latestSeq;
+          if (payload.session.id === this.selectedSessionId) {
+            this.scrollToLatestRevision += 1;
+          }
           return;
         }
         if (envelope.type === 'session.updated') {

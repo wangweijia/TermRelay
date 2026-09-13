@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
@@ -18,13 +18,15 @@ const props = withDefaults(defineProps<{
   events: SessionEventRecord[];
   interactive: boolean;
   shortcutEnabled?: boolean;
-}>(), { shortcutEnabled: true });
+  scrollRevision?: number;
+}>(), { shortcutEnabled: true, scrollRevision: 0 });
 const emit = defineEmits<{
   startTurn: [text: string]; interrupt: [];
   resolveApproval: [approvalId: string, turnId: string, decision: Decision];
   resolveUserInput: [requestId: string, turnId: string, answers: Record<string, string[]>];
 }>();
 const prompt = ref('');
+const timelineElement = ref<HTMLElement>();
 const sendShortcut = ref<SendShortcut>(loadSendShortcut());
 const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
@@ -103,6 +105,23 @@ function handlePromptKeydown(event: KeyboardEvent): void {
   event.preventDefault();
   if (props.interactive && prompt.value.trim()) submitTurn();
 }
+let timelinePinnedToBottom = true;
+function handleTimelineScroll(): void {
+  const element = timelineElement.value;
+  if (!element) return;
+  timelinePinnedToBottom = element.scrollHeight - element.scrollTop - element.clientHeight <= 80;
+}
+async function scrollToLatest(force: boolean): Promise<void> {
+  if (!force && !timelinePinnedToBottom) return;
+  await nextTick();
+  const element = timelineElement.value;
+  if (!element) return;
+  element.scrollTop = element.scrollHeight;
+  timelinePinnedToBottom = true;
+}
+onMounted(() => void scrollToLatest(true));
+watch(() => props.scrollRevision, () => void scrollToLatest(true));
+watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
 function submitAnswers(item: TimelineItem): void {
   const requestId = text(item.data, 'requestId');
@@ -117,7 +136,7 @@ function submitAnswers(item: TimelineItem): void {
 
 <template>
   <section class="agent-view">
-    <div class="agent-timeline">
+    <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll">
       <article v-for="item in timeline" :key="item.id" class="agent-event" :data-kind="item.kind">
         <small>{{ item.kind }}</small>
         <p v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">{{ item.text }}</p>
