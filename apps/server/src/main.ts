@@ -5,6 +5,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 import { WsAdapter } from '@nestjs/platform-ws';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
@@ -22,6 +23,10 @@ async function bootstrap(): Promise<void> {
       root: publicDirectory,
       prefix: '/',
     });
+    const fastify = app.getHttpAdapter().getInstance();
+    const mobilePage = (_request: FastifyRequest, reply: FastifyReply) => reply.sendFile('index.html');
+    fastify.get('/mobile', mobilePage);
+    fastify.get('/mobile/', mobilePage);
   }
 
   const port = Number.parseInt(process.env.PORT ?? '3007', 10);
