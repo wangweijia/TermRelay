@@ -31,6 +31,17 @@ export interface SessionEventRecord {
   createdAt: string;
 }
 
+export interface PendingApprovalRecord {
+  sessionId: string;
+  sessionName: string;
+  approvalId: string;
+  turnId: string;
+  risk: string;
+  request: Record<string, unknown>;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export type SessionWriteResult =
   | { status: 'accepted'; event: SessionEventRecord }
   | { status: 'duplicate' }
@@ -227,6 +238,25 @@ export class SessionRepository {
     if (!this.dataSource) return undefined;
     const session = await this.repository.findOneBy({ id, deletedAt: IsNull() });
     return session ? toSessionRecord(session) : undefined;
+  }
+
+  async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
+    if (!this.dataSource) return [];
+    const rows = await this.dataSource.query<Array<Record<string, unknown>>>(
+      `SELECT a.session_id, COALESCE(s.display_name, s.tool_key) AS session_name,
+              a.approval_key, a.turn_ref, a.risk, a.request, a.expires_at, a.created_at
+       FROM approvals a JOIN sessions s ON s.id = a.session_id
+       WHERE a.decision = 'pending' AND a.expires_at > CURRENT_TIMESTAMP(3)
+         AND s.deleted_at IS NULL
+       ORDER BY a.created_at DESC`,
+    );
+    return rows.map((row) => ({
+      sessionId: String(row.session_id), sessionName: String(row.session_name),
+      approvalId: String(row.approval_key), turnId: String(row.turn_ref), risk: String(row.risk),
+      request: typeof row.request === 'string' ? JSON.parse(row.request) as Record<string, unknown> : row.request as Record<string, unknown>,
+      expiresAt: new Date(row.expires_at as string | Date).toISOString(),
+      createdAt: new Date(row.created_at as string | Date).toISOString(),
+    }));
   }
 
   async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {

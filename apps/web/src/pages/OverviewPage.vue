@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TerminalView from '../components/TerminalView.vue';
 import StructuredAgentView from '../components/StructuredAgentView.vue';
+import ApprovalInbox from '../components/ApprovalInbox.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -31,6 +32,10 @@ function cancelDelete(): void {
   if (deletingSession.value) return;
   sessionPendingDelete.value = undefined;
   purgeAssociatedData.value = false;
+}
+function isSessionInteractive(sessionId: string): boolean {
+  const session = relay.sessions.find((item) => item.id === sessionId);
+  return session ? relay.isSessionInteractive(session) : false;
 }
 
 async function confirmDelete(): Promise<void> {
@@ -70,8 +75,8 @@ onBeforeUnmount(() => {
     <section class="page-heading">
       <div>
         <p class="eyebrow">S5 · INTERACTIVE RELAY</p>
-        <h1>终端中继控制台</h1>
-        <p>查看历史输出，并通过 WebSocket 实时操作 Mac 上的终端会话。</p>
+        <h1>TermRelay 工作台</h1>
+        <p>集中管理终端、ACP 会话与待审批任务。</p>
       </div>
       <div class="connection-pill" :data-state="relay.connectionState">
         <span />{{ connectionLabel }}
@@ -188,6 +193,13 @@ onBeforeUnmount(() => {
         <div v-else class="terminal-placeholder">选择一个会话查看内容</div>
         <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>
       </section>
+      <ApprovalInbox
+        :approvals="relay.pendingApprovals"
+        :settings="relay.notificationSettings"
+        :is-interactive="isSessionInteractive"
+        @resolve="relay.resolveApprovalFromInbox"
+        @toggle-notifications="relay.setApprovalNotifications"
+      />
     </section>
 
     <div

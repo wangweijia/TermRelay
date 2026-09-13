@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import type {
+  PendingApprovalRecord,
   SessionEventRecord,
   SessionRecord,
 } from './session.repository';
@@ -21,6 +22,11 @@ export class SessionsController {
   @Get()
   list(): Promise<SessionRecord[]> {
     return this.sessions.list();
+  }
+
+  @Get('approvals/pending')
+  listPendingApprovals(): Promise<PendingApprovalRecord[]> {
+    return this.sessions.listPendingApprovals();
   }
 
   @Get(':id')

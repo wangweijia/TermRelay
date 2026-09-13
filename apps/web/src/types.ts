@@ -20,6 +20,22 @@ export interface DeviceRecord {
   disconnectedAt?: string;
 }
 
+export interface PendingApprovalRecord {
+  sessionId: string;
+  sessionName: string;
+  approvalId: string;
+  turnId: string;
+  risk: string;
+  request: Record<string, unknown>;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  configured: boolean;
+}
+
 export interface SessionEventRecord {
   seq: number;
   type: string;

@@ -11,6 +11,17 @@ struct ServerSettingsView: View {
                 Button("重新连接") { appModel.reconnectToServer() }
             }
 
+            Section("ACP 交互") {
+                Picker("发送快捷键", selection: $appModel.acpSendShortcut) {
+                    ForEach(ACPSendShortcut.allCases, id: \.self) { shortcut in
+                        Text(shortcut.displayName).tag(shortcut)
+                    }
+                }
+                Text("输入框中的普通回车用于换行；所选组合键用于发送消息。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             ForEach(BuiltInTool.allCases) { tool in
                 ToolExecutableSettingsSection(tool: tool)
                 ToolProxySettingsSection(tool: tool)

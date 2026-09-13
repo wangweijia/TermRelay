@@ -43,6 +43,22 @@ enum CodexInteractionMode: String, Codable, CaseIterable, Sendable {
     case acp
 }
 
+enum ACPSendShortcut: String, Codable, CaseIterable, Sendable {
+    case commandEnter
+    case controlEnter
+    case optionEnter
+    case shiftEnter
+
+    var displayName: String {
+        switch self {
+        case .commandEnter: "⌘ + 回车"
+        case .controlEnter: "⌃ + 回车"
+        case .optionEnter: "⌥ + 回车"
+        case .shiftEnter: "⇧ + 回车"
+        }
+    }
+}
+
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }

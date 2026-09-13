@@ -155,20 +155,56 @@ private struct StructuredAgentSessionView: View {
             }
             .background(Color(nsColor: .textBackgroundColor))
 
-            HStack(alignment: .bottom, spacing: 10) {
+            VStack(alignment: .trailing, spacing: 10) {
                 TextEditor(text: $prompt)
                     .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
-                Button("发送") {
-                    let text = prompt
-                    prompt = ""
-                    Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
+                    .onKeyPress(phases: .down) { keyPress in
+                        guard keyPress.key == .return,
+                              appModel.acpSendShortcut.matches(keyPress.modifiers) else {
+                            return .ignored
+                        }
+                        submitPrompt()
+                        return .handled
+                    }
+                HStack {
+                    Text("发送快捷键：\(appModel.acpSendShortcut.displayName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("发送") { submitPrompt() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canSend)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.state != .ready)
             }
             .padding()
+        }
+    }
+
+    private var canSend: Bool {
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && session.state == .ready
+    }
+
+    private func submitPrompt() {
+        guard canSend else { return }
+        let text = prompt
+        prompt = ""
+        Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
+    }
+}
+
+private extension ACPSendShortcut {
+    func matches(_ modifiers: EventModifiers) -> Bool {
+        let command = modifiers.contains(.command)
+        let control = modifiers.contains(.control)
+        let option = modifiers.contains(.option)
+        let shift = modifiers.contains(.shift)
+        switch self {
+        case .commandEnter: return command && !control && !option && !shift
+        case .controlEnter: return !command && control && !option && !shift
+        case .optionEnter: return !command && !control && option && !shift
+        case .shiftEnter: return !command && !control && !option && shift
         }
     }
 }

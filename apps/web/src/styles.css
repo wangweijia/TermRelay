@@ -22,9 +22,9 @@ header {
 header strong { color: #72e0a5; letter-spacing: .04em; }
 
 .console-page {
-  max-width: 1500px;
+  max-width: 1900px;
   margin: 0 auto;
-  padding: 42px clamp(16px, 3vw, 44px) 52px;
+  padding: 22px clamp(12px, 2vw, 28px) 28px;
 }
 
 .page-heading {
@@ -32,7 +32,7 @@ header strong { color: #72e0a5; letter-spacing: .04em; }
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 26px;
+  margin-bottom: 16px;
 }
 
 h1 {
@@ -101,7 +101,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 
 .relay-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 270px) minmax(480px, 1fr) minmax(280px, 340px);
   min-height: 620px;
   border: 1px solid #27313d;
   border-radius: 13px;
@@ -242,7 +242,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .agent-event[data-kind="error"] { border-color: #6c3438; }
 .approval-card { display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid #765a25; border-radius: 7px; background: #211c12; }
 .approval-card[data-risk="high"], .approval-card[data-risk="critical"] { border-color: #914048; background: #251719; }
-.approval-actions, .agent-composer > div { display: flex; justify-content: flex-end; gap: 8px; }
+.approval-actions, .composer-actions > div { display: flex; justify-content: flex-end; gap: 8px; }
 .approval-actions button, .agent-composer button { padding: 7px 11px; border: 1px solid #3b4856; border-radius: 6px; color: #c8d2dc; background: #18212b; cursor: pointer; }
 .approval-actions button.approve, .agent-composer button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
 .approval-actions button:disabled, .agent-composer button:disabled { opacity: .45; cursor: not-allowed; }
@@ -253,7 +253,28 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .agent-composer { display: grid; flex: 0 0 auto; gap: 10px; padding: 14px 18px 20px; border-top: 1px solid #27313d; background: #0d1218; }
 .agent-composer textarea { width: 100%; resize: none; padding: 11px; border: 1px solid #344251; border-radius: 7px; color: #e2eaf1; background: #121a22; font: 13px/1.5 inherit; }
 .agent-composer textarea:focus { outline: 1px solid #72e0a5; border-color: #72e0a5; }
+.composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.shortcut-picker { display: flex; align-items: center; gap: 8px; color: #7f8e9d; font-size: 11px; }
+.shortcut-picker select { padding: 5px 8px; border: 1px solid #344251; border-radius: 6px; color: #b8c5d1; background: #121a22; font: inherit; }
 .command-status { position: absolute; right: 16px; bottom: 7px; z-index: 2; color: #718096; font: 10px/1.2 ui-monospace, monospace; pointer-events: none; }
+.approval-inbox { display: flex; min-width: 0; flex-direction: column; border-left: 1px solid #27313d; background: #0d1319; }
+.approval-inbox-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 68px; padding: 12px 14px; border-bottom: 1px solid #27313d; background: #121920; }
+.approval-inbox-heading > div { display: grid; gap: 4px; }
+.approval-inbox-heading small { color: #728191; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .1em; }
+.notification-toggle { display: flex; align-items: center; gap: 6px; color: #9aa8b7; font-size: 11px; cursor: pointer; }
+.notification-toggle input { accent-color: #72e0a5; }
+.approval-inbox-list { height: clamp(460px, calc(100dvh - 260px), 650px); overflow: auto; overscroll-behavior: contain; padding: 12px; }
+.inbox-approval { margin-bottom: 10px; padding: 12px; border: 1px solid #5d4828; border-radius: 8px; background: #1b1812; }
+.inbox-approval[data-risk="high"], .inbox-approval[data-risk="critical"] { border-color: #813b43; background: #211518; }
+.inbox-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inbox-session small { color: #d19a61; text-transform: uppercase; }
+.inbox-approval h3 { margin: 9px 0 5px; font-size: 13px; }
+.inbox-approval pre { max-height: 150px; margin: 7px 0; padding: 8px; overflow: auto; border-radius: 5px; background: #0a0e12; color: #c6d0da; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.inbox-actions button { padding: 5px 8px; border: 1px solid #3b4856; border-radius: 5px; color: #c8d2dc; background: #18212b; cursor: pointer; font-size: 11px; }
+.inbox-actions button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
+.inbox-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.inbox-empty { display: grid; min-height: 180px; place-items: center; color: #667584; font-size: 12px; text-align: center; }
 
 .modal-backdrop {
   position: fixed;
@@ -312,4 +333,14 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   .session-list { max-height: 240px; }
   .terminal-view, .agent-view { height: clamp(400px, 60dvh, 520px); }
   .terminal-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .composer-actions { align-items: stretch; flex-direction: column; }
+  .shortcut-picker { justify-content: space-between; }
+  .approval-inbox { border-top: 1px solid #27313d; border-left: 0; }
+  .approval-inbox-list { height: auto; max-height: 420px; }
+}
+
+@media (min-width: 821px) and (max-width: 1180px) {
+  .relay-layout { grid-template-columns: minmax(210px, 250px) minmax(0, 1fr); }
+  .approval-inbox { grid-column: 1 / -1; border-top: 1px solid #27313d; border-left: 0; }
+  .approval-inbox-list { height: auto; max-height: 360px; }
 }

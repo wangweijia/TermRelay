@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
 type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean };
+type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnter';
+
+const sendShortcutStorageKey = 'termrelay.acpSendShortcut';
+const shortcutOptions: { value: SendShortcut; label: string }[] = [
+  { value: 'commandEnter', label: '⌘ + 回车' },
+  { value: 'controlEnter', label: '⌃ + 回车' },
+  { value: 'optionEnter', label: '⌥ + 回车' },
+  { value: 'shiftEnter', label: '⇧ + 回车' },
+];
 
 const props = defineProps<{ events: SessionEventRecord[]; interactive: boolean }>();
 const emit = defineEmits<{
@@ -12,6 +21,7 @@ const emit = defineEmits<{
   resolveUserInput: [requestId: string, turnId: string, answers: Record<string, string[]>];
 }>();
 const prompt = ref('');
+const sendShortcut = ref<SendShortcut>(loadSendShortcut());
 const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
 const toolEvents = computed(() => props.events.flatMap((event) => event.type === 'tool.event'
@@ -70,6 +80,26 @@ function records(value: unknown): Record<string, unknown>[] { return Array.isArr
 function answerKey(requestId: string, questionId: string): string { return `${requestId}:${questionId}`; }
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
 function submitTurn(): void { const value = prompt.value.trim(); if (value) { emit('startTurn', value); prompt.value = ''; } }
+function loadSendShortcut(): SendShortcut {
+  const stored = window.localStorage.getItem(sendShortcutStorageKey);
+  return shortcutOptions.some((option) => option.value === stored)
+    ? stored as SendShortcut
+    : 'commandEnter';
+}
+function matchesSendShortcut(event: KeyboardEvent): boolean {
+  switch (sendShortcut.value) {
+    case 'commandEnter': return event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+    case 'controlEnter': return !event.metaKey && event.ctrlKey && !event.altKey && !event.shiftKey;
+    case 'optionEnter': return !event.metaKey && !event.ctrlKey && event.altKey && !event.shiftKey;
+    case 'shiftEnter': return !event.metaKey && !event.ctrlKey && !event.altKey && event.shiftKey;
+  }
+}
+function handlePromptKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.isComposing || !matchesSendShortcut(event)) return;
+  event.preventDefault();
+  if (props.interactive && prompt.value.trim()) submitTurn();
+}
+watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
 function submitAnswers(item: TimelineItem): void {
   const requestId = text(item.data, 'requestId');
   const values = Object.fromEntries(records(item.data.questions).map((question) => {
@@ -117,8 +147,19 @@ function submitAnswers(item: TimelineItem): void {
       <div v-if="!timeline.length" class="terminal-placeholder">还没有 ACP 消息</div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
-      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Codex…" :disabled="!interactive" />
-      <div><button type="button" :disabled="!interactive" @click="emit('interrupt')">中断</button><button type="submit" class="approve" :disabled="!interactive || !prompt.trim()">发送</button></div>
+      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Codex…" :disabled="!interactive" @keydown="handlePromptKeydown" />
+      <div class="composer-actions">
+        <label class="shortcut-picker">
+          <span>发送快捷键</span>
+          <select v-model="sendShortcut">
+            <option v-for="option in shortcutOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+        <div>
+          <button type="button" :disabled="!interactive" @click="emit('interrupt')">中断</button>
+          <button type="submit" class="approve" :disabled="!interactive || !prompt.trim()">发送</button>
+        </div>
+      </div>
     </form>
   </section>
 </template>

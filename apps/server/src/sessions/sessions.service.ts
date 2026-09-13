@@ -16,6 +16,7 @@ import {
   type SessionEventRecord,
   type SessionDeleteResult,
   type SessionRecord,
+  type PendingApprovalRecord,
   type SessionWriteResult,
 } from './session.repository';
 import { WorkspaceRepository } from './workspace.repository';
@@ -172,6 +173,11 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   async list(): Promise<SessionRecord[]> {
     await this.waitForWrites();
     return this.sessions.list();
+  }
+
+  async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
+    await this.waitForWrites();
+    return this.sessions.listPendingApprovals();
   }
 
   async findById(id: string): Promise<SessionRecord | undefined> {

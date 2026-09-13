@@ -13,6 +13,9 @@ final class AppModel: ObservableObject {
     @Published var codexInteractionMode: CodexInteractionMode {
         didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
     }
+    @Published var acpSendShortcut: ACPSendShortcut {
+        didSet { defaults.set(acpSendShortcut.rawValue, forKey: Keys.acpSendShortcut) }
+    }
     @Published var sessionName = ""
     @Published var proxyConfigurations: [String: ToolProxyConfiguration] {
         didSet { persistProxyConfigurations() }
@@ -35,6 +38,8 @@ final class AppModel: ObservableObject {
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
         codexInteractionMode = defaults.string(forKey: Keys.codexInteractionMode)
             .flatMap(CodexInteractionMode.init(rawValue:)) ?? .pty
+        acpSendShortcut = defaults.string(forKey: Keys.acpSendShortcut)
+            .flatMap(ACPSendShortcut.init(rawValue:)) ?? .commandEnter
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
         let storedServerURL = defaults.string(forKey: Keys.serverURL)
         if let storedServerURL, !Keys.legacyServerURLs.contains(storedServerURL) {
@@ -455,6 +460,7 @@ final class AppModel: ObservableObject {
         static let proxyConfigurations = "toolProxyConfigurations"
         static let toolExecutablePaths = "toolExecutablePaths"
         static let codexInteractionMode = "codexInteractionMode"
+        static let acpSendShortcut = "acpSendShortcut"
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",

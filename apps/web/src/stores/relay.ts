@@ -3,6 +3,8 @@ import { markRaw } from 'vue';
 import type {
   CommandAckPayload,
   DeviceRecord,
+  NotificationSettings,
+  PendingApprovalRecord,
   SessionEventRecord,
   SessionRecord,
   SessionSubscribedPayload,
@@ -20,6 +22,8 @@ export const useRelayStore = defineStore('relay', {
   state: () => ({
     sessions: [] as SessionRecord[],
     devices: [] as DeviceRecord[],
+    pendingApprovals: [] as PendingApprovalRecord[],
+    notificationSettings: { enabled: false, configured: false } as NotificationSettings,
     selectedSessionId: undefined as string | undefined,
     eventsBySession: {} as Record<string, SessionEventRecord[]>,
     lastSeqBySession: {} as Record<string, number>,
@@ -58,6 +62,7 @@ export const useRelayStore = defineStore('relay', {
     async initialize(): Promise<void> {
       this.stopped = false;
       await this.refreshSessions();
+      await this.loadNotificationSettings();
       if (!this.selectedSessionId && this.sessions[0]) {
         await this.selectSession(this.sessions[0].id);
       }
@@ -79,9 +84,10 @@ export const useRelayStore = defineStore('relay', {
     async refreshSessions(): Promise<void> {
       this.loadingSessions = true;
       try {
-        const [sessionsResponse, devicesResponse] = await Promise.all([
+        const [sessionsResponse, devicesResponse, approvalsResponse] = await Promise.all([
           fetch('/api/sessions'),
           fetch('/api/devices'),
+          fetch('/api/sessions/approvals/pending'),
         ]);
         if (!sessionsResponse.ok) {
           throw new Error(`会话列表请求失败 (${sessionsResponse.status})`);
@@ -89,8 +95,10 @@ export const useRelayStore = defineStore('relay', {
         if (!devicesResponse.ok) {
           throw new Error(`设备列表请求失败 (${devicesResponse.status})`);
         }
+        if (!approvalsResponse.ok) throw new Error(`审批列表请求失败 (${approvalsResponse.status})`);
         this.sessions = (await sessionsResponse.json()) as SessionRecord[];
         this.devices = (await devicesResponse.json()) as DeviceRecord[];
+        this.pendingApprovals = (await approvalsResponse.json()) as PendingApprovalRecord[];
         if (
           this.selectedSessionId &&
           !this.sessions.some((item) => item.id === this.selectedSessionId)
@@ -238,7 +246,17 @@ export const useRelayStore = defineStore('relay', {
         this.error = '请先选择一个会话。';
         return;
       }
-      if (!this.selectedSessionInteractive) {
+      this.sendCommandForSession(session.id, type, payload);
+    },
+
+    sendCommandForSession(
+      sessionId: string,
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
+      payload: Record<string, unknown>,
+    ): void {
+      const session = this.sessions.find((item) => item.id === sessionId);
+      if (!session) { this.error = '会话不存在。'; return; }
+      if (!this.isSessionInteractive(session)) {
         this.error = '该会话当前不可操作：Mac 已离线或会话已经结束。';
         this.commandStatus = '命令未发送';
         return;
@@ -295,6 +313,23 @@ export const useRelayStore = defineStore('relay', {
 
     resolveApproval(approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {
       this.sendCommand('tool.approval.resolve', { approvalId, turnId, decision });
+    },
+
+    resolveApprovalFromInbox(sessionId: string, approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {
+      this.sendCommandForSession(sessionId, 'tool.approval.resolve', { approvalId, turnId, decision });
+    },
+
+    async loadNotificationSettings(): Promise<void> {
+      const response = await fetch('/api/notifications/settings');
+      if (response.ok) this.notificationSettings = await response.json() as NotificationSettings;
+    },
+
+    async setApprovalNotifications(enabled: boolean): Promise<void> {
+      const response = await fetch('/api/notifications/settings', {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled }),
+      });
+      if (!response.ok) { this.error = await responseError(response, '通知设置失败'); return; }
+      this.notificationSettings = await response.json() as NotificationSettings;
     },
 
     resolveUserInput(requestId: string, turnId: string, answers: Record<string, string[]>): void {

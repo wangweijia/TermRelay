@@ -8,9 +8,10 @@ import { ClientGateway } from './realtime/client.gateway';
 import { CommandRelayService } from './realtime/command-relay.service';
 import { ProtocolValidator } from './realtime/protocol-validator';
 import { SessionsModule } from './sessions/sessions.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
-  imports: [DatabaseModule.forRoot(), DevicesModule, SessionsModule],
+  imports: [DatabaseModule.forRoot(), DevicesModule, SessionsModule, NotificationsModule],
   controllers: [HealthController],
   providers: [
     ClientGateway,
