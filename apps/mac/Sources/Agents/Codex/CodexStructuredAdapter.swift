@@ -33,7 +33,10 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
                 installation.unsupportedReason ?? "Codex 版本未通过兼容性验证"
             )
         }
-        try await host?.start()
+        if let host {
+            await CodexAppServerHost.waitForStartupCleanup()
+            try await host.start()
+        }
         let transport: any CodexAppServerTransport = if let host {
             CodexUnixSocketTransport(socketPath: host.socketPath)
         } else {

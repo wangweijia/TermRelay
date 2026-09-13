@@ -7,7 +7,8 @@ final class TermRelayAppDelegate: NSObject, NSApplicationDelegate {
     private var terminationCleanupFinished = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        CodexAppServerHost.cleanupAbandonedRuntimes()
+        // Process enumeration and stale-process termination must never block AppKit's main thread.
+        CodexAppServerHost.beginStartupCleanup()
         // `swift run TermRelay` launches a plain SwiftPM executable rather than
         // an application bundle, so opt into a foreground GUI process here.
         NSApplication.shared.setActivationPolicy(.regular)
