@@ -429,7 +429,9 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 : kind == "permissions" ? "批准额外权限" : "批准运行命令",
             detail: approvalDetail(object),
             availableDecisions: approvalDecisions(kind: kind, object: object),
-            expiresAt: Date().addingTimeInterval(5 * 60)
+            // Codex keeps this RPC request open until the user responds. Do not invent a
+            // short client-side deadline that makes a still-live approval unusable.
+            expiresAt: .distantFuture
         )
         pendingApprovals[approvalID] = PendingApproval(
             rpcID: id,

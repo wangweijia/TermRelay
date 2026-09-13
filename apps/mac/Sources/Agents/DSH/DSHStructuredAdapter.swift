@@ -392,7 +392,8 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
             title: title,
             detail: detail,
             availableDecisions: decisions,
-            expiresAt: Date().addingTimeInterval(5 * 60)
+            // ACP does not declare a deadline for this permission request.
+            expiresAt: .distantFuture
         )), turnID: turnID, itemID: toolID, approvalID: approvalID)
     }
 

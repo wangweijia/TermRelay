@@ -319,6 +319,8 @@ private struct AgentCard<Content: View>: View {
 private struct AgentApprovalCard: View {
     let value: AgentApprovalViewState
     @ObservedObject var session: LocalStructuredAgentSession
+    @State private var submittingDecision: ApprovalDecision?
+    @State private var submissionError: String?
 
     var body: some View {
         AgentCard(title: value.request.title, icon: "checkmark.shield") {
@@ -337,6 +339,20 @@ private struct AgentApprovalCard: View {
                         }
                     }
                 }
+                if let submittingDecision {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在提交：\(decisionLabel(submittingDecision))")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                if let submissionError {
+                    Text(submissionError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
             }
         }
     }
@@ -344,13 +360,20 @@ private struct AgentApprovalCard: View {
     private func decisionButton(_ decision: ApprovalDecision) -> some View {
         Button(decisionLabel(decision), role: decision == .deny ? .destructive : nil) {
             Task {
-                _ = await session.resolveApproval(
+                submissionError = nil
+                submittingDecision = decision
+                let result = await session.resolveApproval(
                     approvalID: value.request.approvalID,
                     turnID: value.request.turnID,
                     decision: decision
                 )
+                submittingDecision = nil
+                if !result.succeeded {
+                    submissionError = result.message ?? "审批提交失败，请重试。"
+                }
             }
         }
+        .disabled(submittingDecision != nil || session.state != .awaitingApproval)
     }
 
     private func decisionLabel(_ decision: ApprovalDecision) -> String {

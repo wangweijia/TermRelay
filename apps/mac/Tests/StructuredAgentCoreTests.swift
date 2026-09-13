@@ -68,6 +68,41 @@ final class StructuredAgentCoreTests: XCTestCase {
         }
     }
 
+    func testFailedApprovalSubmissionRemainsRetryable() async throws {
+        let sessionID = UUID()
+        let runtime = FakeAgentRuntime(sessionID: sessionID)
+        let coordinator = StructuredSessionCoordinator(runtime: runtime)
+        try await coordinator.start(request: AgentSessionRequest(
+            sessionID: sessionID,
+            workspaceURL: URL(fileURLWithPath: "/tmp")
+        ))
+        try await coordinator.send(.startTurn(TurnInput(text: "test"), idempotencyKey: UUID()))
+        await runtime.emitTurnStarted("turn-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-a")
+        await settle()
+
+        await runtime.failNextSend()
+        await XCTAssertThrowsErrorAsync {
+            try await coordinator.send(.resolveApproval(ApprovalResolution(
+                approvalID: "approval-a",
+                turnID: "turn-a",
+                decision: .allowOnce
+            )))
+        }
+        var snapshot = await coordinator.snapshot()
+        XCTAssertEqual(snapshot.state, .awaitingApproval)
+        XCTAssertEqual(snapshot.pendingApprovalIDs, ["approval-a"])
+
+        try await coordinator.send(.resolveApproval(ApprovalResolution(
+            approvalID: "approval-a",
+            turnID: "turn-a",
+            decision: .cancel
+        )))
+        snapshot = await coordinator.snapshot()
+        XCTAssertEqual(snapshot.state, .running)
+        XCTAssertTrue(snapshot.pendingApprovalIDs.isEmpty)
+    }
+
     func testCapabilityIntersectionDoesNotInventSupport() {
         let provider: AgentCapabilities = [.streamingText, .reasoning, .approvals]
         let client: AgentCapabilities = [.streamingText, .approvals, .steering]
@@ -114,6 +149,7 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
     private var sequence: UInt64 = 0
     private(set) var actions: [ToolAction] = []
     private(set) var stopCount = 0
+    private var shouldFailNextSend = false
 
     init(sessionID: UUID) {
         self.sessionID = sessionID
@@ -129,7 +165,15 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
     }
 
     func send(_ action: ToolAction) async throws {
+        if shouldFailNextSend {
+            shouldFailNextSend = false
+            throw AgentError.protocolFailure("simulated approval transport failure")
+        }
         actions.append(action)
+    }
+
+    func failNextSend() {
+        shouldFailNextSend = true
     }
 
     func stop() async {

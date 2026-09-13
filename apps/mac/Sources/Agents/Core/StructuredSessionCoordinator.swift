@@ -11,6 +11,7 @@ actor StructuredSessionCoordinator {
     private(set) var activeTurnID: String?
     private var sessionID: UUID?
     private var pendingApprovals: [String: ApprovalRequest] = [:]
+    private var resolvingApprovalIDs: Set<String> = []
     private var pendingUserInputs: [String: UserInputRequest] = [:]
     private var lastSequence: UInt64?
     private var stopped = false
@@ -70,12 +71,25 @@ actor StructuredSessionCoordinator {
                   activeTurnID == resolution.turnID else {
                 throw AgentError.correlationMismatch("approval、turn 或 session 不一致")
             }
+            guard !resolvingApprovalIDs.contains(resolution.approvalID) else {
+                throw AgentError.invalidState(expected: "approval awaiting response", actual: state)
+            }
             guard approval.expiresAt > Date() else {
-                pendingApprovals.removeValue(forKey: resolution.approvalID)
                 throw AgentError.approvalExpired(resolution.approvalID)
             }
-            pendingApprovals.removeValue(forKey: resolution.approvalID)
-            state = .running
+            resolvingApprovalIDs.insert(resolution.approvalID)
+            do {
+                try await runtime.send(action)
+            } catch {
+                resolvingApprovalIDs.remove(resolution.approvalID)
+                throw error
+            }
+            resolvingApprovalIDs.remove(resolution.approvalID)
+            if pendingApprovals.removeValue(forKey: resolution.approvalID) != nil,
+               activeTurnID == resolution.turnID {
+                state = .running
+            }
+            return
         case .resolveUserInput(let resolution):
             guard state == .awaitingUserInput || state == .running,
                   let request = pendingUserInputs[resolution.requestID],
@@ -101,6 +115,7 @@ actor StructuredSessionCoordinator {
         consumeTask?.cancel()
         consumeTask = nil
         pendingApprovals.removeAll()
+        resolvingApprovalIDs.removeAll()
         pendingUserInputs.removeAll()
         await runtime.stop()
         if state != .failed { state = .finished }
@@ -183,6 +198,7 @@ actor StructuredSessionCoordinator {
             }
             activeTurnID = nil
             pendingApprovals.removeAll()
+            resolvingApprovalIDs.removeAll()
             pendingUserInputs.removeAll()
             state = .ready
         case .failed:
