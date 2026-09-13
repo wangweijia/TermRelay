@@ -199,7 +199,11 @@ private struct SessionSidebarRowContent: View {
     }
 
     private var toolIcon: String {
-        session.toolID == BuiltInTool.codex.rawValue ? "sparkles" : "terminal"
+        switch BuiltInTool(rawValue: session.toolID) {
+        case .codex: "sparkles"
+        case .dsh: "brain.head.profile"
+        default: "terminal"
+        }
     }
 
     private var stateColor: Color {

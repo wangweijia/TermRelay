@@ -8,6 +8,7 @@ struct AgentProviderID: RawRepresentable, Hashable, Codable, Sendable {
     }
 
     static let codex = Self(rawValue: "codex")
+    static let dsh = Self(rawValue: "dsh")
     static let fake = Self(rawValue: "fake")
 }
 

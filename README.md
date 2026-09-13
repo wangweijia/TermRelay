@@ -3,9 +3,9 @@
 
   # TermRelay
 
-  **把 Mac 上的 Shell 与 Codex，带到你手边的每一块屏幕。**
+  **把 Mac 上的 Shell、Codex 与 DeepSeek DSH，带到你手边的每一块屏幕。**
 
-  一套面向个人开发工作流的远程会话中枢：在 macOS 上运行真实 PTY 或 Codex App Server，
+  一套面向个人开发工作流的远程会话中枢：在 macOS 上运行真实 PTY、Codex App Server 或 DSH ACP，
   通过 Web 安全查看、交互、审批，并在手机上处理关键任务。
 
   [快速开始](#快速开始) · [核心能力](#核心能力) · [架构](#架构) · [部署](#生产部署) · [开发文档](#开发文档)
@@ -22,14 +22,14 @@ AI 编程任务经常运行很久，而审批、补充问题和终端操作并�
 | 模式 | 本地运行方式 | Mac 界面 | Web 界面 | 适合场景 |
 |---|---|---|---|---|
 | **PTY** | 真实伪终端中的 Shell / Codex CLI | SwiftTerm | xterm.js | 完整 TUI、Shell 命令和传统 CLI 工作流 |
-| **ACP** | Codex App Server + 独立 Unix Socket | SwiftUI 原生组件 | Vue 原生组件 | 消息流、命令、文件变更、审批和用户问答 |
+| **ACP** | Codex App Server / DeepSeek DSH ACP | SwiftUI 原生组件 | Vue 原生组件 | 消息流、思考、工具调用、审批和用户问答 |
 
-ACP 会话始终通过 `thread/start` 创建一次性 Thread，不依赖 `resume`，也不会启动 Codex TUI。
+Codex ACP 始终通过 `thread/start` 创建一次性 Thread；DSH ACP 始终通过 `session/new` 创建隔离会话。两者都不依赖 `resume`，也不会启动终端 TUI。
 
 ## 核心能力
 
 - **真实远程终端**：保留 ANSI、TrueColor、中文、Emoji、终端 resize、输入、Ctrl-C 和停止操作。
-- **原生 Codex ACP 体验**：结构化呈现回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
+- **多 Provider 原生 ACP 体验**：结构化呈现 Codex 与 DSH 的回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
 - **完整交互闭环**：支持审批的全部可用决策，以及 Codex `requestUserInput` 问答。
 - **跨会话审批中心**：PC 与手机 Web 可统一查看多个 ACP 窗口的待审批任务，并直接处理。
 - **手机审批通知**：Server 可通过 Bark 将新审批推送到 iPhone；通知开关由 Web 控制并持久化。
@@ -72,7 +72,7 @@ PC 页面采用三栏布局，尽量把宽屏空间用于实际工作：
 flowchart LR
     subgraph Mac[macOS App]
         PTY[Shell / Codex PTY]
-        ACP[Codex App Server]
+        ACP[Codex App Server / DSH ACP]
         UI[SwiftUI + SwiftTerm]
         ACP <-->|Unix Socket + WebSocket| UI
         PTY <-->|PTY| UI
@@ -108,6 +108,7 @@ flowchart LR
 - pnpm 12+
 - Docker Desktop（运行完整 Server + MySQL 环境）
 - 已安装并登录的 Codex CLI（使用 Codex PTY/ACP 时）
+- 已安装的 DeepSeek `dsh` CLI 与 DeepSeek API Key（使用 DSH ACP 时）
 
 ### 1. 安装依赖并检查工程
 
@@ -140,7 +141,7 @@ docker compose -f deploy/server/compose.dev.yaml up --build
 swift run --package-path apps/mac TermRelay
 ```
 
-App 默认连接 `ws://localhost:3007/ws/client`。也可以在设置页修改 Server WebSocket 地址、CLI 路径、代理和 ACP 发送快捷键。
+App 默认连接 `ws://localhost:3007/ws/client`。也可以在设置页修改 Server WebSocket 地址、CLI 路径、代理、ACP 发送快捷键，并把 DSH API Key 安全保存到 macOS 钥匙串。
 
 新建会话时可以选择：
 
@@ -151,6 +152,9 @@ Shell
 Codex
 ├── PTY
 └── ACP（Codex App Server）
+
+DeepSeek DSH
+└── ACP（标准 ACP v1，无终端模式）
 ```
 
 ## 常用开发命令
@@ -178,6 +182,14 @@ pnpm build
 TERMRELAY_RUN_CODEX_INTEGRATION=1 \
 swift test --disable-sandbox --package-path apps/mac \
   --filter CodexAppServerClientTests/testRealFreshACPThroughUnixSocketWhenExplicitlyEnabled
+```
+
+真实 DSH ACP 启动探针同样不会发送模型请求，只验证全新的隔离会话能够进入 ready 并正常关闭：
+
+```bash
+TERMRELAY_RUN_DSH_INTEGRATION=1 \
+swift test --disable-sandbox --package-path apps/mac \
+  --filter DSHACPClientTests/testRealDSHFreshSessionWhenExplicitlyEnabled
 ```
 
 ## 手机审批通知
@@ -218,7 +230,8 @@ Mac App → trusted LAN → Server :3006/ws/client
 - TermRelay 可以执行终端输入、停止进程并批准 Agent 操作；请把它视为高权限开发工具。
 - 公网部署前必须增加可靠的身份边界。当前推荐方案是 Cloudflare Access。
 - Bark URL、数据库密码、Access 配置等必须放在未提交的环境文件或 Secret 管理系统中。
-- 清理逻辑只处理能够证明由 TermRelay 创建的 Runtime、Socket 和进程，不应扫描或终止无关 Codex 实例。
+- 清理逻辑只处理能够证明由 TermRelay 创建的 Runtime、Socket、进程和 DSH 临时目录，不扫描或终止无关 Agent 实例。
+- DSH API Key 只存储在 macOS 钥匙串并注入本地 DSH 子进程，不进入 TermRelay Server、Web、会话事件或日志。
 - ACP 与 PTY 是严格分离的协议路径；ACP 不接受终端输入/resize，PTY 不接受结构化审批命令。
 
 ## 仓库布局

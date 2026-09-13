@@ -68,7 +68,7 @@ struct NewSessionSheet: View {
                     .font(.headline)
                 Picker("终端工具", selection: $appModel.selectedTool) {
                     ForEach(BuiltInTool.allCases) { tool in
-                        Label(tool.displayName, systemImage: tool == .codex ? "sparkles" : "terminal")
+                        Label(tool.displayName, systemImage: tool.iconName)
                             .tag(tool)
                     }
                 }
@@ -103,6 +103,28 @@ struct NewSessionSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } else if appModel.selectedTool == .dsh {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("DeepSeek 交互模式")
+                        .font(.headline)
+                    Text("ACP")
+                        .font(.callout.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    Label(
+                        appModel.dshAPIKeyConfigured
+                            ? "API Key 已安全保存在这台 Mac"
+                            : "请先在设置中配置 DeepSeek API Key",
+                        systemImage: appModel.dshAPIKeyConfigured ? "key.fill" : "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(appModel.dshAPIKeyConfigured ? Color.secondary : Color.orange)
+                    Text("DSH 通过标准 ACP v1 与原生界面交互，不启动终端 UI。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack {
@@ -133,7 +155,10 @@ struct NewSessionSheet: View {
                     if appModel.errorMessage == nil { dismiss() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!appModel.selectedToolAvailability.isAvailable)
+                .disabled(
+                    !appModel.selectedToolAvailability.isAvailable
+                        || (appModel.selectedTool == .dsh && !appModel.dshAPIKeyConfigured)
+                )
             }
         }
         .padding(24)
@@ -145,6 +170,16 @@ struct NewSessionSheet: View {
         case .inherit: "启动代理：跟随 App 环境"
         case .disabled: "启动代理：已禁用"
         case .custom: "启动代理：使用 \(appModel.selectedTool.displayName) 的独立配置"
+        }
+    }
+}
+
+private extension BuiltInTool {
+    var iconName: String {
+        switch self {
+        case .shell: "terminal"
+        case .codex: "sparkles"
+        case .dsh: "brain.head.profile"
         }
     }
 }

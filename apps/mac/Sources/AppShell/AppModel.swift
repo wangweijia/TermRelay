@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var structuredSessions: [UUID: LocalStructuredAgentSession] = [:]
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
+    @Published private(set) var dshAPIKeyConfigured = false
     @Published var selectedTool: BuiltInTool = .shell
     @Published var codexInteractionMode: CodexInteractionMode {
         didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
@@ -29,11 +30,16 @@ final class AppModel: ObservableObject {
 
     let deviceID: UUID
     private let defaults: UserDefaults
+    private let credentialStore: any CredentialStoring
     private var remoteClient: RemoteClient?
     private var connectionStarted = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        credentialStore: any CredentialStoring = KeychainCredentialStore()
+    ) {
         self.defaults = defaults
+        self.credentialStore = credentialStore
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
         codexInteractionMode = defaults.string(forKey: Keys.codexInteractionMode)
@@ -56,6 +62,8 @@ final class AppModel: ObservableObject {
             deviceID = id
             defaults.set(id.uuidString, forKey: Keys.deviceID)
         }
+        dshAPIKeyConfigured = ((try? credentialStore.read(account: Keys.dshAPIKeyAccount)) ?? nil)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         remoteClient = RemoteClient(
             deviceID: deviceID,
             stateHandler: { [weak self] state, message in
@@ -123,6 +131,20 @@ final class AppModel: ObservableObject {
         else { toolExecutablePaths[tool.rawValue] = trimmed }
     }
 
+    func saveDSHAPIKey(_ value: String) throws {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw AgentError.providerUnavailable("DeepSeek API Key 不能为空")
+        }
+        try credentialStore.write(trimmed, account: Keys.dshAPIKeyAccount)
+        dshAPIKeyConfigured = true
+    }
+
+    func removeDSHAPIKey() throws {
+        try credentialStore.delete(account: Keys.dshAPIKeyAccount)
+        dshAPIKeyConfigured = false
+    }
+
     func chooseExecutable(for tool: BuiltInTool) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
@@ -150,6 +172,9 @@ final class AppModel: ObservableObject {
     @discardableResult
     func startLocalTerminal() -> UUID? {
         do {
+            guard selectedTool != .dsh else {
+                throw ToolLaunchError.unsupportedMode("DeepSeek DSH 当前仅支持 ACP 模式")
+            }
             guard let remoteClient else { return nil }
             let proxy = proxyConfiguration(for: selectedTool)
             if let validationMessage = proxy.validationMessage {
@@ -203,15 +228,15 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession() -> UUID? {
-        selectedTool == .codex && codexInteractionMode == .acp
+        (selectedTool == .codex && codexInteractionMode == .acp) || selectedTool == .dsh
             ? startStructuredSession()
             : startLocalTerminal()
     }
 
     @discardableResult
     private func startStructuredSession() -> UUID? {
-        guard selectedTool == .codex, let remoteClient else {
-            errorMessage = "结构化模式目前仅支持 Codex。"
+        guard selectedTool == .codex || selectedTool == .dsh, let remoteClient else {
+            errorMessage = "该工具不支持结构化模式。"
             return nil
         }
         let proxy = proxyConfiguration(for: selectedTool)
@@ -220,26 +245,39 @@ final class AppModel: ObservableObject {
             return nil
         }
         let displayName = normalizedSessionName
+        let executableName = selectedTool == .dsh ? "dsh" : "codex"
         guard let executableURL = configuredExecutableURL(for: selectedTool)
-            ?? ExecutableLocator.find(named: "codex") else {
-            errorMessage = "找不到 codex 可执行程序"
+            ?? ExecutableLocator.find(named: executableName) else {
+            errorMessage = "找不到 \(executableName) 可执行程序"
             return nil
         }
         let sessionID = UUID()
         let sessionDirectory = workingDirectory
-        let environment = TerminalEnvironment.make(proxy: proxy, executableURL: executableURL)
-        let host = CodexAppServerHost(
-            executableURL: executableURL,
-            directory: sessionDirectory,
-            environment: environment
-        )
+        var environment = TerminalEnvironment.make(proxy: proxy, executableURL: executableURL)
+        let adapter: any StructuredAgentAdapter
+        if selectedTool == .dsh {
+            guard let key = (try? credentialStore.read(account: Keys.dshAPIKeyAccount)) ?? nil,
+                  !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                errorMessage = "请先在设置中配置 DeepSeek API Key"
+                return nil
+            }
+            environment["DEEPSEEK_API_KEY"] = key
+            adapter = DSHStructuredAdapter(configuredExecutableURL: executableURL)
+        } else {
+            let host = CodexAppServerHost(
+                executableURL: executableURL,
+                directory: sessionDirectory,
+                environment: environment
+            )
+            adapter = CodexStructuredAdapter(
+                configuredExecutableURL: executableURL,
+                host: host
+            )
+        }
         let session = LocalStructuredAgentSession(
             id: sessionID,
             directory: sessionDirectory,
-            adapter: CodexStructuredAdapter(
-                configuredExecutableURL: executableURL,
-                host: host
-            ),
+            adapter: adapter,
             environment: environment,
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
@@ -257,6 +295,7 @@ final class AppModel: ObservableObject {
             runtimeMode: .acp
         ))
         let workspaceID = workspaceID(for: workingDirectory)
+        let tool = selectedTool
         Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)
             await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
@@ -265,7 +304,7 @@ final class AppModel: ObservableObject {
             await remoteClient.publishSession(
                 id: session.id,
                 workspaceId: workspaceID,
-                toolKey: selectedTool.rawValue,
+                toolKey: tool.rawValue,
                 displayName: displayName,
                 runtimeMode: .acp,
                 startedAt: session.startedAt
@@ -314,7 +353,7 @@ final class AppModel: ObservableObject {
             $0.state.isActive && structuredSessions[$0.id] == nil
         }
         let activeStructured = structuredSessions.values.filter { $0.state.isActive }
-        let displayNames = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.displayName) })
+        let managedSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)
             for session in activeSessions {
@@ -324,7 +363,7 @@ final class AppModel: ObservableObject {
                     id: session.id,
                     workspaceId: workspaceID,
                     toolKey: session.tool.rawValue,
-                    displayName: displayNames[session.id]
+                    displayName: managedSessions[session.id]?.displayName
                         ?? "\(session.tool.displayName) — \(session.directory.lastPathComponent)",
                     startedAt: session.startedAt
                 )
@@ -335,8 +374,9 @@ final class AppModel: ObservableObject {
                 await remoteClient.publishSession(
                     id: session.id,
                     workspaceId: workspaceID,
-                    toolKey: BuiltInTool.codex.rawValue,
-                    displayName: displayNames[session.id] ?? "Codex Agent — \(session.directory.lastPathComponent)",
+                    toolKey: managedSessions[session.id]?.toolID ?? BuiltInTool.codex.rawValue,
+                    displayName: managedSessions[session.id]?.displayName
+                        ?? "Agent — \(session.directory.lastPathComponent)",
                     runtimeMode: .acp,
                     startedAt: session.startedAt
                 )
@@ -432,7 +472,7 @@ final class AppModel: ObservableObject {
         updateActiveSessionCount()
         guard state == .finished || state == .failed, let remoteClient else { return }
         if state == .failed {
-            errorMessage = structuredSessions[id]?.failureMessage ?? "Codex 会话启动失败"
+            errorMessage = structuredSessions[id]?.failureMessage ?? "ACP 会话启动失败"
         }
         terminalSessions[id]?.terminate()
         Task {
@@ -461,6 +501,7 @@ final class AppModel: ObservableObject {
         static let toolExecutablePaths = "toolExecutablePaths"
         static let codexInteractionMode = "codexInteractionMode"
         static let acpSendShortcut = "acpSendShortcut"
+        static let dshAPIKeyAccount = "deepseek.dsh.api-key"
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",

@@ -27,6 +27,7 @@ struct ToolAvailability: Sendable, Equatable {
 enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
     case shell
     case codex
+    case dsh
 
     var id: String { rawValue }
 
@@ -34,6 +35,7 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .shell: "终端"
         case .codex: "Codex"
+        case .dsh: "DeepSeek DSH"
         }
     }
 
@@ -41,10 +43,46 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .shell: LoginShellAdapter(configuredExecutableURL: executableURL)
         case .codex: CodexAdapter(configuredExecutableURL: executableURL)
+        case .dsh: DSHAdapter(configuredExecutableURL: executableURL)
         }
     }
 
     var adapter: any CLIToolAdapter { makeAdapter() }
+}
+
+struct DSHAdapter: CLIToolAdapter {
+    let toolID = BuiltInTool.dsh.rawValue
+    let displayName = BuiltInTool.dsh.displayName
+    let configuredExecutableURL: URL?
+
+    init(configuredExecutableURL: URL? = nil) {
+        self.configuredExecutableURL = configuredExecutableURL
+    }
+
+    func detect() -> ToolAvailability {
+        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "dsh") else {
+            return ToolAvailability(
+                isAvailable: false,
+                executablePath: nil,
+                detail: "未在 PATH 或常用安装目录找到 dsh"
+            )
+        }
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            return ToolAvailability(
+                isAvailable: false,
+                executablePath: url.path,
+                detail: "文件不存在或不可执行：\(url.path)"
+            )
+        }
+        return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
+    }
+
+    func makeLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration = .inherited
+    ) throws -> LaunchConfiguration {
+        throw ToolLaunchError.unsupportedMode("DeepSeek DSH 当前仅支持 ACP 模式")
+    }
 }
 
 struct LoginShellAdapter: CLIToolAdapter {
@@ -138,12 +176,14 @@ enum ToolLaunchError: LocalizedError, Equatable {
     case notFound(String)
     case notExecutable(String)
     case invalidDirectory(String)
+    case unsupportedMode(String)
 
     var errorDescription: String? {
         switch self {
         case .notFound(let name): "找不到可执行程序：\(name)"
         case .notExecutable(let path): "文件不可执行：\(path)"
         case .invalidDirectory(let path): "工作目录不可用：\(path)"
+        case .unsupportedMode(let message): message
         }
     }
 }

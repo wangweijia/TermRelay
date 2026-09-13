@@ -389,7 +389,7 @@ final class WebSocketPipeCodec: @unchecked Sendable {
     }
 }
 
-private final class JSONLineBuffer: @unchecked Sendable {
+final class JSONLineBuffer: @unchecked Sendable {
     private let maximumLineBytes = 8 * 1_024 * 1_024
     private let lock = NSLock()
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation

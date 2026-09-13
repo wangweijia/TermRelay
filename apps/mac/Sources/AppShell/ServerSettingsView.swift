@@ -22,6 +22,8 @@ struct ServerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            DSHCredentialSettingsSection()
+
             ForEach(BuiltInTool.allCases) { tool in
                 ToolExecutableSettingsSection(tool: tool)
                 ToolProxySettingsSection(tool: tool)
@@ -36,6 +38,56 @@ struct ServerSettingsView: View {
         .formStyle(.grouped)
         .padding()
         .frame(width: 520)
+    }
+}
+
+private struct DSHCredentialSettingsSection: View {
+    @EnvironmentObject private var appModel: AppModel
+    @State private var draft = ""
+    @State private var statusMessage: String?
+
+    var body: some View {
+        Section("DeepSeek DSH API Key") {
+            SecureField(
+                appModel.dshAPIKeyConfigured ? "已配置；输入新 Key 可替换" : "sk-…",
+                text: $draft
+            )
+            HStack {
+                Button(appModel.dshAPIKeyConfigured ? "更新 API Key" : "保存 API Key") {
+                    do {
+                        try appModel.saveDSHAPIKey(draft)
+                        draft = ""
+                        statusMessage = "已保存到 macOS 钥匙串"
+                    } catch {
+                        statusMessage = error.localizedDescription
+                    }
+                }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if appModel.dshAPIKeyConfigured {
+                    Button("移除", role: .destructive) {
+                        do {
+                            try appModel.removeDSHAPIKey()
+                            draft = ""
+                            statusMessage = "已移除"
+                        } catch {
+                            statusMessage = error.localizedDescription
+                        }
+                    }
+                }
+                Spacer()
+                Label(
+                    appModel.dshAPIKeyConfigured ? "已配置" : "未配置",
+                    systemImage: appModel.dshAPIKeyConfigured ? "checkmark.circle" : "key"
+                )
+                .foregroundStyle(appModel.dshAPIKeyConfigured ? Color.green : Color.secondary)
+            }
+            if let statusMessage {
+                Text(statusMessage).font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Key 仅保存在这台 Mac 的钥匙串，并以 DEEPSEEK_API_KEY 注入新启动的 DSH 进程；不会上传 Server。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
