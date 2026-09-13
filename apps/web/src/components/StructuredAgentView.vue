@@ -14,7 +14,11 @@ const shortcutOptions: { value: SendShortcut; label: string }[] = [
   { value: 'shiftEnter', label: '⇧ + 回车' },
 ];
 
-const props = defineProps<{ events: SessionEventRecord[]; interactive: boolean }>();
+const props = withDefaults(defineProps<{
+  events: SessionEventRecord[];
+  interactive: boolean;
+  shortcutEnabled?: boolean;
+}>(), { shortcutEnabled: true });
 const emit = defineEmits<{
   startTurn: [text: string]; interrupt: [];
   resolveApproval: [approvalId: string, turnId: string, decision: Decision];
@@ -95,7 +99,7 @@ function matchesSendShortcut(event: KeyboardEvent): boolean {
   }
 }
 function handlePromptKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Enter' || event.isComposing || !matchesSendShortcut(event)) return;
+  if (!props.shortcutEnabled || event.key !== 'Enter' || event.isComposing || !matchesSendShortcut(event)) return;
   event.preventDefault();
   if (props.interactive && prompt.value.trim()) submitTurn();
 }
@@ -149,7 +153,7 @@ function submitAnswers(item: TimelineItem): void {
     <form class="agent-composer" @submit.prevent="submitTurn">
       <textarea v-model="prompt" rows="3" placeholder="发送消息给 Codex…" :disabled="!interactive" @keydown="handlePromptKeydown" />
       <div class="composer-actions">
-        <label class="shortcut-picker">
+        <label v-if="shortcutEnabled" class="shortcut-picker">
           <span>发送快捷键</span>
           <select v-model="sendShortcut">
             <option v-for="option in shortcutOptions" :key="option.value" :value="option.value">{{ option.label }}</option>

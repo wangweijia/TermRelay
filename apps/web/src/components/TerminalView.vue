@@ -4,15 +4,17 @@ import '@xterm/xterm/css/xterm.css';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SessionEventRecord } from '../types';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   events: SessionEventRecord[];
   interactive: boolean;
-}>();
+  mobileComposer?: boolean;
+}>(), { mobileComposer: false });
 const emit = defineEmits<{
   input: [data: Uint8Array];
   resize: [columns: number, rows: number];
 }>();
 const container = ref<HTMLElement>();
+const mobileInput = ref('');
 const rendered = new Set<number>();
 let terminal: Terminal | undefined;
 let resizeObserver: ResizeObserver | undefined;
@@ -24,7 +26,7 @@ onMounted(() => {
     allowTransparency: false,
     convertEol: false,
     cursorBlink: false,
-    disableStdin: !props.interactive,
+    disableStdin: !props.interactive || props.mobileComposer,
     fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.25,
@@ -38,7 +40,7 @@ onMounted(() => {
   });
   terminal.open(container.value!);
   terminal.onData((value) => {
-    if (props.interactive) emit('input', new TextEncoder().encode(value));
+    if (props.interactive && !props.mobileComposer) emit('input', new TextEncoder().encode(value));
   });
   renderEvents(props.events);
   resizeObserver = new ResizeObserver(scheduleResize);
@@ -54,7 +56,7 @@ watch(
 watch(
   () => props.interactive,
   (interactive) => {
-    if (terminal) terminal.options.disableStdin = !interactive;
+    if (terminal) terminal.options.disableStdin = !interactive || props.mobileComposer;
   },
 );
 
@@ -102,8 +104,20 @@ function decodeBase64(value: string): Uint8Array {
   const binary = window.atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
+
+function sendMobileInput(): void {
+  if (!props.interactive || !mobileInput.value) return;
+  emit('input', new TextEncoder().encode(`${mobileInput.value}\r`));
+  mobileInput.value = '';
+}
 </script>
 
 <template>
-  <div ref="container" class="terminal-view" aria-label="远程交互终端" />
+  <section class="terminal-view" :class="{ 'mobile-terminal-composer': mobileComposer }" aria-label="远程交互终端">
+    <div ref="container" class="terminal-canvas" />
+    <form v-if="mobileComposer" class="terminal-composer" @submit.prevent="sendMobileInput">
+      <input v-model="mobileInput" type="text" enterkeyhint="send" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="输入 Shell 命令" :disabled="!interactive">
+      <button type="submit" :disabled="!interactive || !mobileInput">发送</button>
+    </form>
+  </section>
 </template>
