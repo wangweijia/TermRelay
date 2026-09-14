@@ -21,7 +21,7 @@ pnpm release:server
 指定正式版本：
 
 ```bash
-pnpm release:server -- --version 0.1.0
+pnpm release:server --version 0.1.0
 ```
 
 可用参数：
@@ -61,7 +61,6 @@ cd termrelay-server-0.1.0
 ```text
 termrelay-server/
 └── termrelay-server-0.1.0/
-    ├── .env.production             # 打包时写入的可用生产配置，权限 600
     ├── image.tar.gz
     ├── compose.yaml
     ├── deploy.sh
@@ -71,21 +70,22 @@ termrelay-server/
 
 ## 3. 首次配置
 
-在开发机创建一次受 Git 忽略的生产配置：
+在 Jetson 上创建一次稳定的生产配置：
 
 ```bash
-cp deploy/server/.env.production.example deploy/server/.env.production
-chmod 600 deploy/server/.env.production
+mkdir -p /home/weijia/deploy/termrelay/shared
+cp .env.production.example /home/weijia/deploy/termrelay/shared/.env.production
+chmod 600 /home/weijia/deploy/termrelay/shared/.env.production
 ```
 
-填写实际数据库凭据后运行打包命令。打包脚本会检查必填项和密码占位符，并将该文件直接放进发布包。Jetson 解压后可立即执行 `./deploy.sh`，不再创建或填写配置。不要把发布包发给无权接触生产数据库凭据的人。
+填写实际数据库凭据。后续每个发布包都复用该文件，构建产物不包含任何生产密钥；Release Runner 会在部署时通过 `--env-file` 传入稳定路径。
 
 生产发布包默认绑定 Jetson 的所有网络接口，即 `0.0.0.0:3006`。局域网设备可以通过 Jetson 的局域网 IP 直接访问。当前没有应用层认证，只能在可信局域网使用，不能通过路由器端口转发直接暴露到公网。
 
 ## 4. 一键部署
 
 ```bash
-./deploy.sh
+./deploy.sh --env-file /home/weijia/deploy/termrelay/shared/.env.production
 ```
 
 脚本依次执行：
@@ -117,7 +117,7 @@ chmod 600 deploy/server/.env.production
 
 ```bash
 curl --noproxy 127.0.0.1 -fsS http://127.0.0.1:3006/health
-docker compose --env-file .env.production -f compose.yaml -p termrelay ps
+docker compose --env-file /home/weijia/deploy/termrelay/shared/.env.production -f compose.yaml -p termrelay ps
 ```
 
 从 Mac 或其他局域网设备直接访问（将示例 IP 替换为 Jetson 的实际局域网 IP）：

@@ -11,7 +11,8 @@ Usage: ./deploy.sh [--env-file PATH] [--skip-migration]
 
 Loads the bundled TermRelay Docker image, runs database migrations, starts the
 production container, and waits for its health check. The release archive
-contains a ready-to-use .env.production by default.
+requires a production environment file supplied with --env-file or placed at
+.env.production beside this script.
 EOF
 }
 
@@ -57,8 +58,8 @@ compose_file="$release_dir/compose.yaml"
 [ -f "$compose_file" ] || { echo "Missing Compose file: $compose_file" >&2; exit 1; }
 
 if [ ! -f "$env_file" ]; then
-  echo "Missing packaged production configuration: $env_file" >&2
-  echo "Rebuild the release with scripts/build-server-release.sh --env-file PATH." >&2
+  echo "Missing production configuration: $env_file" >&2
+  echo "Pass the stable Jetson configuration with --env-file PATH." >&2
   exit 2
 fi
 

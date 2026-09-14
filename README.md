@@ -209,10 +209,10 @@ BARK_PUSH_URL=https://api.day.app/your-device-key
 ### Server 离线发布
 
 ```bash
-pnpm release:server --version 0.1.0 --allow-dirty
+pnpm release:server --version 0.1.0
 ```
 
-默认生成适用于 `linux/arm64` 的离线 Docker 发布包。部署流程、环境文件和回滚方式见 [Server 发布指南](docs/SERVER_RELEASE.md)。
+默认生成适用于 `linux/arm64` 的离线 Docker 发布包，且不会把生产环境文件或数据库密码打进产物。部署流程、环境文件和回滚方式见 [Server 发布指南](docs/SERVER_RELEASE.md)。
 
 ### Cloudflare
 
