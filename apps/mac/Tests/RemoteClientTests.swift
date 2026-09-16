@@ -3,6 +3,35 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testRelayOutboxPersistsAndPrunesOnlyConfirmedEvents() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termrelay-outbox-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        let store = RelayOutboxStore(deviceID: UUID(), directory: root)
+        let first = RelayPendingEvent.terminal(TerminalOutputBatch(
+            sessionID: sessionID,
+            sequence: 1,
+            capturedAt: Date(timeIntervalSince1970: 1),
+            bytes: Data("first".utf8)
+        ))
+        let second = RelayPendingEvent.terminal(TerminalOutputBatch(
+            sessionID: sessionID,
+            sequence: 2,
+            capturedAt: Date(timeIntervalSince1970: 2),
+            bytes: Data("second".utf8)
+        ))
+
+        try store.save(second)
+        try store.save(first)
+        XCTAssertEqual(try store.load().map(\.sequence), [1, 2])
+
+        try store.remove(sessionID: sessionID, through: 1)
+        let remaining = try store.load()
+        XCTAssertEqual(remaining.map(\.sequence), [2])
+        XCTAssertEqual(remaining.first?.terminalData, Data("second".utf8))
+    }
+
     func testDecodesInputAndResizeCommands() async throws {
         let client = RemoteClient(
             deviceID: UUID(),

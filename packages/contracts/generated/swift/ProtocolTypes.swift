@@ -61,6 +61,12 @@ public struct SessionEndedPayload: Codable, Sendable {
     public let finishedAt: String
 }
 
+public struct SessionSyncPayload: Codable, Sendable {}
+
+public struct SessionSyncedPayload: Codable, Sendable {
+    public let lastAcceptedSeq: UInt64
+}
+
 public struct TerminalOutputPayload: Codable, Sendable {
     public let encoding: String
     public let data: String

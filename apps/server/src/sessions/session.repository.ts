@@ -45,7 +45,7 @@ export interface PendingApprovalRecord {
 export type SessionWriteResult =
   | { status: 'accepted'; event: SessionEventRecord }
   | { status: 'duplicate' }
-  | { status: 'conflict'; detail: string }
+  | { status: 'conflict'; detail: string; expectedSeq?: number }
   | { status: 'unknown_session' };
 
 export type SessionDeleteResult = 'deleted' | 'not_found' | 'not_finished';
@@ -194,6 +194,7 @@ export class SessionRepository {
         return {
           status: 'conflict',
           detail: `Expected sequence ${expectedSeq}, received ${seq}.`,
+          expectedSeq,
         };
       }
 

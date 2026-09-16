@@ -56,6 +56,7 @@ test('maps sequence conflicts from terminal output persistence', async () => {
   sessions.outputResult = {
     status: 'conflict',
     detail: 'Expected sequence 2, received 3.',
+    expectedSeq: 2,
   };
   const service = makeService(workspaces, sessions);
 
@@ -67,7 +68,10 @@ test('maps sequence conflicts from terminal output persistence', async () => {
   );
 
   assert.equal(result.status, 'error');
-  if (result.status === 'error') assert.equal(result.code, 'conflict');
+  if (result.status === 'error') {
+    assert.equal(result.code, 'conflict');
+    assert.equal(result.expectedSeq, 2);
+  }
 });
 
 test('strictly separates PTY output from ACP events', () => {
@@ -196,7 +200,7 @@ class FakeSessionRepository {
           createdAt: string;
         };
       }
-    | { status: 'conflict'; detail: string } = acceptedEvent(1);
+    | { status: 'conflict'; detail: string; expectedSeq?: number } = acceptedEvent(1);
 
   async registerStarted(
     _deviceId: string,

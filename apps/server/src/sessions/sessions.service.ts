@@ -27,6 +27,7 @@ export type ClientEventResult =
       status: 'error';
       code: 'unknown_device' | 'unknown_session' | 'unauthorized_workspace' | 'conflict';
       detail: string;
+      expectedSeq?: number;
     };
 
 export interface SessionEventNotification {
@@ -185,6 +186,14 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return this.sessions.findById(id);
   }
 
+  async findOwnedSession(
+    deviceId: string,
+    sessionId: string,
+  ): Promise<SessionRecord | undefined> {
+    const session = await this.findById(sessionId);
+    return session?.deviceId === deviceId ? session : undefined;
+  }
+
   async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {
     await this.waitForWrites();
     return this.sessions.deleteFinished(id, purge);
@@ -265,7 +274,7 @@ function mapSessionWrite(result: SessionWriteResult): ClientEventResult {
     case 'unknown_session':
       return error('unknown_session', 'Session does not exist for this device.');
     case 'conflict':
-      return error('conflict', result.detail);
+      return error('conflict', result.detail, result.expectedSeq);
   }
 }
 
@@ -279,6 +288,7 @@ function cloneEvent(event: SessionEventRecord): SessionEventRecord {
 function error(
   code: Extract<ClientEventResult, { status: 'error' }>['code'],
   detail: string,
+  expectedSeq?: number,
 ): ClientEventResult {
-  return { status: 'error', code, detail };
+  return { status: 'error', code, detail, ...(expectedSeq ? { expectedSeq } : {}) };
 }

@@ -7,8 +7,8 @@
   "properties": {
     "code": { "enum": ["invalid_message", "unsupported_version", "unknown_device", "unknown_session", "unauthorized_workspace", "conflict", "internal_error"] },
     "message": { "type": "string", "maxLength": 2048 },
-    "relatedMessageId": { "type": "string", "format": "uuid" }
+    "relatedMessageId": { "type": "string", "format": "uuid" },
+    "expectedSeq": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
   },
   "additionalProperties": false
 }
-

@@ -164,6 +164,56 @@ test('routes registered workspace and session events to the session service', as
     'ended:session-a:finished',
   ]);
   assert.equal(socket.closed.length, 0);
+  assert.equal(
+    socket.messages.some((message) =>
+      message.data.type === 'session.synced'
+      && message.data.payload.lastAcceptedSeq === 0),
+    true,
+  );
+});
+
+test('returns the persisted session watermark on explicit sync', async () => {
+  const { gateway } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  gateway.handleMessage(client, envelope('device-a', 'device.register', {
+    name: 'Development Mac', appVersion: '0.1.0', platform: 'macOS', tools: ['shell'],
+  }));
+
+  await gateway.handleMessage(client, {
+    ...envelope('device-a', 'session.sync', {}),
+    sessionId: 'session-a',
+  });
+
+  assert.equal(socket.messages.at(-1)?.data.type, 'session.synced');
+  assert.equal(socket.messages.at(-1)?.data.payload.lastAcceptedSeq, 0);
+});
+
+test('returns structured sequence recovery context on a gap', async () => {
+  const { gateway, sessions } = makeGateway();
+  sessions.outputResult = {
+    status: 'error', code: 'conflict', detail: 'sequence gap', expectedSeq: 2,
+  };
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  gateway.handleMessage(client, envelope('device-a', 'device.register', {
+    name: 'Development Mac', appVersion: '0.1.0', platform: 'macOS', tools: ['shell'],
+  }));
+
+  await gateway.handleMessage(
+    client,
+    contextualEnvelope('device-a', 'session-a', 3, 'terminal.output', {
+      encoding: 'base64', data: Buffer.from('gap').toString('base64'),
+    }),
+  );
+
+  const error = socket.messages.at(-1)?.data;
+  assert.ok(error);
+  assert.equal(error.type, 'protocol.error');
+  assert.equal(error.sessionId, 'session-a');
+  assert.equal(error.payload.expectedSeq, 2);
 });
 
 test('routes command acknowledgements from a registered Mac', async () => {
@@ -240,6 +290,11 @@ function contextualEnvelope(
 
 class FakeSessionsService {
   readonly calls: string[] = [];
+  outputResult:
+    | { status: 'accepted' }
+    | { status: 'error'; code: 'conflict'; detail: string; expectedSeq: number } = {
+      status: 'accepted',
+    };
 
   async registerWorkspace(
     _deviceId: string,
@@ -274,7 +329,12 @@ class FakeSessionsService {
     _payload: TerminalOutputPayload,
   ) {
     this.calls.push(`output:${sessionId}:${seq}`);
-    return { status: 'accepted' as const };
+    return this.outputResult;
+  }
+
+  async findOwnedSession(deviceId: string, sessionId: string) {
+    if (deviceId !== 'device-a' || sessionId !== 'session-a') return undefined;
+    return { id: sessionId, deviceId, stateVersion: 0 };
   }
 }
 
@@ -283,6 +343,7 @@ interface SentMessage {
   data: {
     type: string;
     deviceId: string;
+    sessionId?: string;
     payload: Record<string, unknown>;
   };
 }

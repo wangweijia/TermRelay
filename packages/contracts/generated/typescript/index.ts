@@ -53,6 +53,12 @@ export interface SessionEndedPayload {
   finishedAt: string;
 }
 
+export type SessionSyncPayload = Record<string, never>;
+
+export interface SessionSyncedPayload {
+  lastAcceptedSeq: number;
+}
+
 export type ProtocolErrorCode =
   | 'invalid_message'
   | 'unsupported_version'
@@ -66,6 +72,7 @@ export interface ProtocolErrorPayload {
   code: ProtocolErrorCode;
   message: string;
   relatedMessageId?: string;
+  expectedSeq?: number;
 }
 
 // Runtime schema exports are generated-file artifacts derived from the JSON Schema source.
@@ -161,6 +168,27 @@ export const sessionEndedSchema = {
   properties: {
     status: { enum: ['finished', 'failed'] },
     finishedAt: { type: 'string', format: 'date-time' },
+  },
+  additionalProperties: false,
+} as const;
+
+export const sessionSyncSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/session-sync.schema.json',
+  title: 'session.sync payload',
+  type: 'object',
+  maxProperties: 0,
+  additionalProperties: false,
+} as const;
+
+export const sessionSyncedSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://termrelay.local/contracts/events/session-synced.schema.json',
+  title: 'session.synced payload',
+  type: 'object',
+  required: ['lastAcceptedSeq'],
+  properties: {
+    lastAcceptedSeq: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
   },
   additionalProperties: false,
 } as const;

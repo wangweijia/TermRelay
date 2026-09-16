@@ -90,6 +90,12 @@ test('accepts workspace, session, and terminal events with required context', ()
     sessionId: 'session-a',
   });
   assert.equal(ended.ok, true);
+
+  const sync = validator.validate({
+    ...envelope('session.sync', {}),
+    sessionId: 'session-a',
+  });
+  assert.equal(sync.ok, true);
 });
 
 test('accepts normalized structured Agent events and rejects incomplete approvals', () => {

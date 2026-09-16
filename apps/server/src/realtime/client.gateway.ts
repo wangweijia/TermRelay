@@ -12,6 +12,7 @@ import type {
   Envelope,
   ProtocolErrorCode,
   ProtocolErrorPayload,
+  SessionSyncedPayload,
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
@@ -123,6 +124,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'session.sync') {
+      await this.sendSessionWatermark(client, result.message.envelope);
+      return;
+    }
+
     return this.handleSessionEvent(client, result.message);
   }
 
@@ -130,7 +136,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' }
     >,
   ): Promise<void> {
     const { envelope } = message;
@@ -173,7 +179,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
           result.code,
           result.detail,
           envelope.messageId,
+          envelope.sessionId,
+          result.expectedSeq,
         );
+      } else if (message.type === 'session.started') {
+        await this.sendSessionWatermark(client, envelope);
       }
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -183,8 +193,36 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
         'internal_error',
         'Failed to persist client event.',
         envelope.messageId,
+        envelope.sessionId,
       );
     }
+  }
+
+  private async sendSessionWatermark(
+    client: WebSocket,
+    envelope: Pick<Envelope<unknown>, 'deviceId' | 'sessionId' | 'messageId'>,
+  ): Promise<void> {
+    const sessionId = envelope.sessionId!;
+    const session = await this.sessions.findOwnedSession(envelope.deviceId, sessionId);
+    if (!session) {
+      this.sendProtocolError(
+        client,
+        'unknown_session',
+        'Session does not exist for this device.',
+        envelope.messageId,
+        sessionId,
+      );
+      return;
+    }
+    this.sendEnvelope<SessionSyncedPayload>(client, {
+      type: 'session.synced',
+      protocolVersion: '2',
+      messageId: randomUUID(),
+      deviceId: envelope.deviceId,
+      sessionId,
+      sentAt: new Date().toISOString(),
+      payload: { lastAcceptedSeq: session.stateVersion },
+    });
   }
 
   private rejectUnregistered(client: WebSocket, messageId: string): void {
@@ -202,6 +240,8 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     code: ProtocolErrorCode,
     message: string,
     relatedMessageId?: string,
+    sessionId?: string,
+    expectedSeq?: number,
   ): void {
     const deviceId = this.registry.getDeviceId(client) ?? 'unregistered';
     this.sendEnvelope<ProtocolErrorPayload>(client, {
@@ -209,11 +249,13 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       protocolVersion: '2',
       messageId: randomUUID(),
       deviceId,
+      ...(sessionId ? { sessionId } : {}),
       sentAt: new Date().toISOString(),
       payload: {
         code,
         message: message.slice(0, 2_048),
         ...(relatedMessageId ? { relatedMessageId } : {}),
+        ...(expectedSeq ? { expectedSeq } : {}),
       },
     });
   }

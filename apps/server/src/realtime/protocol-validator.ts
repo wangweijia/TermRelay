@@ -5,6 +5,7 @@ import type {
   DeviceRegisterPayload,
   Envelope,
   SessionEndedPayload,
+  SessionSyncPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
   ToolEventPayload,
@@ -16,6 +17,7 @@ import {
   deviceRegisterSchema,
   envelopeSchema,
   sessionEndedSchema,
+  sessionSyncSchema,
   sessionStartedSchema,
   terminalOutputSchema,
   toolEventSchema,
@@ -32,6 +34,7 @@ export type ValidClientMessage =
     }
   | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
   | { type: 'session.ended'; envelope: Envelope<SessionEndedPayload> }
+  | { type: 'session.sync'; envelope: Envelope<SessionSyncPayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
   | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
@@ -63,6 +66,7 @@ export class ProtocolValidator {
       ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
       ['session.started', ajv.compile(sessionStartedSchema)],
       ['session.ended', ajv.compile(sessionEndedSchema)],
+      ['session.sync', ajv.compile(sessionSyncSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
@@ -118,11 +122,11 @@ export class ProtocolValidator {
           'session.started requires sessionId and seq 0.',
         );
       }
-    } else if (envelope.type === 'session.ended') {
+    } else if (envelope.type === 'session.ended' || envelope.type === 'session.sync') {
       if (!envelope.sessionId || envelope.seq !== undefined) {
         return invalidContext(
           envelope,
-          'session.ended requires sessionId and must not include seq.',
+          `${envelope.type} requires sessionId and must not include seq.`,
         );
       }
     } else if (envelope.type === 'terminal.output' || envelope.type === 'tool.event') {
@@ -202,6 +206,14 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
         message: {
           type: envelope.type,
           envelope: envelope as unknown as Envelope<SessionEndedPayload>,
+        },
+      };
+    case 'session.sync':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionSyncPayload>,
         },
       };
     case 'terminal.output':

@@ -104,10 +104,17 @@ Server S2 device persistence probe passed.
 - `session.started` 以 seq 0 建立会话和初始事件。
 - `terminal.output` 进行 payload、session/device 归属和连续 seq 校验。
 - 相同 `session_id + seq + payload` 重传会被幂等忽略；相同 seq 的不同内容和跳号会返回 `conflict`。
+- Mac 的事件发送使用按会话串行 outbox；事件先原子落盘，再按 seq 发送，不再因内存缓存上限静默删除已编号事件。
+- 新增 `session.sync` / `session.synced` 水位对账：会话建立、定期检查和序号冲突后，Server 返回持久化的 `lastAcceptedSeq`，Mac 清理已确认事件并从下一条自动补发。
+- 序号冲突通过结构化 `expectedSeq` 返回；Mac 会暂停该会话、重新对账，而不是继续发送更大的序号扩大错误。
 - 同一设备事件串行落库，工作区、会话和输出可以连续发送而不会发生外键竞态。
 - 单条 terminal output 的 Base64 字段限制约 1 MiB，并拒绝非法 Base64。
 - Terminal Output 默认查询保留期为 24 小时，可通过 `TERMINAL_EVENT_TTL_HOURS` 调整；物理清理任务仍待实现。
 - 事件 API 支持从指定 seq 继续读取，给下一阶段历史加载与实时接续提供边界。
+
+后续可靠性待办：
+
+- [ ] 增加逐事件成功 ACK。Server 仅在数据库事务提交后返回 `session.event.ack`，携带原始 `messageId` 和 `acceptedSeq`；Mac 在收到 ACK 前保留事件并支持超时幂等重发。当前累计水位同步可以在重连、定期检查和冲突时恢复，但不能实时确认每一条事件是否已经提交。
 
 真实数据库端到端探测已通过：
 

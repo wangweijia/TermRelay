@@ -44,14 +44,14 @@ struct RelaySessionStarted: Encodable, Sendable {
     let startedAt: String
 }
 
-struct RelayToolEvent: Encodable, Sendable {
+struct RelayToolEvent: Codable, Sendable {
     let kind: String
     let occurredAt: String
     let correlation: RelayToolCorrelation
     let data: [String: JSONValue]
 }
 
-struct RelayToolCorrelation: Encodable, Sendable {
+struct RelayToolCorrelation: Codable, Sendable {
     let turnId: String?
     let itemId: String?
     let approvalId: String?
@@ -66,6 +66,8 @@ struct RelayTerminalOutput: Encodable, Sendable {
     let encoding = "base64"
     let data: String
 }
+
+struct RelaySessionSync: Encodable, Sendable {}
 
 struct RelayCommandAck: Encodable, Sendable {
     let commandId: UUID

@@ -20,20 +20,36 @@ actor RemoteClient {
     private var announcedSessions = Set<UUID>()
     private var endedSessions = Set<UUID>()
     private var pendingSessionEnds: [UUID: RelaySessionEnded] = [:]
-    private var pendingEvents: [UUID: [PendingSessionEvent]] = [:]
+    private var pendingEvents: [UUID: [RelayPendingEvent]] = [:]
     private var nextSequenceBySession: [UUID: UInt64] = [:]
     private var relaySequenceBySource: [UUID: [RelayEventSource: UInt64]] = [:]
-    private var pendingOutputBytes = 0
-    private let maximumPendingOutputBytes = 16 * 1_024 * 1_024
+    private var sentThroughBySession: [UUID: UInt64] = [:]
+    private var sendsSinceSyncBySession: [UUID: Int] = [:]
+    private var drainingSessions = Set<UUID>()
+    private var sessionsAwaitingSync = Set<UUID>()
+    private var sessionsFinalizingSync = Set<UUID>()
+    private var sessionsWithLocalGap = Set<UUID>()
+    private let syncEveryEventCount = 64
+    private let outbox: RelayOutboxStore
 
     init(
         deviceID: UUID,
         stateHandler: @escaping StateHandler,
-        commandHandler: @escaping CommandHandler
+        commandHandler: @escaping CommandHandler,
+        outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
         self.stateHandler = stateHandler
         self.commandHandler = commandHandler
+        outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
+        let recovered = (try? outbox.load()) ?? []
+        for event in recovered {
+            pendingEvents[event.sessionID, default: []].append(event)
+            nextSequenceBySession[event.sessionID] = max(
+                nextSequenceBySession[event.sessionID] ?? 1,
+                event.sequence + 1
+            )
+        }
     }
 
     func connect(to value: String) {
@@ -56,6 +72,10 @@ actor RemoteClient {
         generation += 1
         registered = false
         announcedSessions.removeAll()
+        sentThroughBySession.removeAll()
+        drainingSessions.removeAll()
+        sessionsAwaitingSync.removeAll()
+        sessionsFinalizingSync.removeAll()
         heartbeatTask?.cancel()
         heartbeatTask = nil
         runTask?.cancel()
@@ -90,6 +110,7 @@ actor RemoteClient {
         startedAt: String
     ) async {
         if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
+        sessionsAwaitingSync.insert(id)
         let sent = await send(
             type: "session.started",
             sessionId: id.uuidString.lowercased(),
@@ -103,11 +124,6 @@ actor RemoteClient {
             )
         )
         guard sent else { return }
-        announcedSessions.insert(id)
-        await flushPendingEvents(sessionId: id)
-        if let pendingEnd = pendingSessionEnds.removeValue(forKey: id) {
-            await sendSessionEnded(id: id, payload: pendingEnd)
-        }
     }
 
     func publishSessionEnded(id: UUID, status: SessionState, finishedAt: String) async {
@@ -117,11 +133,11 @@ actor RemoteClient {
             status: status == .failed ? "failed" : "finished",
             finishedAt: finishedAt
         )
+        pendingSessionEnds[id] = payload
         guard registered, announcedSessions.contains(id) else {
-            pendingSessionEnds[id] = payload
             return
         }
-        await sendSessionEnded(id: id, payload: payload)
+        await drainPendingEvents(sessionId: id)
     }
 
     func publishTerminalOutput(_ batch: TerminalOutputBatch) async {
@@ -135,12 +151,9 @@ actor RemoteClient {
             capturedAt: batch.capturedAt,
             bytes: batch.bytes
         )
-        let pending = PendingSessionEvent.terminal(sequenced)
-        guard registered, announcedSessions.contains(sequenced.sessionID) else {
-            enqueue(pending)
-            return
-        }
-        if !(await send(pending)) { enqueue(pending) }
+        let pending = RelayPendingEvent.terminal(sequenced)
+        guard enqueue(pending) else { return }
+        await drainPendingEvents(sessionId: sequenced.sessionID)
     }
 
     func publishToolEvent(_ event: ToolEvent) async {
@@ -151,12 +164,9 @@ actor RemoteClient {
             for: RelayEventSource(kind: .tool, sequence: event.sequence),
             sessionID: event.sessionID
         )
-        let pending = PendingSessionEvent.tool(sequence: sequence, event: event)
-        guard registered, announcedSessions.contains(event.sessionID) else {
-            enqueue(pending)
-            return
-        }
-        if !(await send(pending)) { enqueue(pending) }
+        let pending = RelayPendingEvent.tool(sequence: sequence, event: event)
+        guard enqueue(pending) else { return }
+        await drainPendingEvents(sessionId: event.sessionID)
     }
 
     private func relaySequence(for source: RelayEventSource, sessionID: UUID) -> UInt64 {
@@ -220,6 +230,7 @@ actor RemoteClient {
         guard envelope.deviceId.caseInsensitiveCompare(deviceID.uuidString) == .orderedSame else { return }
         if envelope.type == "device.registered" {
             registered = true
+            sessionsFinalizingSync.removeAll()
             if let interval = envelope.payload.object?["heartbeatIntervalMs"]?.integer {
                 heartbeatIntervalMs = max(1_000, interval)
             }
@@ -227,8 +238,29 @@ actor RemoteClient {
             stateHandler(.connected, nil)
             return
         }
+        if envelope.type == "session.synced" {
+            guard
+                let rawSessionID = envelope.sessionId,
+                let sessionID = UUID(uuidString: rawSessionID),
+                let accepted = envelope.payload.object?["lastAcceptedSeq"]?.integer,
+                accepted >= 0
+            else { return }
+            await reconcileSession(sessionID, lastAcceptedSequence: UInt64(accepted))
+            return
+        }
         if envelope.type == "protocol.error" {
             let message = envelope.payload.object?["message"]?.string ?? "Server 拒绝了消息"
+            if
+                envelope.payload.object?["code"]?.string == "conflict",
+                envelope.payload.object?["expectedSeq"]?.integer != nil,
+                let rawSessionID = envelope.sessionId,
+                let sessionID = UUID(uuidString: rawSessionID)
+            {
+                sessionsAwaitingSync.insert(sessionID)
+                stateHandler(.degraded, "会话序号不同步，正在自动对账并补发。")
+                await requestSessionSync(sessionID)
+                return
+            }
             stateHandler(.degraded, message)
             return
         }
@@ -379,58 +411,144 @@ actor RemoteClient {
         }
     }
 
-    private func enqueue(_ event: PendingSessionEvent) {
+    @discardableResult
+    private func enqueue(_ event: RelayPendingEvent) -> Bool {
         var sessionEvents = pendingEvents[event.sessionID] ?? []
-        if sessionEvents.contains(where: { $0.sequence == event.sequence }) { return }
+        if sessionEvents.contains(where: { $0.sequence == event.sequence }) { return true }
+        do {
+            try outbox.save(event)
+        } catch {
+            stateHandler(.degraded, "无法保存待同步事件：\(error.localizedDescription)")
+            return false
+        }
         sessionEvents.append(event)
         sessionEvents.sort { $0.sequence < $1.sequence }
         pendingEvents[event.sessionID] = sessionEvents
-        pendingOutputBytes += event.byteCount
+        return true
+    }
 
-        while pendingOutputBytes > maximumPendingOutputBytes {
-            guard
-                let oldestSession = pendingEvents.min(by: {
-                    ($0.value.first?.occurredAt ?? .distantFuture) <
-                        ($1.value.first?.occurredAt ?? .distantFuture)
-                })?.key,
-                var events = pendingEvents[oldestSession],
-                !events.isEmpty
-            else { break }
-            let removed = events.removeFirst()
-            pendingOutputBytes -= removed.byteCount
-            pendingEvents[oldestSession] = events.isEmpty ? nil : events
-            stateHandler(.degraded, "离线事件缓存已满，最旧的会话数据被丢弃。")
+    private func drainPendingEvents(sessionId: UUID) async {
+        guard registered,
+              announcedSessions.contains(sessionId),
+              !sessionsAwaitingSync.contains(sessionId),
+              !sessionsWithLocalGap.contains(sessionId),
+              drainingSessions.insert(sessionId).inserted else { return }
+        defer { drainingSessions.remove(sessionId) }
+
+        while registered,
+              announcedSessions.contains(sessionId),
+              !sessionsAwaitingSync.contains(sessionId)
+        {
+            let sentThrough = sentThroughBySession[sessionId] ?? 0
+            guard let event = pendingEvents[sessionId]?.first(where: {
+                $0.sequence > sentThrough
+            }) else {
+                if let pendingEnd = pendingSessionEnds.removeValue(forKey: sessionId) {
+                    if pendingEvents[sessionId]?.isEmpty == false,
+                       sessionsFinalizingSync.insert(sessionId).inserted
+                    {
+                        pendingSessionEnds[sessionId] = pendingEnd
+                        if !(await requestSessionSync(sessionId)) {
+                            sessionsFinalizingSync.remove(sessionId)
+                        }
+                        return
+                    }
+                    sessionsFinalizingSync.remove(sessionId)
+                    await sendSessionEnded(id: sessionId, payload: pendingEnd)
+                }
+                return
+            }
+            guard event.sequence == sentThrough + 1 else {
+                sessionsWithLocalGap.insert(sessionId)
+                stateHandler(
+                    .degraded,
+                    "本地待发送队列缺少序号 \(sentThrough + 1)，已暂停该会话同步。"
+                )
+                return
+            }
+            guard await send(event) else { return }
+            sentThroughBySession[sessionId] = event.sequence
+            let count = (sendsSinceSyncBySession[sessionId] ?? 0) + 1
+            sendsSinceSyncBySession[sessionId] = count
+            if count >= syncEveryEventCount {
+                sendsSinceSyncBySession[sessionId] = 0
+                await requestSessionSync(sessionId)
+            }
         }
     }
 
-    private func flushPendingEvents(sessionId: UUID) async {
-        guard var events = pendingEvents[sessionId] else { return }
-        pendingEvents[sessionId] = nil
-        pendingOutputBytes -= events.reduce(0) { $0 + $1.byteCount }
-        for (index, event) in events.enumerated() {
-            let sent = await send(event)
-            if sent { continue }
-            for remaining in events[index...] { enqueue(remaining) }
+    private func reconcileSession(_ sessionID: UUID, lastAcceptedSequence: UInt64) async {
+        let wasWaiting = sessionsAwaitingSync.remove(sessionID) != nil
+        let removed = pendingEvents[sessionID]?.filter {
+            $0.sequence <= lastAcceptedSequence
+        } ?? []
+        if !removed.isEmpty {
+            pendingEvents[sessionID]?.removeAll { $0.sequence <= lastAcceptedSequence }
+            if pendingEvents[sessionID]?.isEmpty == true { pendingEvents[sessionID] = nil }
+        }
+        do {
+            try outbox.remove(sessionID: sessionID, through: lastAcceptedSequence)
+        } catch {
+            stateHandler(.degraded, "无法清理已同步事件：\(error.localizedDescription)")
+        }
+
+        let firstPending = pendingEvents[sessionID]?.first?.sequence
+        if let firstPending, firstPending > lastAcceptedSequence + 1 {
+            sessionsWithLocalGap.insert(sessionID)
+            stateHandler(
+                .degraded,
+                "服务端需要序号 \(lastAcceptedSequence + 1)，但本地最早只有 \(firstPending)，无法自动补发。"
+            )
             return
         }
-        events.removeAll()
+
+        sessionsWithLocalGap.remove(sessionID)
+        sessionsFinalizingSync.remove(sessionID)
+        announcedSessions.insert(sessionID)
+        if wasWaiting {
+            sentThroughBySession[sessionID] = lastAcceptedSequence
+        } else {
+            sentThroughBySession[sessionID] = max(
+                sentThroughBySession[sessionID] ?? lastAcceptedSequence,
+                lastAcceptedSequence
+            )
+        }
+        nextSequenceBySession[sessionID] = max(
+            nextSequenceBySession[sessionID] ?? 1,
+            (pendingEvents[sessionID]?.last?.sequence ?? lastAcceptedSequence) + 1
+        )
+        Task { [weak self] in
+            await self?.drainPendingEvents(sessionId: sessionID)
+        }
     }
 
-    private func send(_ event: PendingSessionEvent) async -> Bool {
-        switch event {
-        case .terminal(let batch):
-            await send(
+    @discardableResult
+    private func requestSessionSync(_ sessionID: UUID) async -> Bool {
+        guard registered else { return false }
+        return await send(
+            type: "session.sync",
+            sessionId: sessionID.uuidString.lowercased(),
+            payload: RelaySessionSync()
+        )
+    }
+
+    private func send(_ event: RelayPendingEvent) async -> Bool {
+        switch event.kind {
+        case .terminal:
+            guard let data = event.terminalData else { return false }
+            return await send(
                 type: "terminal.output",
-                sessionId: batch.sessionID.uuidString.lowercased(),
-                seq: batch.sequence,
-                payload: RelayTerminalOutput(data: batch.bytes.base64EncodedString())
+                sessionId: event.sessionID.uuidString.lowercased(),
+                seq: event.sequence,
+                payload: RelayTerminalOutput(data: data.base64EncodedString())
             )
-        case .tool(let sequence, let event):
-            await send(
+        case .tool:
+            guard let payload = event.toolPayload else { return false }
+            return await send(
                 type: "tool.event",
                 sessionId: event.sessionID.uuidString.lowercased(),
-                seq: sequence,
-                payload: RelayToolEvent(event)
+                seq: event.sequence,
+                payload: payload
             )
         }
     }
@@ -475,40 +593,7 @@ private struct RelayEventSource: Hashable {
     let sequence: UInt64
 }
 
-private enum PendingSessionEvent {
-    case terminal(TerminalOutputBatch)
-    case tool(sequence: UInt64, event: ToolEvent)
-
-    var sessionID: UUID {
-        switch self {
-        case .terminal(let batch): batch.sessionID
-        case .tool(_, let event): event.sessionID
-        }
-    }
-
-    var sequence: UInt64 {
-        switch self {
-        case .terminal(let batch): batch.sequence
-        case .tool(let sequence, _): sequence
-        }
-    }
-
-    var occurredAt: Date {
-        switch self {
-        case .terminal(let batch): batch.capturedAt
-        case .tool(_, let event): event.occurredAt
-        }
-    }
-
-    var byteCount: Int {
-        switch self {
-        case .terminal(let batch): batch.bytes.count
-        case .tool: 1_024
-        }
-    }
-}
-
-private extension RelayToolEvent {
+extension RelayToolEvent {
     init(_ event: ToolEvent) {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
