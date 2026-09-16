@@ -151,9 +151,21 @@ export const useRelayStore = defineStore('relay', {
       const previous = this.selectedSession;
       if (previous) this.sendSubscription('session.unsubscribe', previous, {});
 
+      const hasInMemoryHistory = Object.prototype.hasOwnProperty.call(
+        this.eventsBySession,
+        sessionId,
+      );
       this.selectedSessionId = sessionId;
       void saveSelectedSession(sessionId).catch(() => undefined);
       const version = ++this.selectionVersion;
+      if (hasInMemoryHistory) {
+        this.loadingHistory = false;
+        this.error = undefined;
+        this.subscribeSelected();
+        this.scrollToLatestRevision += 1;
+        return;
+      }
+
       this.loadingHistory = true;
       try {
         const cached = await loadSessionCache(sessionId).catch(() => undefined);

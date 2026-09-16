@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
 
         <div v-if="relay.loadingHistory" class="terminal-placeholder">正在加载会话历史…</div>
         <TerminalView
-          v-else-if="relay.selectedSession?.runtimeMode === 'pty'"
+          v-if="!relay.loadingHistory && relay.selectedSession?.runtimeMode === 'pty'"
           :key="relay.selectedSession.id"
           :events="relay.selectedEvents"
           :interactive="relay.selectedSessionInteractive"
@@ -181,18 +181,20 @@ onBeforeUnmount(() => {
           @input="relay.sendTerminalInput"
           @resize="relay.resizeTerminal"
         />
-        <StructuredAgentView
-          v-else-if="relay.selectedSession?.runtimeMode === 'acp'"
-          :key="relay.selectedSession.id"
-          :events="relay.selectedEvents"
-          :interactive="relay.selectedSessionInteractive"
-          :scroll-revision="relay.scrollToLatestRevision"
-          @start-turn="relay.startToolTurn"
-          @interrupt="relay.interruptToolTurn"
-          @resolve-approval="relay.resolveApproval"
-          @resolve-user-input="relay.resolveUserInput"
-        />
-        <div v-else class="terminal-placeholder">选择一个会话查看内容</div>
+        <KeepAlive :max="12">
+          <StructuredAgentView
+            v-if="!relay.loadingHistory && relay.selectedSession?.runtimeMode === 'acp'"
+            :key="relay.selectedSession.id"
+            :events="relay.selectedEvents"
+            :interactive="relay.selectedSessionInteractive"
+            :scroll-revision="relay.scrollToLatestRevision"
+            @start-turn="relay.startToolTurn"
+            @interrupt="relay.interruptToolTurn"
+            @resolve-approval="relay.resolveApproval"
+            @resolve-user-input="relay.resolveUserInput"
+          />
+        </KeepAlive>
+        <div v-if="!relay.loadingHistory && !relay.selectedSession" class="terminal-placeholder">选择一个会话查看内容</div>
         <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>
       </section>
       <ApprovalInbox
