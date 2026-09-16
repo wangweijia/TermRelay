@@ -6,7 +6,7 @@ const route = useRoute();
 
 <template>
   <div class="shell">
-    <header v-if="!route.meta.mobile">
+    <header v-if="!route.meta.mobile" class="app-header">
       <strong>TermRelay</strong>
       <span>Your terminals, within reach.</span>
     </header>

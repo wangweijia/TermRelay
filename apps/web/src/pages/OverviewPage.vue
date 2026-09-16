@@ -72,11 +72,10 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="console-page">
-    <section class="page-heading">
-      <div>
-        <p class="eyebrow">S5 · INTERACTIVE RELAY</p>
-        <h1>TermRelay 工作台</h1>
-        <p>集中管理终端、ACP 会话与待审批任务。</p>
+    <section class="workspace-toolbar">
+      <div class="workspace-title">
+        <strong>工作台</strong>
+        <span>终端 · ACP · 审批</span>
       </div>
       <div class="connection-pill" :data-state="relay.connectionState">
         <span />{{ connectionLabel }}
