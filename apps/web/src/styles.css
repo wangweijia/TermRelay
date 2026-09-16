@@ -234,7 +234,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   padding: 0;
   filter: drop-shadow(0 12px 24px rgb(0 0 0 / 48%));
 }
-.agent-event { margin-bottom: 12px; padding: 12px 14px; border: 1px solid #26323e; border-radius: 8px; background: #10171e; }
+.agent-event { margin-bottom: 12px; padding: 12px 14px; border: 1px solid #26323e; border-radius: 8px; background: #10171e; content-visibility: auto; contain-intrinsic-size: auto 96px; }
 .agent-event > small { color: #708091; font: 10px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
 .agent-event p { margin-top: 7px; color: #c4ced8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-event pre { margin: 8px 0 0; padding: 10px; overflow: auto; border-radius: 6px; color: #dce7f0; background: #080c10; white-space: pre-wrap; }

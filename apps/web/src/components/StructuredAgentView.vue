@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
@@ -30,56 +30,80 @@ const timelineElement = ref<HTMLElement>();
 const sendShortcut = ref<SendShortcut>(loadSendShortcut());
 const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
-const toolEvents = computed(() => props.events.flatMap((event) => event.type === 'tool.event'
-  ? [{ ...event, payload: event.payload as unknown as ToolEventPayload }] : []));
-const timeline = computed<TimelineItem[]>(() => {
-  const items: TimelineItem[] = [];
-  const byId = new Map<string, TimelineItem>();
-  for (const event of toolEvents.value) {
+const timeline = shallowRef<TimelineItem[]>([]);
+const timelineById = new Map<string, TimelineItem>();
+let processedEventCount = 0;
+let processedLastSeq: number | undefined;
+
+function syncTimeline(): void {
+  const prefixChanged = processedEventCount > props.events.length || (
+    processedEventCount > 0 && props.events[processedEventCount - 1]?.seq !== processedLastSeq
+  );
+  if (prefixChanged) {
+    timeline.value = [];
+    timelineById.clear();
+    processedEventCount = 0;
+    processedLastSeq = undefined;
+  }
+  let changed = false;
+  for (let index = processedEventCount; index < props.events.length; index += 1) {
+    const event = props.events[index]!;
+    if (event.type !== 'tool.event') continue;
+    applyToolEvent({ ...event, payload: event.payload as unknown as ToolEventPayload });
+    changed = true;
+  }
+  processedEventCount = props.events.length;
+  processedLastSeq = props.events.at(-1)?.seq;
+  if (changed) timeline.value = [...timeline.value];
+}
+
+function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void {
     const { kind, data, correlation } = event.payload;
     if (kind === 'approval.resolved' || kind === 'user-input.resolved') {
       const prefix = kind === 'approval.resolved' ? 'approval' : 'input';
       const key = kind === 'approval.resolved' ? 'approvalId' : 'requestId';
-      const prior = byId.get(`${prefix}:${text(data, key)}`);
+      const prior = timelineById.get(`${prefix}:${text(data, key)}`);
       if (prior) prior.resolved = true;
-      continue;
+      return;
     }
     const identity = correlation.itemId || correlation.turnId || String(event.seq);
     if (['command.started', 'command.output', 'command.completed'].includes(kind)) {
       const id = `command:${text(data, 'commandId') || identity}`;
-      const prior = byId.get(id);
+      const prior = timelineById.get(id);
       if (prior) {
         prior.data = { ...prior.data, ...data };
-        if (kind === 'command.output') prior.text += text(data, 'text');
+        if (kind === 'command.output') prior.text = (prior.text ?? '') + text(data, 'text');
       } else {
         const item = { id, kind: 'command', data, text: kind === 'command.output' ? text(data, 'text') : '', resolved: kind === 'command.completed' };
-        items.push(item); byId.set(id, item);
+        timeline.value.push(item); timelineById.set(id, item);
       }
-      continue;
+      return;
     }
     if (kind === 'assistant.delta' || kind === 'assistant.completed') {
       const id = `assistant:${identity}`;
-      const prior = byId.get(id);
-      if (prior) prior.text = kind === 'assistant.completed' ? text(data, 'text') : prior.text + text(data, 'text');
-      else { const item = { id, kind: 'assistant', data, text: text(data, 'text') }; items.push(item); byId.set(id, item); }
-      continue;
+      const prior = timelineById.get(id);
+      if (prior) prior.text = kind === 'assistant.completed' ? text(data, 'text') : (prior.text ?? '') + text(data, 'text');
+      else { const item = { id, kind: 'assistant', data, text: text(data, 'text') }; timeline.value.push(item); timelineById.set(id, item); }
+      return;
     }
     if (kind === 'file.changed') {
       const id = `file:${identity}`;
-      const prior = byId.get(id);
-      if (prior) prior.text += text(data, 'summary');
-      else { const item = { id, kind, data, text: text(data, 'summary') }; items.push(item); byId.set(id, item); }
-      continue;
+      const prior = timelineById.get(id);
+      if (prior) prior.text = (prior.text ?? '') + text(data, 'summary');
+      else { const item = { id, kind, data, text: text(data, 'summary') }; timeline.value.push(item); timelineById.set(id, item); }
+      return;
     }
     const mergeKind = ['reasoning.delta', 'plan.updated'].includes(kind);
     const id = kind === 'approval.requested' ? `approval:${text(data, 'approvalId')}`
       : kind === 'user-input.requested' ? `input:${text(data, 'requestId')}` : `${kind}:${identity}`;
-    if (mergeKind && byId.has(id)) { byId.get(id)!.text += text(data, 'text'); continue; }
+    if (mergeKind && timelineById.has(id)) {
+      const prior = timelineById.get(id)!;
+      prior.text = (prior.text ?? '') + text(data, 'text');
+      return;
+    }
     const item = { id, kind, data, text: text(data, 'text'), resolved: false };
-    items.push(item); byId.set(id, item);
-  }
-  return items;
-});
+    timeline.value.push(item); timelineById.set(id, item);
+}
 function text(data: Record<string, unknown>, field: string): string { return typeof data[field] === 'string' ? data[field] : ''; }
 function strings(data: Record<string, unknown>, field: string): string[] { return Array.isArray(data[field]) ? (data[field] as unknown[]).filter((value): value is string => typeof value === 'string') : []; }
 function records(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object') : []; }
@@ -120,6 +144,7 @@ async function scrollToLatest(force: boolean): Promise<void> {
   timelinePinnedToBottom = true;
 }
 onMounted(() => void scrollToLatest(true));
+watch([() => props.events.length, () => props.events.at(-1)?.seq], syncTimeline, { immediate: true });
 watch(() => props.scrollRevision, () => void scrollToLatest(true));
 watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));

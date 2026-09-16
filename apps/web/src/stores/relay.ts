@@ -1,5 +1,12 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
+import {
+  deleteSessionCache,
+  loadSelectedSessionCache,
+  loadSessionCache,
+  saveSelectedSession,
+  saveSessionCache,
+} from '../cache/relay-cache';
 import type {
   CommandAckPayload,
   DeviceRecord,
@@ -17,6 +24,11 @@ type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 const HISTORY_PAGE_SIZE = 1_000;
 const MAX_HISTORY_EVENTS = 10_000;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
+const CACHE_WRITE_DELAY_MS = 500;
+const pendingRealtimeEvents = new Map<string, Map<number, SessionEventRecord>>();
+const dirtyCacheSessions = new Set<string>();
+let realtimeFlushFrame: number | undefined;
+let cacheWriteTimer: number | undefined;
 
 export const useRelayStore = defineStore('relay', {
   state: () => ({
@@ -62,6 +74,17 @@ export const useRelayStore = defineStore('relay', {
   actions: {
     async initialize(): Promise<void> {
       this.stopped = false;
+      try {
+        const cached = await loadSelectedSessionCache();
+        if (cached) {
+          this.selectedSessionId = cached.sessionId;
+          if (cached.session) this.sessions = [cached.session];
+          this.eventsBySession[cached.sessionId] = cached.events;
+          this.lastSeqBySession[cached.sessionId] = cached.lastSeq;
+        }
+      } catch {
+        // IndexedDB is an optional fast path; private browsing or browser policy may disable it.
+      }
       await this.refreshSessions();
       await this.loadNotificationSettings();
       if (!this.selectedSessionId && this.sessions[0]) {
@@ -73,6 +96,8 @@ export const useRelayStore = defineStore('relay', {
 
     stop(): void {
       this.stopped = true;
+      this.flushRealtimeEvents();
+      void this.persistDirtyCaches();
       if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
       if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
@@ -104,6 +129,7 @@ export const useRelayStore = defineStore('relay', {
           this.selectedSessionId &&
           !this.sessions.some((item) => item.id === this.selectedSessionId)
         ) {
+          void deleteSessionCache(this.selectedSessionId).catch(() => undefined);
           this.selectedSessionId = undefined;
         }
         this.error = undefined;
@@ -115,7 +141,10 @@ export const useRelayStore = defineStore('relay', {
     },
 
     async selectSession(sessionId: string): Promise<void> {
-      if (sessionId === this.selectedSessionId && this.eventsBySession[sessionId]) {
+      if (
+        sessionId === this.selectedSessionId &&
+        Object.prototype.hasOwnProperty.call(this.eventsBySession, sessionId)
+      ) {
         this.subscribeSelected();
         return;
       }
@@ -123,13 +152,24 @@ export const useRelayStore = defineStore('relay', {
       if (previous) this.sendSubscription('session.unsubscribe', previous, {});
 
       this.selectedSessionId = sessionId;
+      void saveSelectedSession(sessionId).catch(() => undefined);
       const version = ++this.selectionVersion;
       this.loadingHistory = true;
       try {
+        const cached = await loadSessionCache(sessionId).catch(() => undefined);
+        if (version !== this.selectionVersion) return;
+        if (cached) {
+          this.eventsBySession[sessionId] = cached.events;
+          this.lastSeqBySession[sessionId] = cached.lastSeq;
+          this.error = undefined;
+          this.subscribeSelected();
+          return;
+        }
         const history = await loadHistory(sessionId);
         if (version !== this.selectionVersion) return;
         this.eventsBySession[sessionId] = mergeEvents([], history);
         this.lastSeqBySession[sessionId] = history.at(-1)?.seq ?? -1;
+        this.scheduleCachePersist(sessionId);
         this.error = undefined;
         this.subscribeSelected();
       } catch (error: unknown) {
@@ -164,6 +204,8 @@ export const useRelayStore = defineStore('relay', {
         this.sessions = this.sessions.filter((item) => item.id !== sessionId);
         delete this.eventsBySession[sessionId];
         delete this.lastSeqBySession[sessionId];
+        dirtyCacheSessions.delete(sessionId);
+        void deleteSessionCache(sessionId).catch(() => undefined);
         this.commandStatus = undefined;
         this.error = undefined;
 
@@ -367,6 +409,7 @@ export const useRelayStore = defineStore('relay', {
             payload.events,
           );
           this.lastSeqBySession[payload.session.id] = payload.latestSeq;
+          this.scheduleCachePersist(payload.session.id);
           if (payload.session.id === this.selectedSessionId) {
             this.scrollToLatestRevision += 1;
           }
@@ -382,31 +425,83 @@ export const useRelayStore = defineStore('relay', {
           envelope.sessionId &&
           envelope.seq !== undefined
         ) {
-          this.eventsBySession[envelope.sessionId] = mergeEvents(
-            this.eventsBySession[envelope.sessionId] ?? [],
-            [
-              {
-                seq: envelope.seq,
-                type: envelope.type,
-                payload: envelope.payload,
-                createdAt: envelope.sentAt,
-              },
-            ],
-          );
-          this.lastSeqBySession[envelope.sessionId] = Math.max(
-            this.lastSeqBySession[envelope.sessionId] ?? -1,
-            envelope.seq,
-          );
-          const session = this.sessions.find(
-            (item) => item.id === envelope.sessionId,
-          );
-          if (session && envelope.seq > session.stateVersion) {
-            session.stateVersion = envelope.seq;
-          }
+          this.queueRealtimeEvent(envelope.sessionId, {
+            seq: envelope.seq,
+            type: envelope.type,
+            payload: envelope.payload,
+            createdAt: envelope.sentAt,
+          });
         }
       } catch (error: unknown) {
         this.error = `无法解析实时消息：${describeError(error)}`;
       }
+    },
+
+    queueRealtimeEvent(sessionId: string, event: SessionEventRecord): void {
+      let pending = pendingRealtimeEvents.get(sessionId);
+      if (!pending) {
+        pending = new Map();
+        pendingRealtimeEvents.set(sessionId, pending);
+      }
+      pending.set(event.seq, event);
+      if (realtimeFlushFrame !== undefined) return;
+      realtimeFlushFrame = window.requestAnimationFrame(() => {
+        realtimeFlushFrame = undefined;
+        this.flushRealtimeEvents();
+      });
+    },
+
+    flushRealtimeEvents(): void {
+      if (realtimeFlushFrame !== undefined) {
+        window.cancelAnimationFrame(realtimeFlushFrame);
+        realtimeFlushFrame = undefined;
+      }
+      for (const [sessionId, pending] of pendingRealtimeEvents) {
+        const incoming = [...pending.values()].sort((left, right) => left.seq - right.seq);
+        if (!incoming.length) continue;
+        this.eventsBySession[sessionId] = mergeEvents(
+          this.eventsBySession[sessionId] ?? [],
+          incoming,
+        );
+        const latestSeq = incoming.at(-1)!.seq;
+        this.lastSeqBySession[sessionId] = Math.max(
+          this.lastSeqBySession[sessionId] ?? -1,
+          latestSeq,
+        );
+        const session = this.sessions.find((item) => item.id === sessionId);
+        if (session && latestSeq > session.stateVersion) session.stateVersion = latestSeq;
+        this.scheduleCachePersist(sessionId);
+      }
+      pendingRealtimeEvents.clear();
+    },
+
+    scheduleCachePersist(sessionId: string): void {
+      dirtyCacheSessions.add(sessionId);
+      if (cacheWriteTimer !== undefined) return;
+      cacheWriteTimer = window.setTimeout(() => {
+        cacheWriteTimer = undefined;
+        void this.persistDirtyCaches();
+      }, CACHE_WRITE_DELAY_MS);
+    },
+
+    async persistDirtyCaches(): Promise<void> {
+      if (cacheWriteTimer !== undefined) {
+        window.clearTimeout(cacheWriteTimer);
+        cacheWriteTimer = undefined;
+      }
+      const sessionIds = [...dirtyCacheSessions];
+      dirtyCacheSessions.clear();
+      await Promise.all(sessionIds.map(async (sessionId) => {
+        const events = this.eventsBySession[sessionId];
+        if (!events) return;
+        const cachedEvents = events.slice(-MAX_HISTORY_EVENTS);
+        const lastSeq = Math.max(
+          cachedEvents.at(-1)?.seq ?? -1,
+          this.lastSeqBySession[sessionId] ?? -1,
+        );
+        const session = this.sessions.find((item) => item.id === sessionId);
+        await saveSessionCache(sessionId, session, cachedEvents, lastSeq).catch(() => undefined);
+      }));
     },
 
     replaceSession(session: SessionRecord): void {
@@ -479,11 +574,35 @@ function mergeEvents(
   current: SessionEventRecord[],
   incoming: SessionEventRecord[],
 ): SessionEventRecord[] {
-  const events = new Map(current.map((event) => [event.seq, event]));
-  for (const event of incoming) {
-    if (!events.has(event.seq)) events.set(event.seq, event);
+  if (!current.length) return deduplicateSorted(incoming);
+  if (!incoming.length) return current;
+  if (current.at(-1)!.seq < incoming[0]!.seq) return [...current, ...deduplicateSorted(incoming)];
+
+  const merged: SessionEventRecord[] = [];
+  let currentIndex = 0;
+  let incomingIndex = 0;
+  while (currentIndex < current.length || incomingIndex < incoming.length) {
+    const currentEvent = current[currentIndex];
+    const incomingEvent = incoming[incomingIndex];
+    if (!incomingEvent || (currentEvent && currentEvent.seq < incomingEvent.seq)) {
+      merged.push(currentEvent!);
+      currentIndex += 1;
+    } else if (!currentEvent || incomingEvent.seq < currentEvent.seq) {
+      merged.push(incomingEvent);
+      incomingIndex += 1;
+    } else {
+      merged.push(currentEvent);
+      currentIndex += 1;
+      incomingIndex += 1;
+    }
   }
-  return [...events.values()].sort((left, right) => left.seq - right.seq);
+  return merged;
+}
+
+function deduplicateSorted(events: SessionEventRecord[]): SessionEventRecord[] {
+  if (events.length < 2) return events;
+  const sorted = [...events].sort((left, right) => left.seq - right.seq);
+  return sorted.filter((event, index) => index === 0 || event.seq !== sorted[index - 1]!.seq);
 }
 
 function describeError(error: unknown): string {

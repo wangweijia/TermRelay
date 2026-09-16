@@ -22,6 +22,8 @@ let resizeObserver: ResizeObserver | undefined;
 let lastSize: { columns: number; rows: number } | undefined;
 let resizeFrame: number | undefined;
 let terminalPinnedToBottom = true;
+let processedEventCount = 0;
+let processedLastSeq: number | undefined;
 
 onMounted(() => {
   terminal = new Terminal({
@@ -81,13 +83,20 @@ function renderEvents(events: SessionEventRecord[], forceScroll = false): void {
   if (!terminal) return;
   const shouldScroll = forceScroll || terminalPinnedToBottom;
   const output: Uint8Array[] = [];
-  for (const event of events) {
+  const prefixChanged = processedEventCount > events.length || (
+    processedEventCount > 0 && events[processedEventCount - 1]?.seq !== processedLastSeq
+  );
+  const startIndex = prefixChanged ? 0 : processedEventCount;
+  for (let index = startIndex; index < events.length; index += 1) {
+    const event = events[index]!;
     if (event.type !== 'terminal.output' || rendered.has(event.seq)) continue;
     const data = event.payload.data;
     if (typeof data !== 'string') continue;
     output.push(decodeBase64(data));
     rendered.add(event.seq);
   }
+  processedEventCount = events.length;
+  processedLastSeq = events.at(-1)?.seq;
   output.forEach((data, index) => {
     const isLast = index === output.length - 1;
     terminal?.write(data, isLast && shouldScroll ? scrollToLatest : undefined);
