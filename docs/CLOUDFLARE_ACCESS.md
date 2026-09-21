@@ -11,6 +11,12 @@ existing remotely managed `jetson-invest` Cloudflare Tunnel.
   `ws://JETSON_LAN_IP:3006/ws/client` and does not traverse Cloudflare.
 - The browser derives `wss://termrelay.wqyhomes.com/ws/web` from the page URL.
 
+The planned Mac public-domain pairing and authenticated `/ws/mac-client`
+connection are documented in
+[Mac Client 公网配对与认证方案](CLOUDFLARE_MAC_CLIENT_AUTH.md). The design uses
+path-specific Access Bypass rules plus TermRelay-issued device credentials; it
+is not implemented yet. Until then, keep the Mac App on the trusted LAN path.
+
 ## Cloudflare resources
 
 - DNS: proxied CNAME `termrelay.wqyhomes.com` to the `jetson-invest` Tunnel.
@@ -19,9 +25,10 @@ existing remotely managed `jetson-invest` Cloudflare Tunnel.
 - Session duration: 24 hours.
 - Tunnel origin validation: Access JWT validation is required for this ingress.
 
-Do not add a bypass policy for `/ws/web`: the browser sends its Access cookie
-on the WebSocket upgrade request. The `/ws/client` endpoint is not used through
-the public hostname.
+Do not add a bypass policy for `/ws/web` or the existing `/ws/client`: the
+browser sends its Access cookie on the `/ws/web` upgrade, while `/ws/client`
+remains LAN-only. The future public Mac route will use the separate
+`/ws/mac-client` endpoint and server-issued device credentials.
 
 ## Validation
 
