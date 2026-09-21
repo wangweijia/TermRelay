@@ -3,11 +3,14 @@ import Foundation
 actor RemoteClient {
     typealias StateHandler = @Sendable (ConnectionState, String?) -> Void
     typealias CommandHandler = @Sendable (RemoteTerminalCommand) async -> RemoteCommandResult
+    typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
     private let commandHandler: CommandHandler
+    private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
     private var serverURL: URL?
+    private var credential: String?
     private var socket: URLSessionWebSocketTask?
     private var runTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
@@ -36,11 +39,13 @@ actor RemoteClient {
         deviceID: UUID,
         stateHandler: @escaping StateHandler,
         commandHandler: @escaping CommandHandler,
+        authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
         self.stateHandler = stateHandler
         self.commandHandler = commandHandler
+        self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -52,13 +57,14 @@ actor RemoteClient {
         }
     }
 
-    func connect(to value: String) {
+    func connect(to value: String, credential: String? = nil) {
         guard let url = URL(string: value), ["ws", "wss"].contains(url.scheme?.lowercased()) else {
             stateHandler(.offline, "Server URL 必须使用 ws:// 或 wss://")
             return
         }
         disconnect()
         serverURL = url
+        self.credential = credential
         shouldRun = true
         generation += 1
         let currentGeneration = generation
@@ -82,6 +88,7 @@ actor RemoteClient {
         runTask = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        credential = nil
         stateHandler(.offline, nil)
     }
 
@@ -182,7 +189,11 @@ actor RemoteClient {
         while shouldRun, generation == expectedGeneration, !Task.isCancelled {
             guard let serverURL else { return }
             stateHandler(.connecting, nil)
-            let task = URLSession.shared.webSocketTask(with: serverURL)
+            var request = URLRequest(url: serverURL)
+            if serverURL.path == "/ws/client-public", let credential {
+                request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
+            }
+            let task = URLSession.shared.webSocketTask(with: request)
             socket = task
             registered = false
             announcedSessions.removeAll()
@@ -195,6 +206,11 @@ actor RemoteClient {
                 return
             } catch {
                 if shouldRun, generation == expectedGeneration {
+                    let responseCode = (task.response as? HTTPURLResponse)?.statusCode
+                    if task.closeCode.rawValue == 4003 || responseCode == 401 {
+                        invalidateAuthorization()
+                        return
+                    }
                     stateHandler(.degraded, error.localizedDescription)
                 }
             }
@@ -228,6 +244,10 @@ actor RemoteClient {
 
     private func handle(_ envelope: IncomingRelayEnvelope) async {
         guard envelope.deviceId.caseInsensitiveCompare(deviceID.uuidString) == .orderedSame else { return }
+        if envelope.type == "client.authorization-revoked" {
+            invalidateAuthorization()
+            return
+        }
         if envelope.type == "device.registered" {
             registered = true
             sessionsFinalizingSync.removeAll()
@@ -275,6 +295,20 @@ actor RemoteClient {
             if completedCommands.count > 512 { completedCommands.removeFirst(128) }
         }
         await acknowledge(command, result: result)
+    }
+
+    private func invalidateAuthorization() {
+        guard shouldRun else { return }
+        shouldRun = false
+        registered = false
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        let closeCode = URLSessionWebSocketTask.CloseCode(rawValue: 4003) ?? .policyViolation
+        socket?.cancel(with: closeCode, reason: nil)
+        socket = nil
+        credential = nil
+        stateHandler(.offline, "此 Mac 的 Server 授权已失效，需要重新授权。")
+        authorizationInvalidatedHandler()
     }
 
     func decodeCommand(_ envelope: IncomingRelayEnvelope) -> RemoteTerminalCommand? {

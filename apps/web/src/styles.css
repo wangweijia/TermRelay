@@ -52,6 +52,17 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .workspace-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .workspace-title strong { color: #dce6ee; font-size: 15px; }
 .workspace-title span { color: #6f7e8d; font-size: 11px; }
+.workspace-actions { display: flex; align-items: center; gap: 8px; }
+.workspace-actions > button {
+  padding: 6px 10px;
+  border: 1px solid #344251;
+  border-radius: 6px;
+  color: #b9c5d0;
+  background: #151d26;
+  cursor: pointer;
+  font-size: 11px;
+}
+.workspace-actions > button:hover { border-color: #72e0a5; color: #72e0a5; }
 
 .connection-pill {
   display: flex;
@@ -338,6 +349,17 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 }
 .dialog-actions button.danger { border-color: #8c343b; color: #ffd4d7; background: #70262c; }
 .dialog-actions button:disabled { opacity: .55; cursor: wait; }
+.credential-dialog { width: min(680px, 100%); max-height: min(680px, calc(100dvh - 40px)); overflow: hidden; }
+.credential-list { display: grid; gap: 8px; max-height: 430px; margin-top: 18px; overflow: auto; }
+.credential-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px; border: 1px solid #2e3a46; border-radius: 7px; background: #0d1319; }
+.credential-row > div { display: grid; gap: 4px; min-width: 0; }
+.credential-row strong { overflow-wrap: anywhere; color: #dce6ee; font: 12px/1.4 ui-monospace, monospace; }
+.credential-row small { color: #91a0ae; }
+.credential-row span { color: #647382; font-size: 11px; }
+.credential-row button { padding: 7px 10px; border: 1px solid #8c343b; border-radius: 6px; color: #ffd4d7; background: #70262c; cursor: pointer; }
+.credential-row button:disabled { opacity: .55; cursor: wait; }
+.credential-revoked { color: #ef8d94 !important; }
+.credential-loading { min-height: 130px; display: grid; place-items: center; color: #748393; }
 
 @media (max-width: 820px) {
   .app-header span, .workspace-title span { display: none; }

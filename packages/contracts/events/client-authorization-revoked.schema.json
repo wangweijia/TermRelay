@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/client-authorization-revoked.schema.json",
+  "title": "client.authorization-revoked payload",
+  "type": "object",
+  "required": ["reason", "revokedAt"],
+  "properties": {
+    "reason": { "enum": ["revoked", "expired", "device_disabled"] },
+    "revokedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

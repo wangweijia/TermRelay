@@ -2,11 +2,11 @@ import 'reflect-metadata';
 import fastifyStatic from '@fastify/static';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { WsAdapter } from '@nestjs/platform-ws';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppModule } from './app.module';
+import { ClientAuthWsAdapter } from './client-auth/client-auth-ws.adapter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -14,7 +14,7 @@ async function bootstrap(): Promise<void> {
     new FastifyAdapter({ logger: true }),
   );
 
-  app.useWebSocketAdapter(new WsAdapter(app));
+  app.useWebSocketAdapter(new ClientAuthWsAdapter(app));
   app.enableShutdownHooks();
 
   const publicDirectory = join(process.cwd(), 'dist', 'public');
@@ -27,6 +27,8 @@ async function bootstrap(): Promise<void> {
     const mobilePage = (_request: FastifyRequest, reply: FastifyReply) => reply.sendFile('index.html');
     fastify.get('/mobile', mobilePage);
     fastify.get('/mobile/', mobilePage);
+    fastify.get('/client/authorize', mobilePage);
+    fastify.get('/client/authorize/', mobilePage);
   }
 
   const port = Number.parseInt(process.env.PORT ?? '3007', 10);

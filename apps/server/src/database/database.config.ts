@@ -1,4 +1,6 @@
 import type { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
+import { ClientPairingEntity } from '../client-auth/client-pairing.entity';
+import { DeviceCredentialEntity } from '../client-auth/device-credential.entity';
 import { DeviceEntity } from '../devices/device.entity';
 import { SessionEventEntity } from '../sessions/session-event.entity';
 import { SessionEntity } from '../sessions/session.entity';
@@ -11,6 +13,7 @@ import { StructuredApprovalIdentity1789351200000 } from './migrations/1789351200
 import { SessionWebDisplayMode1789437600000 } from './migrations/1789437600000-session-web-display-mode';
 import { AcpRuntimeMode1789524000000 } from './migrations/1789524000000-acp-runtime-mode';
 import { NotificationSettings1789610400000 } from './migrations/1789610400000-notification-settings';
+import { ClientAuth1789696800000 } from './migrations/1789696800000-client-auth';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -35,8 +38,16 @@ export function databaseOptions(): MysqlConnectionOptions {
       SessionWebDisplayMode1789437600000,
       AcpRuntimeMode1789524000000,
       NotificationSettings1789610400000,
+      ClientAuth1789696800000,
     ],
-    entities: [DeviceEntity, WorkspaceEntity, SessionEntity, SessionEventEntity],
+    entities: [
+      DeviceEntity,
+      WorkspaceEntity,
+      SessionEntity,
+      SessionEventEntity,
+      ClientPairingEntity,
+      DeviceCredentialEntity,
+    ],
   };
 }
 

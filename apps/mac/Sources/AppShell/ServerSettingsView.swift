@@ -8,7 +8,16 @@ struct ServerSettingsView: View {
             Section("TermRelay Server") {
                 TextField("Server WebSocket URL", text: $appModel.serverURL)
                 LabeledContent("Device ID", value: appModel.deviceID.uuidString)
-                Button("重新连接") { appModel.reconnectToServer() }
+                HStack {
+                    Button("重新连接") { appModel.reconnectToServer() }
+                    Button("使用公网地址") { appModel.useDefaultPublicServer() }
+                }
+            }
+
+            if appModel.clientAuthorizationState != .notRequired {
+                Section("公网设备授权") {
+                    ClientAuthorizationSettings()
+                }
             }
 
             Section("ACP 交互") {
@@ -38,6 +47,52 @@ struct ServerSettingsView: View {
         .formStyle(.grouped)
         .padding()
         .frame(width: 520)
+    }
+}
+
+private struct ClientAuthorizationSettings: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    var body: some View {
+        switch appModel.clientAuthorizationState {
+        case .notRequired:
+            EmptyView()
+        case .unauthorized:
+            LabeledContent("状态") {
+                Label("未授权", systemImage: "key.slash").foregroundStyle(.secondary)
+            }
+            Button("授权此 Mac") { appModel.authorizeClient() }
+        case .requesting:
+            LabeledContent("状态") {
+                ProgressView().controlSize(.small)
+                Text("正在创建授权请求")
+            }
+            Button("取消", role: .cancel) { appModel.cancelClientAuthorization() }
+        case .awaitingApproval(let userCode):
+            LabeledContent("配对码") {
+                Text(userCode).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+            }
+            LabeledContent("状态") {
+                ProgressView().controlSize(.small)
+                Text("等待浏览器确认")
+            }
+            Button("取消", role: .cancel) { appModel.cancelClientAuthorization() }
+        case .authorized:
+            LabeledContent("状态") {
+                Label("已授权", systemImage: "checkmark.shield").foregroundStyle(.green)
+            }
+            Button("移除本机凭据", role: .destructive) { appModel.removeClientCredential() }
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            HStack {
+                Button("重新授权") { appModel.authorizeClient() }
+                Button("取消", role: .cancel) { appModel.cancelClientAuthorization() }
+            }
+        }
+        Text("授权凭据仅保存在这台 Mac 的钥匙串中，不会写入偏好设置或 URL。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
 

@@ -7,6 +7,7 @@ import { DeviceConnectionRegistry } from './device-connection.registry';
 import { ProtocolValidator } from './protocol-validator';
 import type { SessionsService } from '../sessions/sessions.service';
 import type { CommandRelayService } from './command-relay.service';
+import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
 import type {
   SessionStartedPayload,
   SessionEndedPayload,
@@ -64,6 +65,25 @@ test('rejects heartbeat before registration', () => {
   );
 
   assert.equal(socket.messages[0]?.data.type, 'protocol.error');
+  assert.equal(socket.messages[0]?.data.payload.code, 'unknown_device');
+  assert.equal(socket.closed[0]?.code, 1008);
+});
+
+test('rejects registration that does not match the authenticated device', () => {
+  const { gateway, authorizations } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  authorizations.attach(client, {
+    credentialId: 'credential-a',
+    deviceId: 'device-a',
+    expiresAt: null,
+  });
+  gateway.handleConnection(client);
+
+  gateway.handleMessage(client, envelope('device-b', 'device.register', {
+    name: 'Development Mac', appVersion: '0.1.0', platform: 'macOS', tools: ['shell'],
+  }));
+
   assert.equal(socket.messages[0]?.data.payload.code, 'unknown_device');
   assert.equal(socket.closed[0]?.code, 1008);
 });
@@ -238,15 +258,18 @@ function makeGateway() {
   const registry = new DeviceConnectionRegistry();
   const sessions = new FakeSessionsService();
   const commands = new FakeCommands();
+  const authorizations = new ClientConnectionAuthorizations();
   return {
     registry,
     sessions,
     commands,
+    authorizations,
     gateway: new ClientGateway(
       new ProtocolValidator(),
       registry,
       sessions as unknown as SessionsService,
       commands as unknown as CommandRelayService,
+      authorizations,
     ),
   };
 }

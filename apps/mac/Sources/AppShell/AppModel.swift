@@ -1,6 +1,15 @@
 import AppKit
 import Foundation
 
+enum ClientAuthorizationState: Equatable {
+    case notRequired
+    case unauthorized
+    case requesting
+    case awaitingApproval(userCode: String)
+    case authorized
+    case failed(String)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .offline
@@ -10,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published private(set) var dshAPIKeyConfigured = false
+    @Published private(set) var clientAuthorizationState: ClientAuthorizationState = .notRequired
     @Published var selectedTool: BuiltInTool = .shell
     @Published var codexInteractionMode: CodexInteractionMode {
         didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
@@ -25,21 +35,29 @@ final class AppModel: ObservableObject {
         didSet { defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths) }
     }
     @Published var serverURL: String {
-        didSet { defaults.set(serverURL, forKey: Keys.serverURL) }
+        didSet {
+            defaults.set(serverURL, forKey: Keys.serverURL)
+            pairingTask?.cancel()
+            refreshClientAuthorizationState()
+        }
     }
 
     let deviceID: UUID
     private let defaults: UserDefaults
     private let credentialStore: any CredentialStoring
+    private let pairingClient: ClientPairingClient
     private var remoteClient: RemoteClient?
     private var connectionStarted = false
+    private var pairingTask: Task<Void, Never>?
 
     init(
         defaults: UserDefaults = .standard,
-        credentialStore: any CredentialStoring = KeychainCredentialStore()
+        credentialStore: any CredentialStoring = KeychainCredentialStore(),
+        pairingClient: ClientPairingClient = ClientPairingClient()
     ) {
         self.defaults = defaults
         self.credentialStore = credentialStore
+        self.pairingClient = pairingClient
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
         codexInteractionMode = defaults.string(forKey: Keys.codexInteractionMode)
@@ -64,6 +82,7 @@ final class AppModel: ObservableObject {
         }
         dshAPIKeyConfigured = ((try? credentialStore.read(account: Keys.dshAPIKeyAccount)) ?? nil)?
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        refreshClientAuthorizationState()
         remoteClient = RemoteClient(
             deviceID: deviceID,
             stateHandler: { [weak self] state, message in
@@ -78,6 +97,9 @@ final class AppModel: ObservableObject {
             commandHandler: { [weak self] command in
                 await self?.handleRemoteCommand(command)
                     ?? .rejected("app_unavailable", "Mac App is shutting down.")
+            },
+            authorizationInvalidatedHandler: { [weak self] in
+                Task { @MainActor [weak self] in self?.removeInvalidCredential() }
             }
         )
     }
@@ -94,10 +116,102 @@ final class AppModel: ObservableObject {
 
     func reconnectToServer() {
         connectionStarted = true
-        connectionState = .connecting
         guard let remoteClient else { return }
         let url = serverURL
-        Task { await remoteClient.connect(to: url) }
+        let credential: String?
+        do {
+            credential = try clientCredential(for: url)
+        } catch {
+            connectionState = .offline
+            errorMessage = error.localizedDescription
+            return
+        }
+        if isPublicClientURL(url), credential == nil {
+            connectionState = .offline
+            errorMessage = "公网连接需要先授权此 Mac。"
+            Task { await remoteClient.disconnect() }
+            return
+        }
+        connectionState = .connecting
+        Task { await remoteClient.connect(to: url, credential: credential) }
+    }
+
+    func useDefaultPublicServer() {
+        serverURL = "wss://termrelay.wqyhomes.com/ws/client-public"
+    }
+
+    func authorizeClient() {
+        pairingTask?.cancel()
+        guard let serverWebSocketURL = URL(string: serverURL),
+              isPublicClientURL(serverURL),
+              let credentialAccount = clientCredentialAccount(for: serverURL) else {
+            clientAuthorizationState = .failed("请先将 Server URL 设置为 /ws/client-public 公网入口。")
+            return
+        }
+        clientAuthorizationState = .requesting
+        pairingTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let pairing = try await pairingClient.create(
+                    serverWebSocketURL: serverWebSocketURL,
+                    deviceID: deviceID,
+                    deviceName: Host.current().localizedName ?? "Mac",
+                    appVersion: Self.appVersion
+                )
+                try Task.checkCancellation()
+                clientAuthorizationState = .awaitingApproval(userCode: pairing.userCode)
+                NSWorkspace.shared.open(pairing.verificationURL)
+                let deadline = Date().addingTimeInterval(TimeInterval(pairing.expiresIn))
+                while Date() < deadline {
+                    try await Task.sleep(for: .seconds(max(1, pairing.pollInterval)))
+                    switch try await pairingClient.exchange(
+                        serverWebSocketURL: serverWebSocketURL,
+                        pairingID: pairing.pairingID,
+                        deviceCode: pairing.deviceCode
+                    ) {
+                    case .pending:
+                        continue
+                    case .issued(let credential, _):
+                        try Task.checkCancellation()
+                        try credentialStore.write(credential, account: credentialAccount)
+                        clientAuthorizationState = .authorized
+                        pairingTask = nil
+                        reconnectToServer()
+                        return
+                    case .denied:
+                        throw ClientAuthorizationError.denied
+                    case .expired:
+                        throw ClientAuthorizationError.expired
+                    case .invalid:
+                        throw ClientPairingError.invalidResponse
+                    }
+                }
+                throw ClientAuthorizationError.expired
+            } catch is CancellationError {
+                return
+            } catch {
+                clientAuthorizationState = .failed(error.localizedDescription)
+                pairingTask = nil
+            }
+        }
+    }
+
+    func cancelClientAuthorization() {
+        pairingTask?.cancel()
+        pairingTask = nil
+        refreshClientAuthorizationState()
+    }
+
+    func removeClientCredential() {
+        guard let account = clientCredentialAccount(for: serverURL) else { return }
+        do {
+            try credentialStore.delete(account: account)
+            clientAuthorizationState = .unauthorized
+            connectionState = .offline
+            Task { await remoteClient?.disconnect() }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func addSession(directory: URL, toolID: String, displayName: String? = nil) {
@@ -502,10 +616,51 @@ final class AppModel: ObservableObject {
         static let codexInteractionMode = "codexInteractionMode"
         static let acpSendShortcut = "acpSendShortcut"
         static let dshAPIKeyAccount = "deepseek.dsh.api-key"
+        static let clientCredentialPrefix = "termrelay.client-credential."
         static let legacyServerURLs = [
             "ws://localhost:3000/ws/client",
             "ws://127.0.0.1:3000/ws/client",
         ]
+    }
+
+    private static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+    }
+
+    private func isPublicClientURL(_ value: String) -> Bool {
+        URL(string: value)?.path == "/ws/client-public"
+    }
+
+    private func clientCredentialAccount(for value: String) -> String? {
+        guard let url = URL(string: value), isPublicClientURL(value), let host = url.host else {
+            return nil
+        }
+        let authority = url.port.map { "\(host):\($0)" } ?? host
+        return Keys.clientCredentialPrefix + authority.lowercased()
+    }
+
+    private func clientCredential(for value: String) throws -> String? {
+        guard let account = clientCredentialAccount(for: value) else { return nil }
+        return try credentialStore.read(account: account)
+    }
+
+    private func refreshClientAuthorizationState() {
+        guard isPublicClientURL(serverURL) else {
+            clientAuthorizationState = .notRequired
+            return
+        }
+        do {
+            clientAuthorizationState = try clientCredential(for: serverURL) == nil
+                ? .unauthorized : .authorized
+        } catch {
+            clientAuthorizationState = .failed(error.localizedDescription)
+        }
+    }
+
+    private func removeInvalidCredential() {
+        guard let account = clientCredentialAccount(for: serverURL) else { return }
+        try? credentialStore.delete(account: account)
+        clientAuthorizationState = .unauthorized
     }
 
     private func persistProxyConfigurations() {
@@ -528,6 +683,18 @@ final class AppModel: ObservableObject {
         let path = executablePath(for: tool).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return nil }
         return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    }
+}
+
+private enum ClientAuthorizationError: LocalizedError {
+    case denied
+    case expired
+
+    var errorDescription: String? {
+        switch self {
+        case .denied: "此 Mac 的授权请求已被拒绝。"
+        case .expired: "授权请求已过期，请重新发起。"
+        }
     }
 }
 

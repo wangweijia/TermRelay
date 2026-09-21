@@ -11,7 +11,21 @@ const toastMessage = ref<string>();
 const sessionPendingDelete = ref<SessionRecord>();
 const purgeAssociatedData = ref(false);
 const deletingSession = ref(false);
+const credentialsOpen = ref(false);
+const loadingCredentials = ref(false);
+const revokingCredentialID = ref<string>();
+const credentials = ref<ClientCredentialSummary[]>([]);
 let toastTimer: number | undefined;
+
+interface ClientCredentialSummary {
+  id: string;
+  deviceId: string;
+  approvedBy: string;
+  createdAt: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
 const connectionLabel = computed(() => {
   switch (relay.connectionState) {
     case 'connected':
@@ -50,6 +64,40 @@ async function confirmDelete(): Promise<void> {
   if (deleted) cancelDelete();
 }
 
+async function openCredentials(): Promise<void> {
+  credentialsOpen.value = true;
+  loadingCredentials.value = true;
+  try {
+    const response = await fetch('/api/client-credentials', { cache: 'no-store' });
+    if (!response.ok) throw new Error('无法读取 Mac 授权列表');
+    credentials.value = await response.json() as ClientCredentialSummary[];
+  } catch (reason) {
+    toastMessage.value = reason instanceof Error ? reason.message : '无法读取 Mac 授权列表';
+  } finally {
+    loadingCredentials.value = false;
+  }
+}
+
+async function revokeCredential(id: string): Promise<void> {
+  revokingCredentialID.value = id;
+  try {
+    const response = await fetch(`/api/client-credentials/${encodeURIComponent(id)}/revoke`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('无法撤销此 Mac 授权');
+    const updated = await response.json() as ClientCredentialSummary;
+    credentials.value = credentials.value.map((item) => item.id === id ? updated : item);
+  } catch (reason) {
+    toastMessage.value = reason instanceof Error ? reason.message : '无法撤销此 Mac 授权';
+  } finally {
+    revokingCredentialID.value = undefined;
+  }
+}
+
+function displayDate(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : '从未';
+}
+
 watch(
   () => relay.error,
   (error) => {
@@ -77,8 +125,11 @@ onBeforeUnmount(() => {
         <strong>工作台</strong>
         <span>终端 · ACP · 审批</span>
       </div>
-      <div class="connection-pill" :data-state="relay.connectionState">
-        <span />{{ connectionLabel }}
+      <div class="workspace-actions">
+        <button type="button" @click="openCredentials">Mac 授权</button>
+        <div class="connection-pill" :data-state="relay.connectionState">
+          <span />{{ connectionLabel }}
+        </div>
       </div>
     </section>
 
@@ -236,6 +287,40 @@ onBeforeUnmount(() => {
             :disabled="deletingSession"
             @click="confirmDelete"
           >{{ deletingSession ? '删除中…' : '确认删除' }}</button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="credentialsOpen"
+      class="modal-backdrop"
+      role="presentation"
+      @click.self="credentialsOpen = false"
+    >
+      <section class="confirm-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credentials-title">
+        <small>CLIENT ACCESS</small>
+        <h2 id="credentials-title">Mac 授权</h2>
+        <div v-if="loadingCredentials" class="credential-loading">正在读取…</div>
+        <div v-else-if="credentials.length" class="credential-list">
+          <article v-for="credential in credentials" :key="credential.id" class="credential-row">
+            <div>
+              <strong>{{ credential.deviceId }}</strong>
+              <small>{{ credential.approvedBy }}</small>
+              <span>最近连接：{{ displayDate(credential.lastUsedAt) }}</span>
+            </div>
+            <span v-if="credential.revokedAt" class="credential-revoked">已撤销</span>
+            <button
+              v-else
+              type="button"
+              class="danger"
+              :disabled="revokingCredentialID === credential.id"
+              @click="revokeCredential(credential.id)"
+            >{{ revokingCredentialID === credential.id ? '撤销中' : '撤销' }}</button>
+          </article>
+        </div>
+        <div v-else class="credential-loading">暂无 Mac 授权</div>
+        <div class="dialog-actions">
+          <button type="button" @click="credentialsOpen = false">关闭</button>
         </div>
       </section>
     </div>

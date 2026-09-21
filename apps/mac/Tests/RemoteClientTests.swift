@@ -3,6 +3,16 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testPairingAPIURLUsesTheWebSocketOrigin() throws {
+        let websocketURL = try XCTUnwrap(URL(string: "wss://relay.example.com/ws/client-public?ignored=1"))
+        let apiURL = try ClientPairingClient.apiURL(
+            serverWebSocketURL: websocketURL,
+            path: "/api/client-pairings"
+        )
+
+        XCTAssertEqual(apiURL.absoluteString, "https://relay.example.com/api/client-pairings")
+    }
+
     func testRelayOutboxPersistsAndPrunesOnlyConfirmedEvents() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("termrelay-outbox-tests-\(UUID().uuidString)")

@@ -45,7 +45,14 @@ pnpm dev:server
 
 开发环境的默认密码只用于绑定在 `127.0.0.1` 的本机数据库，可以在 `deploy/server/.env.development` 中覆盖。
 
-完整开发栈的 Server 地址是 `http://127.0.0.1:3007`。Mac App 同机运行时使用 `ws://127.0.0.1:3007/ws/client`；独立 Vite 开发页使用 `http://127.0.0.1:5177` 并代理到 3007。从另一台 Mac 连接时将主机替换为 Server 的局域网地址，并确保 Server 监听 LAN 地址。当前尚无设备认证，只能用于受控局域网。
+完整开发栈的 Server 地址是 `http://127.0.0.1:3007`。Mac App 同机运行时使用 `ws://127.0.0.1:3007/ws/client`；独立 Vite 开发页使用 `http://127.0.0.1:5177` 并代理到 3007。从另一台 Mac 连接时将主机替换为 Server 的局域网地址，并确保 Server 监听 LAN 地址。局域网 `/ws/client` 保持无凭据兼容入口；公网 `/ws/client-public` 使用 Server 签发的设备凭据。
+
+公网配对还需要配置：
+
+- `PUBLIC_ORIGIN`：浏览器授权 URL 的 HTTPS origin，例如 `https://termrelay.wqyhomes.com`。
+- `CF_ACCESS_TEAM_DOMAIN`：Access team domain，可填写完整 HTTPS URL 或主机名。
+- `CF_ACCESS_AUD`：保护授权页和管理 API 的 Access Application AUD。
+- `CLIENT_CREDENTIAL_LIFETIME_MS`：可选；留空表示凭据只在主动撤销时失效。
 
 ## 最终部署
 

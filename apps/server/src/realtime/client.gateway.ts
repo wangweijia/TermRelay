@@ -16,6 +16,7 @@ import type {
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
+import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
 import { SessionsService } from '../sessions/sessions.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
@@ -33,14 +34,20 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly registry: DeviceConnectionRegistry,
     private readonly sessions: SessionsService,
     @Optional() private readonly commands?: CommandRelayService,
+    @Optional() private readonly authorizations?: ClientConnectionAuthorizations,
   ) {}
 
   handleConnection(client: WebSocket): void {
+    if (this.isPublicGateway() && !this.authorizations?.get(client)) {
+      client.close(1008, 'unauthorized');
+      return;
+    }
     this.registry.connect(client);
   }
 
   handleDisconnect(client: WebSocket): void {
     this.registry.disconnect(client);
+    this.authorizations?.detach(client);
   }
 
   @SubscribeMessage('message')
@@ -64,6 +71,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (result.message.type === 'device.register') {
       const { envelope } = result.message;
+      const authorizedDeviceId = this.authorizations?.get(client)?.deviceId;
+      if (authorizedDeviceId && authorizedDeviceId !== envelope.deviceId) {
+        this.rejectUnregistered(client, envelope.messageId);
+        return;
+      }
       const device = this.registry.register(
         client,
         envelope.deviceId,
@@ -130,6 +142,10 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return this.handleSessionEvent(client, result.message);
+  }
+
+  private isPublicGateway(): boolean {
+    return this.constructor.name === 'PublicClientGateway';
   }
 
   private async handleSessionEvent(

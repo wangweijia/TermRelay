@@ -11,6 +11,7 @@ services:
       DB_NAME: termrelay_dev
       DB_USER: termrelay_dev
       DB_PASSWORD: ${DEV_DB_PASSWORD:-termrelay-dev-only}
+      PUBLIC_ORIGIN: http://localhost:3007
     ports:
       - "127.0.0.1:3007:3000"
     healthcheck:
