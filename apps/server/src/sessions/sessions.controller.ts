@@ -41,10 +41,25 @@ export class SessionsController {
     @Param('id') id: string,
     @Query('afterSeq') rawAfterSeq?: string,
     @Query('limit') rawLimit?: string,
+    @Query('beforeSeq') rawBeforeSeq?: string,
   ): Promise<SessionEventRecord[]> {
-    const afterSeq = parseInteger(rawAfterSeq, -1, -1, Number.MAX_SAFE_INTEGER);
+    if (rawAfterSeq !== undefined && rawBeforeSeq !== undefined) {
+      throw new BadRequestException('afterSeq and beforeSeq are mutually exclusive');
+    }
     const limit = parseInteger(rawLimit, 200, 1, 1_000);
-    const events = await this.sessions.listEvents(id, afterSeq, limit);
+    const events = rawAfterSeq !== undefined
+      ? await this.sessions.listEvents(
+          id,
+          parseInteger(rawAfterSeq, -1, -1, Number.MAX_SAFE_INTEGER),
+          limit,
+        )
+      : await this.sessions.listEventsBefore(
+          id,
+          rawBeforeSeq === undefined
+            ? undefined
+            : parseInteger(rawBeforeSeq, 0, 0, Number.MAX_SAFE_INTEGER),
+          limit,
+        );
     if (!events) throw new NotFoundException('session not found');
     return events;
   }

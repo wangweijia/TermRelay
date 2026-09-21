@@ -16,7 +16,7 @@ const emit = defineEmits<{
 }>();
 const container = ref<HTMLElement>();
 const mobileInput = ref('');
-const rendered = new Set<number>();
+let highestRenderedSeq = -1;
 let terminal: Terminal | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let lastSize: { columns: number; rows: number } | undefined;
@@ -24,6 +24,10 @@ let resizeFrame: number | undefined;
 let terminalPinnedToBottom = true;
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
+const pendingWrites: Array<{ data: Uint8Array; scroll: boolean }> = [];
+let drainingWrites = false;
+let disposed = false;
+const MAX_WRITE_CHUNK_BYTES = 256 * 1_024;
 
 onMounted(() => {
   terminal = new Terminal({
@@ -74,6 +78,8 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  disposed = true;
+  pendingWrites.length = 0;
   resizeObserver?.disconnect();
   if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
   terminal?.dispose();
@@ -89,19 +95,64 @@ function renderEvents(events: SessionEventRecord[], forceScroll = false): void {
   const startIndex = prefixChanged ? 0 : processedEventCount;
   for (let index = startIndex; index < events.length; index += 1) {
     const event = events[index]!;
-    if (event.type !== 'terminal.output' || rendered.has(event.seq)) continue;
+    if (event.type !== 'terminal.output' || event.seq <= highestRenderedSeq) continue;
     const data = event.payload.data;
     if (typeof data !== 'string') continue;
     output.push(decodeBase64(data));
-    rendered.add(event.seq);
+    highestRenderedSeq = event.seq;
   }
   processedEventCount = events.length;
   processedLastSeq = events.at(-1)?.seq;
-  output.forEach((data, index) => {
-    const isLast = index === output.length - 1;
-    terminal?.write(data, isLast && shouldScroll ? scrollToLatest : undefined);
+  const chunks = combineChunks(output, MAX_WRITE_CHUNK_BYTES);
+  chunks.forEach((data, index) => {
+    pendingWrites.push({ data, scroll: index === chunks.length - 1 && shouldScroll });
   });
+  drainWrites();
   if (forceScroll && !output.length) scrollToLatest();
+}
+
+function drainWrites(): void {
+  if (drainingWrites || disposed || !terminal) return;
+  const next = pendingWrites.shift();
+  if (!next) return;
+  drainingWrites = true;
+  terminal.write(next.data, () => {
+    if (next.scroll) scrollToLatest();
+    drainingWrites = false;
+    if (pendingWrites.length) requestAnimationFrame(drainWrites);
+  });
+}
+
+function combineChunks(values: Uint8Array[], maximumBytes: number): Uint8Array[] {
+  const result: Uint8Array[] = [];
+  let parts: Uint8Array[] = [];
+  let size = 0;
+  const flush = () => {
+    if (!size) return;
+    const combined = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      combined.set(part, offset);
+      offset += part.byteLength;
+    }
+    result.push(combined);
+    parts = [];
+    size = 0;
+  };
+  for (const value of values) {
+    if (size > 0 && size + value.byteLength > maximumBytes) flush();
+    if (value.byteLength <= maximumBytes) {
+      parts.push(value);
+      size += value.byteLength;
+      continue;
+    }
+    flush();
+    for (let offset = 0; offset < value.byteLength; offset += maximumBytes) {
+      result.push(value.slice(offset, offset + maximumBytes));
+    }
+  }
+  flush();
+  return result;
 }
 
 function scrollToLatest(): void {

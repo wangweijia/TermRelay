@@ -209,6 +209,16 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return this.sessions.listEvents(sessionId, afterSeq, limit);
   }
 
+  async listEventsBefore(
+    sessionId: string,
+    beforeSeq: number | undefined,
+    limit: number,
+  ): Promise<SessionEventRecord[] | undefined> {
+    await this.waitForWrites();
+    if (!(await this.sessions.findById(sessionId))) return undefined;
+    return this.sessions.listEventsBefore(sessionId, beforeSeq, limit);
+  }
+
   subscribe(listener: SessionEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);

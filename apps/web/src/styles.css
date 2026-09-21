@@ -246,6 +246,9 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   scrollbar-gutter: stable;
   padding: 18px;
 }
+.timeline-history-status { position: sticky; top: 0; z-index: 4; padding: 7px; color: #7f8e9d; background: rgb(13 18 24 / 92%); text-align: center; font-size: 11px; }
+.agent-virtual-list { position: relative; width: 100%; }
+.agent-virtual-row { position: absolute; top: 0; left: 0; width: 100%; margin-bottom: 0; }
 .agent-view-approval { height: 100%; }
 .agent-view-full > .terminal-view { flex: 0 0 auto; width: 100%; }
 .agent-view-full > .agent-timeline {

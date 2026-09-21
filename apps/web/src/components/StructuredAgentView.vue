@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import { useVirtualizer } from '@tanstack/vue-virtual';
+import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
@@ -7,6 +8,8 @@ type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; t
 type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnter';
 
 const sendShortcutStorageKey = 'termrelay.acpSendShortcut';
+const MAX_COMMAND_TEXT = 200_000;
+const MAX_STREAMING_TEXT = 1_000_000;
 const shortcutOptions: { value: SendShortcut; label: string }[] = [
   { value: 'commandEnter', label: '⌘ + 回车' },
   { value: 'controlEnter', label: '⌃ + 回车' },
@@ -19,9 +22,12 @@ const props = withDefaults(defineProps<{
   interactive: boolean;
   shortcutEnabled?: boolean;
   scrollRevision?: number;
-}>(), { shortcutEnabled: true, scrollRevision: 0 });
+  hasOlder?: boolean;
+  loadingOlder?: boolean;
+}>(), { shortcutEnabled: true, scrollRevision: 0, hasOlder: false, loadingOlder: false });
 const emit = defineEmits<{
   startTurn: [text: string]; interrupt: [];
+  loadOlder: [];
   resolveApproval: [approvalId: string, turnId: string, decision: Decision];
   resolveUserInput: [requestId: string, turnId: string, answers: Record<string, string[]>];
 }>();
@@ -34,6 +40,20 @@ const timeline = shallowRef<TimelineItem[]>([]);
 const timelineById = new Map<string, TimelineItem>();
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
+let loadingOlderRequested = false;
+let previousVirtualSize = 0;
+
+const virtualizer = useVirtualizer(computed(() => ({
+  count: timeline.value.length,
+  getScrollElement: () => timelineElement.value ?? null,
+  estimateSize: () => 108,
+  overscan: 8,
+  gap: 12,
+})));
+
+function measureVirtualElement(value: unknown): void {
+  if (value instanceof Element) virtualizer.value.measureElement(value);
+}
 
 function syncTimeline(): void {
   const prefixChanged = processedEventCount > props.events.length || (
@@ -72,7 +92,9 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
       const prior = timelineById.get(id);
       if (prior) {
         prior.data = { ...prior.data, ...data };
-        if (kind === 'command.output') prior.text = (prior.text ?? '') + text(data, 'text');
+        if (kind === 'command.output') {
+          prior.text = appendBounded(prior.text ?? '', text(data, 'text'), MAX_COMMAND_TEXT);
+        }
       } else {
         const item = { id, kind: 'command', data, text: kind === 'command.output' ? text(data, 'text') : '', resolved: kind === 'command.completed' };
         timeline.value.push(item); timelineById.set(id, item);
@@ -82,7 +104,9 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
     if (kind === 'assistant.delta' || kind === 'assistant.completed') {
       const id = `assistant:${identity}`;
       const prior = timelineById.get(id);
-      if (prior) prior.text = kind === 'assistant.completed' ? text(data, 'text') : (prior.text ?? '') + text(data, 'text');
+      if (prior) prior.text = kind === 'assistant.completed'
+        ? text(data, 'text').slice(-MAX_STREAMING_TEXT)
+        : appendBounded(prior.text ?? '', text(data, 'text'), MAX_STREAMING_TEXT);
       else { const item = { id, kind: 'assistant', data, text: text(data, 'text') }; timeline.value.push(item); timelineById.set(id, item); }
       return;
     }
@@ -98,13 +122,18 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
       : kind === 'user-input.requested' ? `input:${text(data, 'requestId')}` : `${kind}:${identity}`;
     if (mergeKind && timelineById.has(id)) {
       const prior = timelineById.get(id)!;
-      prior.text = (prior.text ?? '') + text(data, 'text');
+      prior.text = appendBounded(prior.text ?? '', text(data, 'text'), MAX_COMMAND_TEXT);
       return;
     }
     const item = { id, kind, data, text: text(data, 'text'), resolved: false };
     timeline.value.push(item); timelineById.set(id, item);
 }
 function text(data: Record<string, unknown>, field: string): string { return typeof data[field] === 'string' ? data[field] : ''; }
+function appendBounded(current: string, addition: string, maximum: number): string {
+  const combined = current + addition;
+  if (combined.length <= maximum) return combined;
+  return `[更早内容已省略]\n${combined.slice(-maximum)}`;
+}
 function strings(data: Record<string, unknown>, field: string): string[] { return Array.isArray(data[field]) ? (data[field] as unknown[]).filter((value): value is string => typeof value === 'string') : []; }
 function records(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object') : []; }
 function answerKey(requestId: string, questionId: string): string { return `${requestId}:${questionId}`; }
@@ -134,6 +163,11 @@ function handleTimelineScroll(): void {
   const element = timelineElement.value;
   if (!element) return;
   timelinePinnedToBottom = element.scrollHeight - element.scrollTop - element.clientHeight <= 80;
+  if (element.scrollTop <= 120 && props.hasOlder && !props.loadingOlder && !loadingOlderRequested) {
+    loadingOlderRequested = true;
+    previousVirtualSize = virtualizer.value.getTotalSize();
+    emit('loadOlder');
+  }
 }
 async function scrollToLatest(force: boolean): Promise<void> {
   if (!force && !timelinePinnedToBottom) return;
@@ -147,6 +181,14 @@ onMounted(() => void scrollToLatest(true));
 watch([() => props.events.length, () => props.events.at(-1)?.seq], syncTimeline, { immediate: true });
 watch(() => props.scrollRevision, () => void scrollToLatest(true));
 watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
+watch(() => props.loadingOlder, async (loading, wasLoading) => {
+  if (loading || !wasLoading || !loadingOlderRequested) return;
+  await nextTick();
+  const sizeDelta = virtualizer.value.getTotalSize() - previousVirtualSize;
+  const element = timelineElement.value;
+  if (element && sizeDelta > 0) element.scrollTop += sizeDelta;
+  loadingOlderRequested = false;
+});
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
 function submitAnswers(item: TimelineItem): void {
   const requestId = text(item.data, 'requestId');
@@ -162,7 +204,25 @@ function submitAnswers(item: TimelineItem): void {
 <template>
   <section class="agent-view">
     <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll">
-      <article v-for="item in timeline" :key="item.id" class="agent-event" :data-kind="item.kind">
+      <div v-if="hasOlder || loadingOlder" class="timeline-history-status">
+        {{ loadingOlder ? '正在加载更早内容…' : '向上滚动加载更早内容' }}
+      </div>
+      <div
+        v-if="timeline.length"
+        class="agent-virtual-list"
+        :style="{ height: `${virtualizer.getTotalSize()}px` }"
+      >
+        <article
+          v-for="virtualRow in virtualizer.getVirtualItems()"
+          :key="timeline[virtualRow.index]!.id"
+          :ref="measureVirtualElement"
+          :data-index="virtualRow.index"
+          class="agent-event agent-virtual-row"
+          :data-kind="timeline[virtualRow.index]!.kind"
+          :style="{ transform: `translateY(${virtualRow.start}px)` }"
+        >
+        <template v-if="timeline[virtualRow.index]" :key="timeline[virtualRow.index]!.id">
+        <template v-for="item in [timeline[virtualRow.index]!]" :key="item.id">
         <small>{{ item.kind }}</small>
         <p v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">{{ item.text }}</p>
         <div v-else-if="item.kind === 'command'">
@@ -191,7 +251,10 @@ function submitAnswers(item: TimelineItem): void {
         </div>
         <p v-else-if="item.kind === 'file.changed'">{{ item.text }}</p>
         <p v-else-if="item.kind === 'warning' || item.kind === 'error'">{{ text(item.data, 'message') }}</p>
+        </template>
+        </template>
       </article>
+      </div>
       <div v-if="!timeline.length" class="terminal-placeholder">还没有 ACP 消息</div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">

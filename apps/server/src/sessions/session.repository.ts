@@ -352,6 +352,27 @@ export class SessionRepository {
     return events.map(toEventRecord);
   }
 
+  async listEventsBefore(
+    sessionId: string,
+    beforeSeq: number | undefined,
+    limit: number,
+  ): Promise<SessionEventRecord[]> {
+    if (!this.dataSource) return [];
+    const query = this.dataSource
+      .getRepository(SessionEventEntity)
+      .createQueryBuilder('event')
+      .where('event.sessionId = :sessionId', { sessionId })
+      .andWhere('(event.expiresAt IS NULL OR event.expiresAt > CURRENT_TIMESTAMP(3))');
+    if (beforeSeq !== undefined) {
+      query.andWhere('event.seq < :beforeSeq', { beforeSeq });
+    }
+    const events = await query
+      .orderBy('event.seq', 'DESC')
+      .limit(limit)
+      .getMany();
+    return events.reverse().map(toEventRecord);
+  }
+
   private get repository(): Repository<SessionEntity> {
     if (!this.dataSource) throw new Error('Database is disabled.');
     return this.dataSource.getRepository(SessionEntity);

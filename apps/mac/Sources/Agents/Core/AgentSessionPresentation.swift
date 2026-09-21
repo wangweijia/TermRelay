@@ -59,6 +59,9 @@ enum AgentTimelineItem: Identifiable, Sendable, Equatable {
 }
 
 enum AgentTimelineProjector {
+    private static let maximumCommandOutputCharacters = 200_000
+    private static let maximumStreamingTextCharacters = 1_000_000
+
     static func apply(_ event: ToolEvent, to items: inout [AgentTimelineItem]) {
         let fallbackID = "seq-\(event.sequence)"
         let itemID = event.correlation.itemID ?? fallbackID
@@ -101,7 +104,13 @@ enum AgentTimelineProjector {
                 $0.isRunning = true
             }
         case .commandOutput(let commandID, let text):
-            upsertCommand(id: commandID, in: &items) { $0.output += text }
+            upsertCommand(id: commandID, in: &items) {
+                $0.output = appendBounded(
+                    $0.output,
+                    text,
+                    maximum: maximumCommandOutputCharacters
+                )
+            }
         case .commandCompleted(let commandID, let exitCode):
             upsertCommand(id: commandID, in: &items) {
                 $0.exitCode = exitCode
@@ -156,7 +165,13 @@ enum AgentTimelineProjector {
     ) {
         if let index = items.firstIndex(where: { $0.id == "message:\(message.id)" }),
            case .message(var existing) = items[index] {
-            existing.text = append ? existing.text + message.text : message.text
+            existing.text = append
+                ? appendBounded(
+                    existing.text,
+                    message.text,
+                    maximum: maximumStreamingTextCharacters
+                )
+                : String(message.text.suffix(maximumStreamingTextCharacters))
             existing.isStreaming = message.isStreaming
             items[index] = .message(existing)
         } else {
@@ -220,5 +235,15 @@ enum AgentTimelineProjector {
         let item = AgentTimelineItem.notice(id: id, text: text, isError: isError)
         if let index = items.firstIndex(where: { $0.id == item.id }) { items[index] = item }
         else { items.append(item) }
+    }
+
+    private static func appendBounded(
+        _ current: String,
+        _ addition: String,
+        maximum: Int
+    ) -> String {
+        let combined = current + addition
+        guard combined.count > maximum else { return combined }
+        return "[更早内容已省略]\n" + String(combined.suffix(maximum))
     }
 }

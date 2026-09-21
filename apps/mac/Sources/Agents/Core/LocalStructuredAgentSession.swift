@@ -2,11 +2,15 @@ import Foundation
 
 @MainActor
 final class LocalStructuredAgentSession: ObservableObject, Identifiable {
+    private static let maximumRetainedEvents = 2_000
+    private static let eventTrimThreshold = 2_200
+    private static let maximumTimelineItems = 500
+
     let id: UUID
     let directory: URL
     let startedAt: String
     @Published private(set) var state: StructuredSessionState = .created
-    @Published private(set) var events: [ToolEvent] = []
+    private(set) var events: [ToolEvent] = []
     @Published private(set) var timeline: [AgentTimelineItem] = []
     @Published private(set) var failureMessage: String?
 
@@ -17,6 +21,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private let runtimeReadyHandler: @MainActor @Sendable () throws -> Void
     private var coordinator: StructuredSessionCoordinator?
     private var eventTask: Task<Void, Never>?
+    private var timelineFlushTask: Task<Void, Never>?
+    private var pendingTimelineEvents: [ToolEvent] = []
 
     init(
         id: UUID = UUID(),
@@ -53,9 +59,11 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 for await event in stream {
                     guard !Task.isCancelled, let self else { return }
                     self.events.append(event)
-                    AgentTimelineProjector.apply(event, to: &self.timeline)
+                    if self.events.count > Self.eventTrimThreshold {
+                        self.events.removeFirst(self.events.count - Self.maximumRetainedEvents)
+                    }
                     self.eventHandler(event)
-                    await self.refreshState()
+                    self.enqueueTimelineEvent(event)
                 }
             }
             try await coordinator.start(request: AgentSessionRequest(
@@ -67,6 +75,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             failureMessage = error.localizedDescription
             eventTask?.cancel()
             eventTask = nil
+            timelineFlushTask?.cancel()
+            timelineFlushTask = nil
             await coordinator?.stop()
             coordinator = nil
             setState(.failed)
@@ -106,6 +116,9 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     func stop() async {
         eventTask?.cancel()
         eventTask = nil
+        timelineFlushTask?.cancel()
+        timelineFlushTask = nil
+        flushTimelineEvents()
         await coordinator?.stop()
         coordinator = nil
         setState(.finished)
@@ -135,5 +148,49 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         guard state != value else { return }
         state = value
         stateHandler(id, value)
+    }
+
+    private func enqueueTimelineEvent(_ event: ToolEvent) {
+        pendingTimelineEvents.append(event)
+        guard timelineFlushTask == nil else { return }
+        timelineFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(33))
+            guard !Task.isCancelled, let self else { return }
+            self.timelineFlushTask = nil
+            self.flushTimelineEvents()
+            await self.refreshState()
+        }
+    }
+
+    private func flushTimelineEvents() {
+        guard !pendingTimelineEvents.isEmpty else { return }
+        var projected = timeline
+        for event in pendingTimelineEvents {
+            AgentTimelineProjector.apply(event, to: &projected)
+        }
+        pendingTimelineEvents.removeAll(keepingCapacity: true)
+        timeline = Self.trimTimeline(projected)
+    }
+
+    private static func trimTimeline(_ items: [AgentTimelineItem]) -> [AgentTimelineItem] {
+        var removeCount = max(0, items.count - maximumTimelineItems)
+        guard removeCount > 0 else { return items }
+        return items.filter { item in
+            if removeCount > 0 && !item.requiresUserAction {
+                removeCount -= 1
+                return false
+            }
+            return true
+        }
+    }
+}
+
+private extension AgentTimelineItem {
+    var requiresUserAction: Bool {
+        switch self {
+        case .approval(let value): value.decision == nil
+        case .userInput(let value): value.answers == nil
+        default: false
+        }
     }
 }

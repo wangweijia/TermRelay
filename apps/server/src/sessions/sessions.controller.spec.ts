@@ -22,6 +22,7 @@ test('returns session details and ordered events', async () => {
         createdAt: expected.createdAt,
       },
     ],
+    listEventsBefore: async () => [],
   } as unknown as SessionsService);
 
   assert.deepEqual(await controller.list(), [expected]);
@@ -29,10 +30,26 @@ test('returns session details and ordered events', async () => {
   assert.equal((await controller.listEvents('session-a', '0', '10'))[0]?.seq, 1);
 });
 
+test('loads the latest events by default and supports backward pagination', async () => {
+  const calls: Array<number | undefined> = [];
+  const controller = new SessionsController({
+    listEventsBefore: async (_id: string, beforeSeq: number | undefined) => {
+      calls.push(beforeSeq);
+      return [];
+    },
+  } as unknown as SessionsService);
+
+  await controller.listEvents('session-a');
+  await controller.listEvents('session-a', undefined, '50', '200');
+
+  assert.deepEqual(calls, [undefined, 200]);
+});
+
 test('returns 404 for unknown sessions', async () => {
   const controller = new SessionsController({
     findById: async () => undefined,
     listEvents: async () => undefined,
+    listEventsBefore: async () => undefined,
   } as unknown as SessionsService);
 
   await assert.rejects(
@@ -53,6 +70,10 @@ test('rejects invalid event pagination', async () => {
   );
   await assert.rejects(
     () => controller.listEvents('session-a', '0', '1001'),
+    (error: unknown) => error instanceof BadRequestException,
+  );
+  await assert.rejects(
+    () => controller.listEvents('session-a', '0', '10', '100'),
     (error: unknown) => error instanceof BadRequestException,
   );
 });

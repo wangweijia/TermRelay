@@ -21,8 +21,11 @@ import type {
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected';
 
-const HISTORY_PAGE_SIZE = 1_000;
-const MAX_HISTORY_EVENTS = 10_000;
+const INITIAL_HISTORY_EVENTS = 500;
+const OLDER_HISTORY_PAGE_SIZE = 250;
+const MAX_HISTORY_EVENTS = 2_000;
+const MAX_CACHED_EVENTS = 1_000;
+const MAX_MEMORY_SESSIONS = 5;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const CACHE_WRITE_DELAY_MS = 500;
 const pendingRealtimeEvents = new Map<string, Map<number, SessionEventRecord>>();
@@ -38,10 +41,13 @@ export const useRelayStore = defineStore('relay', {
     notificationSettings: { enabled: false, configured: false } as NotificationSettings,
     selectedSessionId: undefined as string | undefined,
     eventsBySession: {} as Record<string, SessionEventRecord[]>,
+    hasOlderBySession: {} as Record<string, boolean>,
     lastSeqBySession: {} as Record<string, number>,
+    historyAccessOrder: [] as string[],
     connectionState: 'disconnected' as ConnectionState,
     loadingSessions: false,
     loadingHistory: false,
+    loadingOlderHistory: false,
     error: undefined as string | undefined,
     socket: undefined as WebSocket | undefined,
     reconnectTimer: undefined as number | undefined,
@@ -80,7 +86,9 @@ export const useRelayStore = defineStore('relay', {
           this.selectedSessionId = cached.sessionId;
           if (cached.session) this.sessions = [cached.session];
           this.eventsBySession[cached.sessionId] = cached.events;
+          this.hasOlderBySession[cached.sessionId] = (cached.events[0]?.seq ?? 0) > 0;
           this.lastSeqBySession[cached.sessionId] = cached.lastSeq;
+          this.touchHistory(cached.sessionId);
         }
       } catch {
         // IndexedDB is an optional fast path; private browsing or browser policy may disable it.
@@ -156,6 +164,8 @@ export const useRelayStore = defineStore('relay', {
         sessionId,
       );
       this.selectedSessionId = sessionId;
+      this.touchHistory(sessionId);
+      this.evictInactiveHistories();
       void saveSelectedSession(sessionId).catch(() => undefined);
       const version = ++this.selectionVersion;
       if (hasInMemoryHistory) {
@@ -171,7 +181,9 @@ export const useRelayStore = defineStore('relay', {
         const cached = await loadSessionCache(sessionId).catch(() => undefined);
         if (version !== this.selectionVersion) return;
         if (cached) {
-          this.eventsBySession[sessionId] = cached.events;
+          const cachedEvents = cached.events.slice(-MAX_HISTORY_EVENTS);
+          this.eventsBySession[sessionId] = cachedEvents;
+          this.hasOlderBySession[sessionId] = (cachedEvents[0]?.seq ?? 0) > 0;
           this.lastSeqBySession[sessionId] = cached.lastSeq;
           this.error = undefined;
           this.subscribeSelected();
@@ -180,6 +192,8 @@ export const useRelayStore = defineStore('relay', {
         const history = await loadHistory(sessionId);
         if (version !== this.selectionVersion) return;
         this.eventsBySession[sessionId] = mergeEvents([], history);
+        this.hasOlderBySession[sessionId] = history.length === INITIAL_HISTORY_EVENTS
+          && (history[0]?.seq ?? 0) > 0;
         this.lastSeqBySession[sessionId] = history.at(-1)?.seq ?? -1;
         this.scheduleCachePersist(sessionId);
         this.error = undefined;
@@ -188,6 +202,38 @@ export const useRelayStore = defineStore('relay', {
         if (version === this.selectionVersion) this.error = describeError(error);
       } finally {
         if (version === this.selectionVersion) this.loadingHistory = false;
+      }
+    },
+
+    async loadOlderHistory(): Promise<void> {
+      const sessionId = this.selectedSessionId;
+      if (!sessionId || this.loadingOlderHistory || !this.hasOlderBySession[sessionId]) return;
+      const current = this.eventsBySession[sessionId] ?? [];
+      const beforeSeq = current[0]?.seq;
+      const available = MAX_HISTORY_EVENTS - current.length;
+      if (beforeSeq === undefined || available <= 0) {
+        this.hasOlderBySession[sessionId] = false;
+        return;
+      }
+
+      this.loadingOlderHistory = true;
+      try {
+        const limit = Math.min(OLDER_HISTORY_PAGE_SIZE, available);
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/events?beforeSeq=${beforeSeq}&limit=${limit}`,
+        );
+        if (!response.ok) throw new Error(`更早历史请求失败 (${response.status})`);
+        const page = (await response.json()) as SessionEventRecord[];
+        if (sessionId !== this.selectedSessionId) return;
+        this.eventsBySession[sessionId] = mergeEvents(page, current);
+        this.hasOlderBySession[sessionId] = page.length === limit
+          && (page[0]?.seq ?? 0) > 0
+          && this.eventsBySession[sessionId]!.length < MAX_HISTORY_EVENTS;
+        this.scheduleCachePersist(sessionId);
+      } catch (error: unknown) {
+        this.error = describeError(error);
+      } finally {
+        this.loadingOlderHistory = false;
       }
     },
 
@@ -215,7 +261,9 @@ export const useRelayStore = defineStore('relay', {
         }
         this.sessions = this.sessions.filter((item) => item.id !== sessionId);
         delete this.eventsBySession[sessionId];
+        delete this.hasOlderBySession[sessionId];
         delete this.lastSeqBySession[sessionId];
+        this.historyAccessOrder = this.historyAccessOrder.filter((id) => id !== sessionId);
         dirtyCacheSessions.delete(sessionId);
         void deleteSessionCache(sessionId).catch(() => undefined);
         this.commandStatus = undefined;
@@ -418,8 +466,8 @@ export const useRelayStore = defineStore('relay', {
           this.replaceSession(payload.session);
           this.eventsBySession[payload.session.id] = mergeEvents(
             this.eventsBySession[payload.session.id] ?? [],
-            payload.events,
-          );
+            payload.events.slice(-MAX_HISTORY_EVENTS),
+          ).slice(-MAX_HISTORY_EVENTS);
           this.lastSeqBySession[payload.session.id] = payload.latestSeq;
           this.scheduleCachePersist(payload.session.id);
           if (payload.session.id === this.selectedSessionId) {
@@ -474,7 +522,10 @@ export const useRelayStore = defineStore('relay', {
         this.eventsBySession[sessionId] = mergeEvents(
           this.eventsBySession[sessionId] ?? [],
           incoming,
-        );
+        ).slice(-MAX_HISTORY_EVENTS);
+        if (this.eventsBySession[sessionId]!.length >= MAX_HISTORY_EVENTS) {
+          this.hasOlderBySession[sessionId] = true;
+        }
         const latestSeq = incoming.at(-1)!.seq;
         this.lastSeqBySession[sessionId] = Math.max(
           this.lastSeqBySession[sessionId] ?? -1,
@@ -506,7 +557,7 @@ export const useRelayStore = defineStore('relay', {
       await Promise.all(sessionIds.map(async (sessionId) => {
         const events = this.eventsBySession[sessionId];
         if (!events) return;
-        const cachedEvents = events.slice(-MAX_HISTORY_EVENTS);
+        const cachedEvents = events.slice(-MAX_CACHED_EVENTS);
         const lastSeq = Math.max(
           cachedEvents.at(-1)?.seq ?? -1,
           this.lastSeqBySession[sessionId] ?? -1,
@@ -520,6 +571,23 @@ export const useRelayStore = defineStore('relay', {
       const index = this.sessions.findIndex((item) => item.id === session.id);
       if (index === -1) this.sessions.unshift(session);
       else this.sessions[index] = session;
+    },
+
+    touchHistory(sessionId: string): void {
+      this.historyAccessOrder = [
+        ...this.historyAccessOrder.filter((id) => id !== sessionId),
+        sessionId,
+      ];
+    },
+
+    evictInactiveHistories(): void {
+      while (this.historyAccessOrder.length > MAX_MEMORY_SESSIONS) {
+        const sessionId = this.historyAccessOrder.shift();
+        if (!sessionId || sessionId === this.selectedSessionId) continue;
+        delete this.eventsBySession[sessionId];
+        delete this.hasOlderBySession[sessionId];
+        dirtyCacheSessions.delete(sessionId);
+      }
     },
 
     scheduleReconnect(): void {
@@ -565,21 +633,11 @@ export const useRelayStore = defineStore('relay', {
 });
 
 async function loadHistory(sessionId: string): Promise<SessionEventRecord[]> {
-  const events: SessionEventRecord[] = [];
-  let afterSeq = -1;
-  while (events.length < MAX_HISTORY_EVENTS) {
-    const remaining = MAX_HISTORY_EVENTS - events.length;
-    const limit = Math.min(HISTORY_PAGE_SIZE, remaining);
-    const response = await fetch(
-      `/api/sessions/${encodeURIComponent(sessionId)}/events?afterSeq=${afterSeq}&limit=${limit}`,
-    );
-    if (!response.ok) throw new Error(`历史事件请求失败 (${response.status})`);
-    const page = (await response.json()) as SessionEventRecord[];
-    events.push(...page);
-    if (page.length < limit) return events;
-    afterSeq = page.at(-1)!.seq;
-  }
-  return events;
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/events?limit=${INITIAL_HISTORY_EVENTS}`,
+  );
+  if (!response.ok) throw new Error(`历史事件请求失败 (${response.status})`);
+  return (await response.json()) as SessionEventRecord[];
 }
 
 function mergeEvents(

@@ -238,8 +238,11 @@ onBeforeUnmount(() => {
             :events="relay.selectedEvents"
             :interactive="relay.selectedSessionInteractive"
             :scroll-revision="relay.scrollToLatestRevision"
+            :has-older="relay.hasOlderBySession[relay.selectedSession.id] ?? false"
+            :loading-older="relay.loadingOlderHistory"
             @start-turn="relay.startToolTurn"
             @interrupt="relay.interruptToolTurn"
+            @load-older="relay.loadOlderHistory"
             @resolve-approval="relay.resolveApproval"
             @resolve-user-input="relay.resolveUserInput"
           />

@@ -243,6 +243,10 @@ class FakeSessionRepository {
     return [];
   }
 
+  async listEventsBefore() {
+    return [];
+  }
+
   private record(
     id: string,
     status: 'running' | 'finished' | 'failed',
