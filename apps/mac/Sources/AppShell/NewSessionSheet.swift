@@ -91,15 +91,13 @@ struct NewSessionSheet: View {
                 VStack(alignment: .leading, spacing: 9) {
                     Text("Codex 交互模式")
                         .font(.headline)
-                    Picker("Codex 交互模式", selection: $appModel.codexInteractionMode) {
-                        Text("PTY").tag(CodexInteractionMode.pty)
-                        Text("ACP").tag(CodexInteractionMode.acp)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    Text(appModel.codexInteractionMode == .pty
-                         ? "运行普通 Codex 终端界面，Mac 和 Web 都使用终端渲染。"
-                         : "通过 Codex App Server 运行；Mac 和 Web 都使用原生 Agent 界面，不启动终端。")
+                    Text("ACP")
+                        .font(.callout.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    Text("通过 Codex App Server 运行；Mac 和 Web 都使用原生 Agent 界面，不启动终端。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

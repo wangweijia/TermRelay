@@ -60,8 +60,7 @@ final class AppModel: ObservableObject {
         self.pairingClient = pairingClient
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
-        codexInteractionMode = defaults.string(forKey: Keys.codexInteractionMode)
-            .flatMap(CodexInteractionMode.init(rawValue:)) ?? .pty
+        codexInteractionMode = .acp
         acpSendShortcut = defaults.string(forKey: Keys.acpSendShortcut)
             .flatMap(ACPSendShortcut.init(rawValue:)) ?? .commandEnter
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -342,7 +341,8 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession() -> UUID? {
-        (selectedTool == .codex && codexInteractionMode == .acp)
+        // TODO: Remove CodexInteractionMode and Codex PTY launch support after the ACP-only UI migration settles.
+        selectedTool == .codex
             || selectedTool == .copilot
             || selectedTool == .dsh
             ? startStructuredSession()
@@ -351,7 +351,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     private func startStructuredSession() -> UUID? {
-          guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
+                guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
               let remoteClient else {
             errorMessage = "该工具不支持结构化模式。"
             return nil
