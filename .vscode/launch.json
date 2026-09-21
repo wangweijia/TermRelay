@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:TermRelay}/apps/mac",
+      "name": "Debug TermRelay (apps/mac)",
+      "target": "TermRelay",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug TermRelay (apps/mac)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:TermRelay}/apps/mac",
+      "name": "Release TermRelay (apps/mac)",
+      "target": "TermRelay",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release TermRelay (apps/mac)"
+    }
+  ]
+}
