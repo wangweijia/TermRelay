@@ -80,6 +80,14 @@ chmod 600 /home/weijia/deploy/termrelay/shared/.env.production
 
 填写实际数据库凭据。后续每个发布包都复用该文件，构建产物不包含任何生产密钥；Release Runner 会在部署时通过 `--env-file` 传入稳定路径。
 
+如果这个稳定配置由旧版本创建，请在升级前同步新增的必填项。当前至少需要配置浏览器实际访问的 origin：
+
+```dotenv
+PUBLIC_ORIGIN=https://termrelay.wqyhomes.com
+```
+
+部署脚本会在加载镜像前检查该值，避免 Compose 在迁移阶段才因缺少变量退出。
+
 生产发布包默认绑定 Jetson 的所有网络接口，即 `0.0.0.0:3006`。局域网设备可以通过 Jetson 的局域网 IP 直接访问。当前没有应用层认证，只能在可信局域网使用，不能通过路由器端口转发直接暴露到公网。
 
 ## 4. 一键部署

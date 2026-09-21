@@ -128,7 +128,10 @@ TERMRELAY_GIT_COMMIT=$(git -C "$repo_root" rev-parse HEAD)
 TERMRELAY_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
-(cd "$release_tmp" && tar -czf "$output_dir/$archive_name" "termrelay-server-$version")
+# macOS files can carry provenance and other extended attributes. Do not write
+# them into the portable Linux release archive: GNU tar on the Jetson cannot
+# interpret libarchive's LIBARCHIVE.xattr.* PAX headers.
+(cd "$release_tmp" && tar --no-xattrs -czf "$output_dir/$archive_name" "termrelay-server-$version")
 checksum="$(shasum -a 256 "$output_dir/$archive_name" | awk '{print $1}')"
 printf '%s  %s\n' "$checksum" "$archive_name" > "$output_dir/$archive_name.sha256"
 

@@ -74,6 +74,17 @@ if grep -Eq '^(DB_PASSWORD|DB_MIGRATION_PASSWORD)=replace-' "$env_file"; then
   exit 2
 fi
 
+public_origin="$(sed -n 's/^[[:space:]]*PUBLIC_ORIGIN[[:space:]]*=[[:space:]]*//p' "$env_file" | tail -n 1 | tr -d '\r')"
+case "$public_origin" in
+  http://*|https://*) ;;
+  *)
+    echo "PUBLIC_ORIGIN is missing or invalid in $env_file." >&2
+    echo "Set it to the browser-facing origin, for example:" >&2
+    echo "  PUBLIC_ORIGIN=https://termrelay.wqyhomes.com" >&2
+    exit 2
+    ;;
+esac
+
 server_port="$(sed -n 's/^SERVER_PORT=//p' "$env_file" | tail -n 1)"
 server_port="${server_port:-3006}"
 case "$server_port" in
