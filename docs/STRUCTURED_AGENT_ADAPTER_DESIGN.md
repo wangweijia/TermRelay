@@ -9,6 +9,9 @@
 > 实现更新：2026-09-12。Mac、Server、Web 已通过中立 `tool.*` Contract 接通 Turn、
 > 结构化事件和单次审批；可靠 ACK/Journal 补传与完整审计加固仍在后续阶段。
 >
+> 实现更新：2026-09-21。Mac 新增 GitHub Copilot CLI 官方 ACP Server 适配；各 AI
+> 工具继续使用独立 provider 目录、进程管理和协议映射实现。
+>
 > 关联决策：[ADR-001：Codex 结构化集成使用官方 App Server Protocol](ADR-001-CODEX-APP-SERVER.md)
 
 ## 1. 目标
@@ -32,7 +35,7 @@ Mac 会话核心、TermRelay Server 或 Web UI 依赖某个厂商的原始协议
 - 不把 Codex App Server JSON-RPC 直接暴露给 Server 或 Web。
 - 不要求所有普通 CLI 都提供结构化事件。
 - 不把 Web 展示模式当成两套独立运行时；Codex 始终保留 TUI，并独立监听结构化审批流。
-- 不在当前阶段实现 Claude、Gemini 或 ACP Adapter。
+- 不在当前阶段实现 Claude 或 Gemini Adapter；ACP provider 按工具独立实现。
 - 不用结构化 Adapter 替代 TermRelay 的设备、会话、ACK 和重连协议。
 
 ## 2. 术语
@@ -110,7 +113,8 @@ apps/mac/Sources/
 │   │   ├── CodexEventMapper.swift
 │   │   ├── CodexCapabilityMapper.swift
 │   │   └── Generated/
-│   ├── ACP/                       # 达到重新评估条件后再创建
+│   ├── Copilot/                   # GitHub Copilot CLI 官方 ACP Server
+│   ├── DSH/                       # DeepSeek DSH ACP
 │   └── Testing/
 │       ├── FakeAgentAdapter.swift
 │       └── ScriptedAgentAdapter.swift

@@ -125,6 +125,20 @@ struct NewSessionSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } else if appModel.selectedTool == .copilot {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("GitHub Copilot 交互模式")
+                        .font(.headline)
+                    Text("ACP")
+                        .font(.callout.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.accentColor.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    Text("通过 Copilot CLI 官方 ACP Server 连接。请先在终端运行 copilot login 完成登录。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack {
@@ -179,6 +193,7 @@ private extension BuiltInTool {
         switch self {
         case .shell: "terminal"
         case .codex: "sparkles"
+        case .copilot: "chevron.left.forwardslash.chevron.right"
         case .dsh: "brain.head.profile"
         }
     }

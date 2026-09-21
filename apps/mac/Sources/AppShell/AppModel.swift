@@ -286,8 +286,8 @@ final class AppModel: ObservableObject {
     @discardableResult
     func startLocalTerminal() -> UUID? {
         do {
-            guard selectedTool != .dsh else {
-                throw ToolLaunchError.unsupportedMode("DeepSeek DSH 当前仅支持 ACP 模式")
+            guard selectedTool != .dsh, selectedTool != .copilot else {
+                throw ToolLaunchError.unsupportedMode("\(selectedTool.displayName) 当前仅支持 ACP 模式")
             }
             guard let remoteClient else { return nil }
             let proxy = proxyConfiguration(for: selectedTool)
@@ -342,14 +342,17 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession() -> UUID? {
-        (selectedTool == .codex && codexInteractionMode == .acp) || selectedTool == .dsh
+        (selectedTool == .codex && codexInteractionMode == .acp)
+            || selectedTool == .copilot
+            || selectedTool == .dsh
             ? startStructuredSession()
             : startLocalTerminal()
     }
 
     @discardableResult
     private func startStructuredSession() -> UUID? {
-        guard selectedTool == .codex || selectedTool == .dsh, let remoteClient else {
+          guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
+              let remoteClient else {
             errorMessage = "该工具不支持结构化模式。"
             return nil
         }
@@ -359,7 +362,11 @@ final class AppModel: ObservableObject {
             return nil
         }
         let displayName = normalizedSessionName
-        let executableName = selectedTool == .dsh ? "dsh" : "codex"
+        let executableName = switch selectedTool {
+        case .copilot: "copilot"
+        case .dsh: "dsh"
+        default: "codex"
+        }
         guard let executableURL = configuredExecutableURL(for: selectedTool)
             ?? ExecutableLocator.find(named: executableName) else {
             errorMessage = "找不到 \(executableName) 可执行程序"
@@ -377,6 +384,8 @@ final class AppModel: ObservableObject {
             }
             environment["DEEPSEEK_API_KEY"] = key
             adapter = DSHStructuredAdapter(configuredExecutableURL: executableURL)
+        } else if selectedTool == .copilot {
+            adapter = CopilotStructuredAdapter(configuredExecutableURL: executableURL)
         } else {
             let host = CodexAppServerHost(
                 executableURL: executableURL,

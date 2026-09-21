@@ -27,6 +27,7 @@ struct ToolAvailability: Sendable, Equatable {
 enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
     case shell
     case codex
+    case copilot
     case dsh
 
     var id: String { rawValue }
@@ -35,6 +36,7 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .shell: "终端"
         case .codex: "Codex"
+        case .copilot: "GitHub Copilot"
         case .dsh: "DeepSeek DSH"
         }
     }
@@ -43,11 +45,47 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .shell: LoginShellAdapter(configuredExecutableURL: executableURL)
         case .codex: CodexAdapter(configuredExecutableURL: executableURL)
+        case .copilot: CopilotCLIAdapter(configuredExecutableURL: executableURL)
         case .dsh: DSHAdapter(configuredExecutableURL: executableURL)
         }
     }
 
     var adapter: any CLIToolAdapter { makeAdapter() }
+}
+
+struct CopilotCLIAdapter: CLIToolAdapter {
+    let toolID = BuiltInTool.copilot.rawValue
+    let displayName = BuiltInTool.copilot.displayName
+    let configuredExecutableURL: URL?
+
+    init(configuredExecutableURL: URL? = nil) {
+        self.configuredExecutableURL = configuredExecutableURL
+    }
+
+    func detect() -> ToolAvailability {
+        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "copilot") else {
+            return ToolAvailability(
+                isAvailable: false,
+                executablePath: nil,
+                detail: "未在 PATH 或常用安装目录找到 copilot"
+            )
+        }
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            return ToolAvailability(
+                isAvailable: false,
+                executablePath: url.path,
+                detail: "文件不存在或不可执行：\(url.path)"
+            )
+        }
+        return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
+    }
+
+    func makeLaunchConfiguration(
+        directory: URL,
+        proxy: ToolProxyConfiguration = .inherited
+    ) throws -> LaunchConfiguration {
+        throw ToolLaunchError.unsupportedMode("GitHub Copilot 当前仅支持 ACP 模式")
+    }
 }
 
 struct DSHAdapter: CLIToolAdapter {

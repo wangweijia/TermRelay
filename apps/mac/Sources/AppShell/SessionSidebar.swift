@@ -201,6 +201,7 @@ private struct SessionSidebarRowContent: View {
     private var toolIcon: String {
         switch BuiltInTool(rawValue: session.toolID) {
         case .codex: "sparkles"
+        case .copilot: "chevron.left.forwardslash.chevron.right"
         case .dsh: "brain.head.profile"
         default: "terminal"
         }
