@@ -119,6 +119,8 @@ private struct StructuredAgentSessionView: View {
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
     @State private var prompt = ""
+    @State private var autoApprove = false
+    @State private var autoApprovedIDs: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -182,6 +184,12 @@ private struct StructuredAgentSessionView: View {
                 }
             }
             .background(Color(nsColor: .textBackgroundColor))
+            .onChange(of: session.timeline) { _, timeline in
+                maybeAutoApprove(timeline)
+            }
+            .onChange(of: autoApprove) { _, enabled in
+                if enabled { maybeAutoApprove(session.timeline) }
+            }
 
             VStack(alignment: .trailing, spacing: 10) {
                 TextEditor(text: $prompt)
@@ -201,6 +209,10 @@ private struct StructuredAgentSessionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
+                    Toggle("自动审批通过", isOn: $autoApprove)
+                        .toggleStyle(.checkbox)
+                        .font(.caption)
+                        .help("勾选后，此会话后续的审批请求将自动允许一次")
                     Button("发送") { submitPrompt() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!canSend)
@@ -219,6 +231,22 @@ private struct StructuredAgentSessionView: View {
         let text = prompt
         prompt = ""
         Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
+    }
+
+    private func maybeAutoApprove(_ timeline: [AgentTimelineItem]) {
+        guard autoApprove else { return }
+        for item in timeline {
+            guard case .approval(let approval) = item, approval.decision == nil else { continue }
+            guard !autoApprovedIDs.contains(approval.id) else { continue }
+            autoApprovedIDs.insert(approval.id)
+            Task {
+                _ = await session.resolveApproval(
+                    approvalID: approval.request.approvalID,
+                    turnID: approval.request.turnID,
+                    decision: .allowOnce
+                )
+            }
+        }
     }
 }
 

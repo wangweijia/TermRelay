@@ -34,6 +34,8 @@ const emit = defineEmits<{
 const prompt = ref('');
 const timelineElement = ref<HTMLElement>();
 const sendShortcut = ref<SendShortcut>(loadSendShortcut());
+const autoApprove = ref(false);
+const autoApprovedIds = new Set<string>();
 const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
 const timeline = shallowRef<TimelineItem[]>([]);
@@ -80,6 +82,18 @@ function syncTimeline(): void {
   processedEventCount = props.events.length;
   processedLastSeq = props.events.at(-1)?.seq;
   if (changed) timeline.value = [...timeline.value];
+  if (changed) maybeAutoApprove();
+}
+
+function maybeAutoApprove(): void {
+  if (!autoApprove.value) return;
+  for (const item of timeline.value) {
+    if (item.kind !== 'approval.requested' || item.resolved) continue;
+    const approvalId = text(item.data, 'approvalId');
+    if (!approvalId || autoApprovedIds.has(approvalId)) continue;
+    autoApprovedIds.add(approvalId);
+    emit('resolveApproval', approvalId, text(item.data, 'turnId'), 'allowOnce');
+  }
 }
 
 function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void {
@@ -200,6 +214,7 @@ watch(() => props.loadingOlder, async (loading, wasLoading) => {
   loadingOlderRequested = false;
 });
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
+watch(autoApprove, (enabled) => { if (enabled) maybeAutoApprove(); });
 function submitAnswers(item: TimelineItem): void {
   const requestId = text(item.data, 'requestId');
   const values = Object.fromEntries(records(item.data.questions).map((question) => {
@@ -284,6 +299,10 @@ function submitAnswers(item: TimelineItem): void {
           </select>
         </label>
         <div>
+          <label class="auto-approve-toggle" title="勾选后，此会话后续的审批请求将自动允许一次">
+            <input v-model="autoApprove" type="checkbox">
+            <span>自动审批通过</span>
+          </label>
           <button type="button" :disabled="!interactive" @click="emit('interrupt')">中断</button>
           <button type="submit" class="approve" :disabled="!interactive || !prompt.trim()">发送</button>
         </div>
