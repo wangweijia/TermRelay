@@ -9,7 +9,6 @@ import {
 } from './client-auth.service';
 import { ClientPairingsController } from './client-pairings.controller';
 import { ClientApprovalsController } from './client-approvals.controller';
-import { CloudflareAccessVerifier } from './cloudflare-access-verifier';
 import { DeviceCredentialsController } from './device-credentials.controller';
 import { DeviceCredentialsService } from './device-credentials.service';
 import { ClientAuthRateLimiter } from './client-auth-rate-limiter';
@@ -23,7 +22,6 @@ import { ClientAuthRateLimiter } from './client-auth-rate-limiter';
   providers: [
     ClientAuthRepository,
     ClientConnectionAuthorizations,
-    CloudflareAccessVerifier,
     DeviceCredentialsService,
     ClientAuthRateLimiter,
     ClientAuthService,

@@ -97,12 +97,41 @@ case "$output_dir" in
   *) output_dir="$repo_root/$output_dir" ;;
 esac
 
-for command in codesign ditto git hdiutil iconutil plutil shasum sips swift xattr; do
+configure_xcode_toolchain() {
+  local selected_developer_dir=""
+  local candidate=""
+
+  if selected_developer_dir="$(xcode-select -p 2>/dev/null)" &&
+     DEVELOPER_DIR="$selected_developer_dir" xcrun --find metal >/dev/null 2>&1; then
+    export DEVELOPER_DIR="$selected_developer_dir"
+  else
+    for candidate in /Applications/Xcode.app/Contents/Developer \
+      "$HOME"/Applications/Xcode.app/Contents/Developer; do
+      if [[ -d "$candidate" ]] && DEVELOPER_DIR="$candidate" xcrun --find metal >/dev/null 2>&1; then
+        export DEVELOPER_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "${DEVELOPER_DIR:-}" ]] || ! xcrun --find metal >/dev/null 2>&1; then
+    echo "A full Xcode installation with the Metal compiler is required." >&2
+    echo "Install Xcode, then run:" >&2
+    echo "  sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer" >&2
+    exit 1
+  fi
+
+  echo "Using Xcode toolchain: $DEVELOPER_DIR"
+}
+
+for command in codesign ditto git hdiutil iconutil plutil shasum sips swift xattr xcode-select xcrun; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Required command is missing: $command" >&2
     exit 1
   }
 done
+
+configure_xcode_toolchain
 
 if [ "$allow_dirty" = false ] && [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
   echo "Workspace has uncommitted changes. Commit them or pass --allow-dirty." >&2

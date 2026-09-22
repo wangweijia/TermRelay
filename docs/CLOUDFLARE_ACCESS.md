@@ -23,7 +23,7 @@ is not implemented yet. Until then, keep the Mac App on the trusted LAN path.
 - Access application: self-hosted application named `termrelay`.
 - Authentication: email one-time PIN with a single-email allow policy.
 - Session duration: 24 hours.
-- Tunnel origin validation: Access JWT validation is required for this ingress.
+- Origin authorization: Cloudflare Access performs browser authentication at the edge; the Server trusts requests that Access forwards through the Tunnel.
 
 Do not add a bypass policy for `/ws/web` or the existing `/ws/client`: the
 browser sends its Access cookie on the `/ws/web` upgrade, while `/ws/client`

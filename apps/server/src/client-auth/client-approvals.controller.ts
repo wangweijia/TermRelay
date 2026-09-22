@@ -10,22 +10,16 @@ import {
   Query,
 } from '@nestjs/common';
 import { ClientAuthService, type ClientPairingRecord } from './client-auth.service';
-import { CloudflareAccessVerifier } from './cloudflare-access-verifier';
+
+const DEFAULT_APPROVER = 'cloudflare-access-user';
 
 @Controller('api/client-approvals')
 export class ClientApprovalsController {
-  constructor(
-    private readonly auth: ClientAuthService,
-    private readonly access: CloudflareAccessVerifier,
-  ) {}
+  constructor(private readonly auth: ClientAuthService) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
-  async find(
-    @Query('code') code: string | undefined,
-    @Headers('cf-access-jwt-assertion') assertion: string | undefined,
-  ): Promise<PairingSummary> {
-    await this.access.verify(assertion);
+  async find(@Query('code') code: string | undefined): Promise<PairingSummary> {
     const pairing = await this.auth.findPairing(parseCode(code));
     if (!pairing) throw new NotFoundException('pairing not found');
     return summarize(pairing);
@@ -35,16 +29,21 @@ export class ClientApprovalsController {
   @Header('Cache-Control', 'no-store')
   async decide(
     @Body() input: unknown,
-    @Headers('cf-access-jwt-assertion') assertion: string | undefined,
+    @Headers('cf-access-authenticated-user-email') email: string | undefined,
   ): Promise<PairingSummary> {
-    const identity = await this.access.verify(assertion);
     const body = parseDecision(input);
+    const approvedBy = accessUser(email);
     const pairing = body.decision === 'approve'
-      ? await this.auth.approvePairing(body.code, identity.email ?? identity.subject)
-      : await this.auth.denyPairing(body.code, identity.email ?? identity.subject);
+      ? await this.auth.approvePairing(body.code, approvedBy)
+      : await this.auth.denyPairing(body.code, approvedBy);
     if (!pairing) throw new NotFoundException('pending pairing not found');
     return summarize(pairing);
   }
+}
+
+function accessUser(email: string | undefined): string {
+  const value = email?.trim();
+  return value && value.length <= 320 ? value : DEFAULT_APPROVER;
 }
 
 interface PairingSummary {

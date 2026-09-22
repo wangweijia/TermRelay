@@ -91,9 +91,9 @@ App 使用 `NSWorkspace.shared.open` 打开 `verificationURL`。`/client/authori
 `/api/client-approvals` 不在 Bypass 范围内，浏览器必须先完成现有 Cloudflare Access Email OTP 或 IdP
 登录。
 
-Server 对 Cloudflare 注入的 `Cf-Access-Jwt-Assertion` 验证签名、`iss`、`aud`、`exp` 和 `nbf`，
-显示待配对设备信息，并要求用户明确批准。批准记录保存已验证用户的 `sub` 或 email 用于审计，但不
-保存原始 JWT。
+Cloudflare Access 在边缘完成浏览器登录和访问控制，Server 信任经过 Access 放行的请求，不再自行
+校验 Access JWT。Server 显示待配对设备信息并要求用户明确批准；如果 Cloudflare 提供
+`Cf-Access-Authenticated-User-Email`，批准记录使用该邮箱审计，否则记录统一的 Access 用户标识。
 
 ### 3. 兑换设备凭据
 
@@ -195,12 +195,12 @@ Cloudflare 官方明确说明 Bypass 不执行 Access 安全控制，且请求�
 
 - `ClientPairingService`：创建、批准、拒绝、轮询和一次性兑换配对。
 - `DeviceCredentialService`：生成、哈希、验证、轮换和撤销凭据，并维护凭据与活跃连接的关联。
-- `CloudflareAccessVerifier`：只用于受保护的浏览器批准接口，动态获取并缓存团队 JWKS。
+- Cloudflare Access：在边缘保护浏览器批准和凭据管理接口；Server 不重复校验 Access JWT。
 - 公网 WebSocket Gateway：只服务 `/ws/client-public`，在 Upgrade 阶段验证 Bearer 凭据。
 - 当前 `ClientGateway` 和 `/ws/client` 保持局域网行为，避免一次改动同时改变现有可用路径。
 
-`Cf-Access-Jwt-Assertion` 只能证明浏览器批准者身份，不能作为 Mac 的长期凭据。Mac 设备只能使用
-TermRelay 签发的 device credential。
+Cloudflare Access 登录只用于浏览器管理面，不能作为 Mac 的长期凭据。Mac 设备只能使用 TermRelay
+签发的 device credential。
 
 ### WebSocket Upgrade 鉴权
 
