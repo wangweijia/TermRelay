@@ -11,11 +11,13 @@ existing remotely managed `jetson-invest` Cloudflare Tunnel.
   `ws://JETSON_LAN_IP:3006/ws/client` and does not traverse Cloudflare.
 - The browser derives `wss://termrelay.wqyhomes.com/ws/web` from the page URL.
 
-The planned Mac public-domain pairing and authenticated `/ws/client-public`
-connection are documented in
+Mac App public-domain pairing over an authenticated `/ws/client-public`
+connection is implemented and documented in
 [Mac Client 公网配对与认证方案](CLOUDFLARE_MAC_CLIENT_AUTH.md). The design uses
-path-specific Access Bypass rules plus TermRelay-issued device credentials; it
-is not implemented yet. Until then, keep the Mac App on the trusted LAN path.
+path-specific Access Bypass rules (turn off "Protect with Access" only for the
+pairing and `/ws/client-public` routes) plus TermRelay-issued device
+credentials. It is optional: if the Mac App always stays on the trusted LAN,
+none of this is required.
 
 ## Cloudflare resources
 

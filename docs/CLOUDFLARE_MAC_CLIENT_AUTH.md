@@ -2,9 +2,12 @@
 
 ## 状态
 
-本文记录 Mac App 通过公网域名连接 TermRelay Server 的待实施设计。当前生产路径仍以
-[Cloudflare Access 部署说明](CLOUDFLARE_ACCESS.md)为准：浏览器经过 Cloudflare Access，Mac App
-通过受信局域网直连 `/ws/client`。
+本文记录的配对与设备凭据方案**已经实现**（`ClientPairingService` / `DeviceCredentialService` /
+`/ws/client-public` Gateway 与 Mac 端 `ClientPairingClient`）。浏览器仍以
+[Cloudflare Access 部署说明](CLOUDFLARE_ACCESS.md)为准：浏览器经过 Cloudflare Access 访问 `/ws/web`；
+Mac App 默认通过受信局域网直连 `/ws/client`，只有在需要跨网络访问时才启用本文描述的
+`/ws/client-public` 公网入口。README 的 [Cloudflare 配置](../README.md#cloudflare-配置) 一节给出了
+面向最终用户的精简配置步骤，本文提供完整的设计依据、数据模型和测试要求。
 
 本方案不依赖 `cloudflared` 客户端，也不尝试从外部浏览器读取 Cloudflare Cookie。Cloudflare 负责
 Tunnel、TLS 和边缘防护；TermRelay Server 负责 Mac 设备配对、凭据签发、WebSocket 鉴权和撤销。
