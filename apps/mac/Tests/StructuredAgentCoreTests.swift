@@ -103,6 +103,39 @@ final class StructuredAgentCoreTests: XCTestCase {
         XCTAssertTrue(snapshot.pendingApprovalIDs.isEmpty)
     }
 
+    func testResolvingOneOfTwoApprovalsKeepsSecondApprovalActionable() async throws {
+        let sessionID = UUID()
+        let runtime = FakeAgentRuntime(sessionID: sessionID)
+        let coordinator = StructuredSessionCoordinator(runtime: runtime)
+        try await coordinator.start(request: AgentSessionRequest(
+            sessionID: sessionID,
+            workspaceURL: URL(fileURLWithPath: "/tmp")
+        ))
+        try await coordinator.send(.startTurn(TurnInput(text: "test"), idempotencyKey: UUID()))
+        await runtime.emitTurnStarted("turn-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-b")
+        await settle()
+
+        try await coordinator.send(.resolveApproval(ApprovalResolution(
+            approvalID: "approval-a",
+            turnID: "turn-a",
+            decision: .allowOnce
+        )))
+        var snapshot = await coordinator.snapshot()
+        XCTAssertEqual(snapshot.state, .awaitingApproval)
+        XCTAssertEqual(snapshot.pendingApprovalIDs, ["approval-b"])
+
+        try await coordinator.send(.resolveApproval(ApprovalResolution(
+            approvalID: "approval-b",
+            turnID: "turn-a",
+            decision: .allowOnce
+        )))
+        snapshot = await coordinator.snapshot()
+        XCTAssertEqual(snapshot.state, .running)
+        XCTAssertTrue(snapshot.pendingApprovalIDs.isEmpty)
+    }
+
     func testCapabilityIntersectionDoesNotInventSupport() {
         let provider: AgentCapabilities = [.streamingText, .reasoning, .approvals]
         let client: AgentCapabilities = [.streamingText, .approvals, .steering]

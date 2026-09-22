@@ -87,7 +87,7 @@ actor StructuredSessionCoordinator {
             resolvingApprovalIDs.remove(resolution.approvalID)
             if pendingApprovals.removeValue(forKey: resolution.approvalID) != nil,
                activeTurnID == resolution.turnID {
-                state = .running
+                state = pendingApprovals.isEmpty ? .running : .awaitingApproval
             }
             return
         case .resolveUserInput(let resolution):
