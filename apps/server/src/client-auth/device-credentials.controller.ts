@@ -1,6 +1,5 @@
-import { Controller, Get, Header, Headers, NotFoundException, Param, Post } from '@nestjs/common';
+import { Controller, Get, Header, NotFoundException, Param, Post } from '@nestjs/common';
 import type { DeviceCredentialRecord } from './client-auth.service';
-import { CloudflareAccessVerifier } from './cloudflare-access-verifier';
 import { DeviceCredentialsService } from './device-credentials.service';
 
 interface CredentialSummary {
@@ -15,27 +14,17 @@ interface CredentialSummary {
 
 @Controller('api/client-credentials')
 export class DeviceCredentialsController {
-  constructor(
-    private readonly credentials: DeviceCredentialsService,
-    private readonly access: CloudflareAccessVerifier,
-  ) {}
+  constructor(private readonly credentials: DeviceCredentialsService) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
-  async list(
-    @Headers('cf-access-jwt-assertion') assertion: string | undefined,
-  ): Promise<CredentialSummary[]> {
-    await this.access.verify(assertion);
+  async list(): Promise<CredentialSummary[]> {
     return (await this.credentials.list()).map(summarize);
   }
 
   @Post(':id/revoke')
   @Header('Cache-Control', 'no-store')
-  async revoke(
-    @Param('id') id: string,
-    @Headers('cf-access-jwt-assertion') assertion: string | undefined,
-  ): Promise<CredentialSummary> {
-    await this.access.verify(assertion);
+  async revoke(@Param('id') id: string): Promise<CredentialSummary> {
     const credential = await this.credentials.revoke(id);
     if (!credential) throw new NotFoundException('credential not found');
     return summarize(credential);
