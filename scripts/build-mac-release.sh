@@ -10,19 +10,23 @@ build_number="$(date -u +%Y%m%d%H%M)"
 output_dir="$repo_root/dist/termrelay-mac"
 run_tests=false
 allow_dirty=false
+local_signing_identity="TermRelay Local Code Signing"
+signing_identity="${TERMRELAY_SIGNING_IDENTITY:-}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/build-mac-release.sh [options]
 
 Builds the macOS app in Release mode, creates a standard .app bundle, applies
-an ad-hoc signature, and packages both ZIP and DMG artifacts.
+a local identity or ad-hoc signature, and packages both ZIP and DMG artifacts.
 
 Options:
   --version VERSION       Marketing version, such as 0.1.0 (default: 0.1.0)
   --build-number NUMBER   Numeric build number (default: UTC timestamp)
   --bundle-id ID          Bundle identifier (default: com.termrelay.mac)
   --output-dir PATH       Artifact directory (default: dist/termrelay-mac)
+  --signing-identity ID   Code-signing identity (default: local TermRelay identity
+                          when installed, otherwise ad-hoc signing)
   --run-tests             Run swift test before the Release build (requires XCTest)
   --allow-dirty           Allow packaging uncommitted workspace changes
   -h, --help              Show this help
@@ -58,6 +62,11 @@ while [ "$#" -gt 0 ]; do
     --output-dir)
       [ "$#" -ge 2 ] || { echo "--output-dir requires a path" >&2; exit 2; }
       output_dir="$2"
+      shift 2
+      ;;
+    --signing-identity)
+      [ "$#" -ge 2 ] || { echo "--signing-identity requires a value" >&2; exit 2; }
+      signing_identity="$2"
       shift 2
       ;;
     --run-tests)
@@ -124,12 +133,27 @@ configure_xcode_toolchain() {
   echo "Using Xcode toolchain: $DEVELOPER_DIR"
 }
 
-for command in codesign ditto git hdiutil iconutil plutil shasum sips swift xattr xcode-select xcrun; do
+for command in codesign ditto git hdiutil iconutil plutil security shasum sips swift xattr xcode-select xcrun; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Required command is missing: $command" >&2
     exit 1
   }
 done
+
+if [ -z "$signing_identity" ]; then
+  if security find-identity -v -p codesigning 2>/dev/null \
+    | grep -Fq "\"$local_signing_identity\""; then
+    signing_identity="$local_signing_identity"
+  else
+    signing_identity="-"
+  fi
+fi
+if [ "$signing_identity" != "-" ] && ! security find-identity -v -p codesigning 2>/dev/null \
+  | grep -Fq "\"$signing_identity\""; then
+  echo "Code-signing identity is unavailable: $signing_identity" >&2
+  echo "Run scripts/setup-mac-local-signing.sh or choose an installed identity." >&2
+  exit 1
+fi
 
 configure_xcode_toolchain
 
@@ -194,6 +218,9 @@ plutil -insert CFBundleShortVersionString -string "$version" "$info_plist"
 plutil -insert CFBundleVersion -string "$build_number" "$info_plist"
 plutil -insert LSApplicationCategoryType -string public.app-category.developer-tools "$info_plist"
 plutil -insert LSMinimumSystemVersion -string 14.0 "$info_plist"
+plutil -insert NSAppDataUsageDescription \
+  -string "TermRelay needs access to data used by terminal and developer tools when you start and manage authorized local sessions." \
+  "$info_plist"
 plutil -insert NSHighResolutionCapable -bool YES "$info_plist"
 plutil -insert NSPrincipalClass -string NSApplication "$info_plist"
 
@@ -202,8 +229,12 @@ plutil -insert NSPrincipalClass -string NSApplication "$info_plist"
 chmod -R u+w "$app_path"
 xattr -cr "$app_path"
 
-echo "Applying ad-hoc signature ..."
-codesign --force --deep --options runtime --sign - --timestamp=none "$app_path"
+if [ "$signing_identity" = "-" ]; then
+  echo "Applying ad-hoc signature ..."
+else
+  echo "Applying local signature: $signing_identity"
+fi
+codesign --force --deep --options runtime --sign "$signing_identity" --timestamp=none "$app_path"
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
 zip_path="$output_dir/$release_name.zip"
@@ -235,7 +266,11 @@ echo "  $zip_path"
 echo "  $dmg_path"
 echo "  $checksum_path"
 echo
-echo "Signature: ad-hoc (not notarized)"
+if [ "$signing_identity" = "-" ]; then
+  echo "Signature: ad-hoc (not notarized)"
+else
+  echo "Signature: $signing_identity (local, not notarized)"
+fi
 echo "First launch on another Mac:"
 echo "  1. Move $product_name.app to Applications."
 echo "  2. Control-click the app, choose Open, then confirm Open."
