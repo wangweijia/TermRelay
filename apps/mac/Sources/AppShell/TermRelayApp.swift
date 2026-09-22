@@ -9,12 +9,11 @@ final class TermRelayAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Process enumeration and stale-process termination must never block AppKit's main thread.
         CodexAppServerHost.beginStartupCleanup()
-        // Surface the Desktop/Documents/Downloads access prompt now instead of mid-Agent-run.
-        ProtectedFolderPreflight.beginWarmup()
         // `swift run TermRelay` launches a plain SwiftPM executable rather than
         // an application bundle, so opt into a foreground GUI process here.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        FullDiskAccessOnboarding.requestIfNeeded()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
