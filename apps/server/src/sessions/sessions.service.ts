@@ -6,6 +6,7 @@ import type {
   ToolEventPayload,
   WorkspaceRegisteredPayload,
 } from '@termrelay/contracts';
+import { randomUUID } from 'node:crypto';
 import { DevicesService } from '../devices/devices.service';
 import {
   DeviceConnectionRegistry,
@@ -194,6 +195,24 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return session?.deviceId === deviceId ? session : undefined;
   }
 
+  async setAutoApprove(
+    sessionId: string,
+    enabled: boolean,
+    expectedDeviceId?: string,
+  ): Promise<SessionRecord | undefined> {
+    const current = await this.findById(sessionId);
+    if (!current || (expectedDeviceId && current.deviceId !== expectedDeviceId)) {
+      return undefined;
+    }
+    const updated = await this.serialize(current.deviceId, () =>
+      this.sessions.updateAutoApprove(sessionId, enabled),
+    );
+    if (!updated) return undefined;
+    this.publishState(updated);
+    this.pushSessionSync(updated);
+    return updated;
+  }
+
   async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {
     await this.waitForWrites();
     return this.sessions.deleteFinished(id, purge);
@@ -273,6 +292,30 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
 
   private publishState(session: SessionRecord): void {
     for (const listener of this.stateListeners) listener({ ...session });
+  }
+
+  private pushSessionSync(session: SessionRecord): void {
+    const client = this.registry.getClient(session.deviceId);
+    if (!client) return;
+    try {
+      client.send(JSON.stringify({
+        event: 'message',
+        data: {
+          type: 'session.synced',
+          protocolVersion: '2',
+          messageId: randomUUID(),
+          deviceId: session.deviceId,
+          sessionId: session.id,
+          sentAt: new Date().toISOString(),
+          payload: {
+            lastAcceptedSeq: session.stateVersion,
+            autoApproveEnabled: session.autoApproveEnabled,
+          },
+        },
+      }));
+    } catch {
+      this.logger.warn(`Failed to sync auto-approve state for ${session.id}.`);
+    }
   }
 }
 

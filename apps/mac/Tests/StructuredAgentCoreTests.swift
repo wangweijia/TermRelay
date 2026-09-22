@@ -162,6 +162,37 @@ final class StructuredAgentCoreTests: XCTestCase {
         XCTAssertEqual(provider.intersection(client), [.streamingText, .approvals])
     }
 
+    func testLocalSessionAutoApprovesEachApprovalOnlyOnce() async throws {
+        let sessionID = UUID()
+        let runtime = FakeAgentRuntime(sessionID: sessionID)
+        let session = await MainActor.run {
+            LocalStructuredAgentSession(
+                id: sessionID,
+                directory: URL(fileURLWithPath: "/tmp"),
+                adapter: FixedRuntimeAdapter(runtime: runtime),
+                eventHandler: { _ in },
+                stateHandler: { _, _ in }
+            )
+        }
+
+        await session.start()
+        _ = await session.startTurn("test", idempotencyKey: UUID())
+        await MainActor.run { session.setAutoApproveEnabled(true) }
+        await runtime.emitTurnStarted("turn-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-a")
+        await settle()
+
+        var approvalCount = await runtime.approvalActionCount()
+        XCTAssertEqual(approvalCount, 1)
+        await MainActor.run { session.setAutoApproveEnabled(false) }
+        await MainActor.run { session.setAutoApproveEnabled(true) }
+        await settle()
+        approvalCount = await runtime.approvalActionCount()
+        XCTAssertEqual(approvalCount, 1)
+        await session.stop()
+    }
+
     private func settle() async {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(10))
@@ -185,6 +216,27 @@ private struct FakeAgentAdapter: StructuredAgentAdapter {
         configuration: AgentLaunchConfiguration
     ) async throws -> any StructuredAgentRuntime {
         FakeAgentRuntime(sessionID: configuration.sessionID)
+    }
+}
+
+private struct FixedRuntimeAdapter: StructuredAgentAdapter {
+    let providerID = AgentProviderID.fake
+    let displayName = "Fixed Fake Agent"
+    let runtime: FakeAgentRuntime
+
+    func detect() async throws -> AgentInstallation {
+        AgentInstallation(
+            executableURL: URL(fileURLWithPath: "/usr/bin/false"),
+            version: "1.0",
+            supported: true,
+            unsupportedReason: nil
+        )
+    }
+
+    func makeRuntime(
+        configuration: AgentLaunchConfiguration
+    ) async throws -> any StructuredAgentRuntime {
+        runtime
     }
 }
 
@@ -227,6 +279,12 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
 
     func failNextSend() {
         shouldFailNextSend = true
+    }
+
+    func approvalActionCount() -> Int {
+        actions.reduce(into: 0) { count, action in
+            if case .resolveApproval = action { count += 1 }
+        }
     }
 
     func stop() async {

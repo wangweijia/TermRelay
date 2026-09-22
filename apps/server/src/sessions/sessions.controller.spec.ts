@@ -123,6 +123,27 @@ test('rejects deletion for active, missing, and invalid purge requests', async (
   );
 });
 
+test('validates and updates a session auto-approve setting', async () => {
+  const expected = { ...record(), autoApproveEnabled: true };
+  const controller = new SessionsController({
+    setAutoApprove: async (_id: string, enabled: boolean) =>
+      enabled ? expected : undefined,
+  } as unknown as SessionsService);
+
+  assert.equal(
+    (await controller.setAutoApprove('session-a', { enabled: true })).autoApproveEnabled,
+    true,
+  );
+  await assert.rejects(
+    () => controller.setAutoApprove('session-a', { enabled: 'true' }),
+    (error: unknown) => error instanceof BadRequestException,
+  );
+  await assert.rejects(
+    () => controller.setAutoApprove('missing', { enabled: false }),
+    (error: unknown) => error instanceof NotFoundException,
+  );
+});
+
 function record(): SessionRecord {
   const timestamp = new Date(1_000).toISOString();
   return {
@@ -134,6 +155,7 @@ function record(): SessionRecord {
     runtimeMode: 'pty',
     status: 'running',
     stateVersion: 1,
+    autoApproveEnabled: false,
     startedAt: timestamp,
     finishedAt: null,
     createdAt: timestamp,

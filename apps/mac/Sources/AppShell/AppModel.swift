@@ -97,6 +97,11 @@ final class AppModel: ObservableObject {
                 await self?.handleRemoteCommand(command)
                     ?? .rejected("app_unavailable", "Mac App is shutting down.")
             },
+            autoApproveStateHandler: { [weak self] sessionID, enabled in
+                Task { @MainActor [weak self] in
+                    self?.structuredSessions[sessionID]?.setAutoApproveEnabled(enabled)
+                }
+            },
             authorizationInvalidatedHandler: { [weak self] in
                 Task { @MainActor [weak self] in self?.removeInvalidCredential() }
             }
@@ -444,6 +449,13 @@ final class AppModel: ObservableObject {
 
     func structuredSession(id: UUID) -> LocalStructuredAgentSession? {
         structuredSessions[id]
+    }
+
+    func setAutoApprove(sessionID: UUID, enabled: Bool) {
+        guard connectionState == .connected,
+              structuredSessions[sessionID] != nil,
+              let remoteClient else { return }
+        Task { await remoteClient.publishAutoApprove(sessionID: sessionID, enabled: enabled) }
     }
 
     func stopLocalTerminal(id: UUID) {

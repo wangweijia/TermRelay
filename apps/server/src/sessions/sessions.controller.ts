@@ -6,6 +6,8 @@ import {
   Get,
   NotFoundException,
   Param,
+  Body,
+  Put,
   Query,
 } from '@nestjs/common';
 import type {
@@ -32,6 +34,22 @@ export class SessionsController {
   @Get(':id')
   async findById(@Param('id') id: string): Promise<SessionRecord> {
     const session = await this.sessions.findById(id);
+    if (!session) throw new NotFoundException('session not found');
+    return session;
+  }
+
+  @Put(':id/auto-approve')
+  async setAutoApprove(
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<SessionRecord> {
+    const record = typeof body === 'object' && body !== null
+      ? body as Record<string, unknown>
+      : undefined;
+    if (!record || typeof record.enabled !== 'boolean' || Object.keys(record).length !== 1) {
+      throw new BadRequestException('body must contain only boolean enabled');
+    }
+    const session = await this.sessions.setAutoApprove(id, record.enabled);
     if (!session) throw new NotFoundException('session not found');
     return session;
   }

@@ -13,6 +13,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private(set) var events: [ToolEvent] = []
     @Published private(set) var timeline: [AgentTimelineItem] = []
     @Published private(set) var failureMessage: String?
+    @Published private(set) var autoApproveEnabled = false
 
     private let adapter: any StructuredAgentAdapter
     private let environment: [String: String]
@@ -23,6 +24,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private var eventTask: Task<Void, Never>?
     private var timelineFlushTask: Task<Void, Never>?
     private var pendingTimelineEvents: [ToolEvent] = []
+    private var autoApprovalAttemptedIDs = Set<String>()
 
     init(
         id: UUID = UUID(),
@@ -63,6 +65,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                         self.events.removeFirst(self.events.count - Self.maximumRetainedEvents)
                     }
                     self.eventHandler(event)
+                    self.scheduleAutoApproval(for: event)
                     self.enqueueTimelineEvent(event)
                 }
             }
@@ -113,6 +116,12 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         )))
     }
 
+    func setAutoApproveEnabled(_ enabled: Bool) {
+        guard autoApproveEnabled != enabled else { return }
+        autoApproveEnabled = enabled
+        if enabled { schedulePendingAutoApprovals() }
+    }
+
     func stop() async {
         eventTask?.cancel()
         eventTask = nil
@@ -159,6 +168,38 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             self.timelineFlushTask = nil
             self.flushTimelineEvents()
             await self.refreshState()
+        }
+    }
+
+    private func scheduleAutoApproval(for event: ToolEvent) {
+        guard autoApproveEnabled,
+              case .approvalRequested(let request) = event.payload else { return }
+        scheduleAutoApproval(request)
+    }
+
+    private func schedulePendingAutoApprovals() {
+        var pending: [String: ApprovalRequest] = [:]
+        for event in events {
+            switch event.payload {
+            case .approvalRequested(let request):
+                pending[request.approvalID] = request
+            case .approvalResolved(let approvalID, _, _):
+                pending.removeValue(forKey: approvalID)
+            default:
+                break
+            }
+        }
+        for request in pending.values { scheduleAutoApproval(request) }
+    }
+
+    private func scheduleAutoApproval(_ request: ApprovalRequest) {
+        guard autoApprovalAttemptedIDs.insert(request.approvalID).inserted else { return }
+        Task { [weak self] in
+            _ = await self?.resolveApproval(
+                approvalID: request.approvalID,
+                turnID: request.turnID,
+                decision: .allowOnce
+            )
         }
     }
 

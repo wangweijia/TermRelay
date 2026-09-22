@@ -66,7 +66,11 @@ export class ProtocolValidator {
       ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
       ['session.started', ajv.compile(sessionStartedSchema)],
       ['session.ended', ajv.compile(sessionEndedSchema)],
-      ['session.sync', ajv.compile(sessionSyncSchema)],
+      ['session.sync', ajv.compile({
+        ...sessionSyncSchema,
+        properties: { autoApproveEnabled: { type: 'boolean' } },
+        maxProperties: 1,
+      })],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],

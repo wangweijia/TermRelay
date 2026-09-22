@@ -240,11 +240,14 @@ onBeforeUnmount(() => {
             :scroll-revision="relay.scrollToLatestRevision"
             :has-older="relay.hasOlderBySession[relay.selectedSession.id] ?? false"
             :loading-older="relay.loadingOlderHistory"
+            :auto-approve-enabled="relay.selectedSession.autoApproveEnabled"
+            :auto-approve-updating="relay.updatingAutoApprove[relay.selectedSession.id] ?? false"
             @start-turn="relay.startToolTurn"
             @interrupt="relay.interruptToolTurn"
             @load-older="relay.loadOlderHistory"
             @resolve-approval="relay.resolveApproval"
             @resolve-user-input="relay.resolveUserInput"
+            @set-auto-approve="(enabled) => relay.setSessionAutoApprove(relay.selectedSession!.id, enabled)"
           />
         </KeepAlive>
         <div v-if="!relay.loadingHistory && !relay.selectedSession" class="terminal-placeholder">选择一个会话查看内容</div>

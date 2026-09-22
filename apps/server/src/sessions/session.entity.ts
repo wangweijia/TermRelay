@@ -42,6 +42,9 @@ export class SessionEntity {
   @Column({ name: 'state_version', type: 'bigint', unsigned: true, default: 0 })
   stateVersion!: string;
 
+  @Column({ name: 'auto_approve_enabled', type: 'boolean', default: false })
+  autoApproveEnabled!: boolean;
+
   @Column({ name: 'started_at', type: 'datetime', precision: 3, nullable: true })
   startedAt!: Date | null;
 

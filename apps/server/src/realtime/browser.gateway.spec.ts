@@ -185,6 +185,7 @@ class FakeSessionsService {
     runtimeMode: 'pty',
     status: 'running',
     stateVersion: 1,
+    autoApproveEnabled: false,
     startedAt: new Date(1_000).toISOString(),
     finishedAt: null,
     createdAt: new Date(1_000).toISOString(),

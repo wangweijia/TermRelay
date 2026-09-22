@@ -7,6 +7,7 @@ export interface SessionRecord {
   runtimeMode: 'pty' | 'acp';
   status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
   stateVersion: number;
+  autoApproveEnabled: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;

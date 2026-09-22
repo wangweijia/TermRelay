@@ -3,11 +3,13 @@ import Foundation
 actor RemoteClient {
     typealias StateHandler = @Sendable (ConnectionState, String?) -> Void
     typealias CommandHandler = @Sendable (RemoteTerminalCommand) async -> RemoteCommandResult
+    typealias AutoApproveStateHandler = @Sendable (UUID, Bool) -> Void
     typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
     private let commandHandler: CommandHandler
+    private let autoApproveStateHandler: AutoApproveStateHandler
     private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
     private var serverURL: URL?
     private var credential: String?
@@ -39,12 +41,14 @@ actor RemoteClient {
         deviceID: UUID,
         stateHandler: @escaping StateHandler,
         commandHandler: @escaping CommandHandler,
+        autoApproveStateHandler: @escaping AutoApproveStateHandler = { _, _ in },
         authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
         self.stateHandler = stateHandler
         self.commandHandler = commandHandler
+        self.autoApproveStateHandler = autoApproveStateHandler
         self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
@@ -94,6 +98,14 @@ actor RemoteClient {
 
     func setActiveSessionCount(_ count: Int) {
         activeSessionCount = max(0, count)
+    }
+
+    func publishAutoApprove(sessionID: UUID, enabled: Bool) async {
+        _ = await send(
+            type: "session.sync",
+            sessionId: sessionID.uuidString.lowercased(),
+            payload: RelaySessionSync(autoApproveEnabled: enabled)
+        )
     }
 
     func publishWorkspace(id: String, directory: URL) async {
@@ -265,6 +277,9 @@ actor RemoteClient {
                 let accepted = envelope.payload.object?["lastAcceptedSeq"]?.integer,
                 accepted >= 0
             else { return }
+            if let enabled = envelope.payload.object?["autoApproveEnabled"]?.bool {
+                autoApproveStateHandler(sessionID, enabled)
+            }
             await reconcileSession(sessionID, lastAcceptedSequence: UInt64(accepted))
             return
         }

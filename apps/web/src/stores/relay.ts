@@ -40,6 +40,7 @@ export const useRelayStore = defineStore('relay', {
     devices: [] as DeviceRecord[],
     pendingApprovals: [] as PendingApprovalRecord[],
     resolvingApprovals: {} as Record<string, boolean>,
+    updatingAutoApprove: {} as Record<string, boolean>,
     notificationSettings: { enabled: false, configured: false } as NotificationSettings,
     selectedSessionId: undefined as string | undefined,
     eventsBySession: {} as Record<string, SessionEventRecord[]>,
@@ -423,6 +424,28 @@ export const useRelayStore = defineStore('relay', {
 
     resolveApproval(approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {
       this.sendCommand('tool.approval.resolve', { approvalId, turnId, decision });
+    },
+
+    async setSessionAutoApprove(sessionId: string, enabled: boolean): Promise<void> {
+      if (this.updatingAutoApprove[sessionId]) return;
+      this.updatingAutoApprove[sessionId] = true;
+      try {
+        const response = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/auto-approve`,
+          {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+          },
+        );
+        if (!response.ok) throw new Error(await responseError(response, '自动审批设置失败'));
+        this.replaceSession(await response.json() as SessionRecord);
+        this.error = undefined;
+      } catch (error: unknown) {
+        this.error = describeError(error);
+      } finally {
+        delete this.updatingAutoApprove[sessionId];
+      }
     },
 
     resolveApprovalFromInbox(sessionId: string, approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {

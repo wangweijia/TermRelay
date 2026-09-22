@@ -192,8 +192,8 @@ test('routes registered workspace and session events to the session service', as
   );
 });
 
-test('returns the persisted session watermark on explicit sync', async () => {
-  const { gateway } = makeGateway();
+test('persists auto-approve changes and returns them on explicit sync', async () => {
+  const { gateway, sessions } = makeGateway();
   const socket = new FakeSocket();
   const client = socket.asWebSocket();
   gateway.handleConnection(client);
@@ -202,12 +202,14 @@ test('returns the persisted session watermark on explicit sync', async () => {
   }));
 
   await gateway.handleMessage(client, {
-    ...envelope('device-a', 'session.sync', {}),
+    ...envelope('device-a', 'session.sync', { autoApproveEnabled: true }),
     sessionId: 'session-a',
   });
 
   assert.equal(socket.messages.at(-1)?.data.type, 'session.synced');
   assert.equal(socket.messages.at(-1)?.data.payload.lastAcceptedSeq, 0);
+  assert.equal(socket.messages.at(-1)?.data.payload.autoApproveEnabled, true);
+  assert.equal(sessions.autoApproveEnabled, true);
 });
 
 test('returns structured sequence recovery context on a gap', async () => {
@@ -318,6 +320,7 @@ class FakeSessionsService {
     | { status: 'error'; code: 'conflict'; detail: string; expectedSeq: number } = {
       status: 'accepted',
     };
+  autoApproveEnabled = false;
 
   async registerWorkspace(
     _deviceId: string,
@@ -357,7 +360,18 @@ class FakeSessionsService {
 
   async findOwnedSession(deviceId: string, sessionId: string) {
     if (deviceId !== 'device-a' || sessionId !== 'session-a') return undefined;
-    return { id: sessionId, deviceId, stateVersion: 0 };
+    return {
+      id: sessionId,
+      deviceId,
+      stateVersion: 0,
+      autoApproveEnabled: this.autoApproveEnabled,
+    };
+  }
+
+  async setAutoApprove(sessionId: string, enabled: boolean, deviceId?: string) {
+    if (sessionId !== 'session-a' || (deviceId && deviceId !== 'device-a')) return undefined;
+    this.autoApproveEnabled = enabled;
+    return this.findOwnedSession('device-a', sessionId);
   }
 }
 

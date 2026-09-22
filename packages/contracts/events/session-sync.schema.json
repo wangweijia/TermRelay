@@ -3,6 +3,8 @@
   "$id": "https://termrelay.local/contracts/events/session-sync.schema.json",
   "title": "session.sync payload",
   "type": "object",
-  "maxProperties": 0,
+  "properties": {
+    "autoApproveEnabled": { "type": "boolean" }
+  },
   "additionalProperties": false
 }

@@ -24,18 +24,26 @@ const props = withDefaults(defineProps<{
   scrollRevision?: number;
   hasOlder?: boolean;
   loadingOlder?: boolean;
-}>(), { shortcutEnabled: true, scrollRevision: 0, hasOlder: false, loadingOlder: false });
+  autoApproveEnabled?: boolean;
+  autoApproveUpdating?: boolean;
+}>(), {
+  shortcutEnabled: true,
+  scrollRevision: 0,
+  hasOlder: false,
+  loadingOlder: false,
+  autoApproveEnabled: false,
+  autoApproveUpdating: false,
+});
 const emit = defineEmits<{
   startTurn: [text: string]; interrupt: [];
   loadOlder: [];
   resolveApproval: [approvalId: string, turnId: string, decision: Decision];
   resolveUserInput: [requestId: string, turnId: string, answers: Record<string, string[]>];
+  setAutoApprove: [enabled: boolean];
 }>();
 const prompt = ref('');
 const timelineElement = ref<HTMLElement>();
 const sendShortcut = ref<SendShortcut>(loadSendShortcut());
-const autoApprove = ref(false);
-const autoApprovedIds = new Set<string>();
 const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
 const timeline = shallowRef<TimelineItem[]>([]);
@@ -82,18 +90,6 @@ function syncTimeline(): void {
   processedEventCount = props.events.length;
   processedLastSeq = props.events.at(-1)?.seq;
   if (changed) timeline.value = [...timeline.value];
-  if (changed) maybeAutoApprove();
-}
-
-function maybeAutoApprove(): void {
-  if (!autoApprove.value) return;
-  for (const item of timeline.value) {
-    if (item.kind !== 'approval.requested' || item.resolved) continue;
-    const approvalId = text(item.data, 'approvalId');
-    if (!approvalId || autoApprovedIds.has(approvalId)) continue;
-    autoApprovedIds.add(approvalId);
-    emit('resolveApproval', approvalId, text(item.data, 'turnId'), 'allowOnce');
-  }
 }
 
 function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void {
@@ -214,7 +210,9 @@ watch(() => props.loadingOlder, async (loading, wasLoading) => {
   loadingOlderRequested = false;
 });
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
-watch(autoApprove, (enabled) => { if (enabled) maybeAutoApprove(); });
+function updateAutoApprove(event: Event): void {
+  emit('setAutoApprove', (event.target as HTMLInputElement).checked);
+}
 function submitAnswers(item: TimelineItem): void {
   const requestId = text(item.data, 'requestId');
   const values = Object.fromEntries(records(item.data.questions).map((question) => {
@@ -299,8 +297,8 @@ function submitAnswers(item: TimelineItem): void {
           </select>
         </label>
         <div>
-          <label class="auto-approve-toggle" title="勾选后，此会话后续的审批请求将自动允许一次">
-            <input v-model="autoApprove" type="checkbox">
+          <label class="auto-approve-toggle" title="开关由 Server 按会话保存，审批只在 Mac App 执行一次">
+            <input :checked="autoApproveEnabled" :disabled="autoApproveUpdating" type="checkbox" @change="updateAutoApprove">
             <span>自动审批通过</span>
           </label>
           <button type="button" :disabled="!interactive" @click="emit('interrupt')">中断</button>

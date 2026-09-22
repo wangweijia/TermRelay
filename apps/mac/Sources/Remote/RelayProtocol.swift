@@ -67,7 +67,13 @@ struct RelayTerminalOutput: Encodable, Sendable {
     let data: String
 }
 
-struct RelaySessionSync: Encodable, Sendable {}
+struct RelaySessionSync: Encodable, Sendable {
+    let autoApproveEnabled: Bool?
+
+    init(autoApproveEnabled: Bool? = nil) {
+        self.autoApproveEnabled = autoApproveEnabled
+    }
+}
 
 struct RelayCommandAck: Encodable, Sendable {
     let commandId: UUID

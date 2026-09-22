@@ -18,6 +18,7 @@ export interface SessionRecord {
   runtimeMode: SessionEntity['runtimeMode'];
   status: SessionStatus;
   stateVersion: number;
+  autoApproveEnabled: boolean;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -111,6 +112,7 @@ export class SessionRepository {
         runtimeMode: payload.runtimeMode,
         status: 'running',
         stateVersion: '0',
+        autoApproveEnabled: false,
         startedAt: new Date(payload.startedAt),
         finishedAt: null,
         deletedAt: null,
@@ -239,6 +241,19 @@ export class SessionRepository {
     if (!this.dataSource) return undefined;
     const session = await this.repository.findOneBy({ id, deletedAt: IsNull() });
     return session ? toSessionRecord(session) : undefined;
+  }
+
+  async updateAutoApprove(
+    id: string,
+    enabled: boolean,
+  ): Promise<SessionRecord | undefined> {
+    if (!this.dataSource) return undefined;
+    const result = await this.repository.update(
+      { id, deletedAt: IsNull() },
+      { autoApproveEnabled: enabled },
+    );
+    if (result.affected !== 1) return undefined;
+    return this.findById(id);
   }
 
   async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
@@ -455,6 +470,7 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     runtimeMode: session.runtimeMode,
     status: session.status,
     stateVersion: Number(session.stateVersion),
+    autoApproveEnabled: session.autoApproveEnabled,
     startedAt: session.startedAt?.toISOString() ?? null,
     finishedAt: session.finishedAt?.toISOString() ?? null,
     createdAt: session.createdAt.toISOString(),

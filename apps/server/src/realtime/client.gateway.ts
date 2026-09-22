@@ -137,6 +137,25 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.message.type === 'session.sync') {
+      const requested = (result.message.envelope.payload as Record<string, unknown>)
+        .autoApproveEnabled;
+      if (typeof requested === 'boolean') {
+        const updated = await this.sessions.setAutoApprove(
+          result.message.envelope.sessionId!,
+          requested,
+          result.message.envelope.deviceId,
+        );
+        if (!updated) {
+          this.sendProtocolError(
+            client,
+            'unknown_session',
+            'Session does not exist for this device.',
+            result.message.envelope.messageId,
+            result.message.envelope.sessionId,
+          );
+          return;
+        }
+      }
       await this.sendSessionWatermark(client, result.message.envelope);
       return;
     }
@@ -230,14 +249,17 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       );
       return;
     }
-    this.sendEnvelope<SessionSyncedPayload>(client, {
+    this.sendEnvelope<SessionSyncedPayload & { autoApproveEnabled: boolean }>(client, {
       type: 'session.synced',
       protocolVersion: '2',
       messageId: randomUUID(),
       deviceId: envelope.deviceId,
       sessionId,
       sentAt: new Date().toISOString(),
-      payload: { lastAcceptedSeq: session.stateVersion },
+      payload: {
+        lastAcceptedSeq: session.stateVersion,
+        autoApproveEnabled: session.autoApproveEnabled,
+      },
     });
   }
 

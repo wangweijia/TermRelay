@@ -139,6 +139,20 @@ test('delegates finished session deletion after queued writes settle', async () 
   assert.deepEqual(sessions.deletions, [{ id: 'session-a', purge: true }]);
 });
 
+test('persists and publishes auto-approve state per session', async () => {
+  const workspaces = new FakeWorkspaceRepository();
+  const sessions = new FakeSessionRepository();
+  const service = makeService(workspaces, sessions);
+  const states: boolean[] = [];
+  service.subscribeState((session) => states.push(session.autoApproveEnabled));
+
+  const updated = await service.setAutoApprove('session-a', true, 'device-a');
+
+  assert.equal(updated?.autoApproveEnabled, true);
+  assert.deepEqual(states, [true]);
+  assert.equal(await service.setAutoApprove('session-a', false, 'other-device'), undefined);
+});
+
 function makeService(
   workspaces: FakeWorkspaceRepository,
   sessions: FakeSessionRepository,
@@ -214,6 +228,11 @@ class FakeSessionRepository {
     return this.outputResult;
   }
 
+  async updateAutoApprove(id: string, enabled: boolean) {
+    const record = await this.findById(id);
+    return record ? { ...record, autoApproveEnabled: enabled } : undefined;
+  }
+
   async finishAllActive() {
     this.finishedAll += 1;
   }
@@ -261,6 +280,7 @@ class FakeSessionRepository {
       runtimeMode: 'pty' as const,
       status,
       stateVersion: 1,
+      autoApproveEnabled: false,
       startedAt: new Date(1_000).toISOString(),
       finishedAt: finishedAt?.toISOString() ?? null,
       createdAt: new Date(1_000).toISOString(),
@@ -279,6 +299,10 @@ class FakeRegistry {
   subscribe(listener: typeof this.listener): () => void {
     this.listener = listener;
     return () => { this.listener = undefined; };
+  }
+
+  getClient() {
+    return undefined;
   }
 
   publishOffline(deviceId: string, disconnectedAt: string): void {
