@@ -310,7 +310,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .approval-inbox-heading small { color: #728191; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .1em; }
 .notification-toggle { display: flex; align-items: center; gap: 6px; color: #9aa8b7; font-size: 11px; cursor: pointer; }
 .notification-toggle input { accent-color: #72e0a5; }
-.approval-inbox-list { flex: 1 1 auto; height: auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px; }
+.approval-inbox-list { position: relative; flex: 1 1 auto; height: auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px; }
 .inbox-approval { margin-bottom: 10px; padding: 12px; border: 1px solid #5d4828; border-radius: 8px; background: #1b1812; }
 .inbox-approval[data-risk="high"], .inbox-approval[data-risk="critical"] { border-color: #813b43; background: #211518; }
 .inbox-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -321,6 +321,23 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .inbox-actions button { padding: 5px 8px; border: 1px solid #3b4856; border-radius: 5px; color: #c8d2dc; background: #18212b; cursor: pointer; font-size: 11px; }
 .inbox-actions button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
 .inbox-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.inbox-approval.is-resolving { border-color: #3d5978; background: #101a24; }
+.inbox-resolving { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; color: #9fd1ff; font-size: 12px; }
+.inbox-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgb(106 167 232 / 25%);
+  border-top-color: #6aa7e8;
+  border-radius: 50%;
+  animation: inbox-spinner-spin .7s linear infinite;
+}
+@keyframes inbox-spinner-spin { to { transform: rotate(360deg); } }
+.inbox-approval-move,
+.inbox-approval-enter-active,
+.inbox-approval-leave-active { transition: opacity .22s ease, transform .22s ease, margin-bottom .22s ease, max-height .22s ease; }
+.inbox-approval-enter-from { opacity: 0; transform: translateY(-6px); }
+.inbox-approval-leave-active { position: absolute; width: calc(100% - 24px); }
+.inbox-approval-leave-to { opacity: 0; transform: scale(.97); }
 .inbox-empty { display: grid; min-height: 180px; place-items: center; color: #667584; font-size: 12px; text-align: center; }
 
 .modal-backdrop {

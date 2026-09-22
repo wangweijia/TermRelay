@@ -91,7 +91,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     </section>
 
     <section v-show="activeTab === 'approvals'" class="mobile-screen mobile-approvals">
-      <ApprovalInbox :approvals="relay.pendingApprovals" :settings="relay.notificationSettings" :is-interactive="interactive" @resolve="relay.resolveApprovalFromInbox" @toggle-notifications="relay.setApprovalNotifications" />
+      <ApprovalInbox :approvals="relay.pendingApprovals" :settings="relay.notificationSettings" :is-interactive="interactive" :resolving="relay.resolvingApprovals" @resolve="relay.resolveApprovalFromInbox" @toggle-notifications="relay.setApprovalNotifications" />
     </section>
 
     <nav class="mobile-tabs" aria-label="主要功能">

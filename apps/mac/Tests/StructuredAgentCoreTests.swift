@@ -136,6 +136,26 @@ final class StructuredAgentCoreTests: XCTestCase {
         XCTAssertTrue(snapshot.pendingApprovalIDs.isEmpty)
     }
 
+    func testReasoningChunksWithoutItemIDMergeByTurn() {
+        let sessionID = UUID()
+        var items: [AgentTimelineItem] = []
+        for (sequence, text) in ["正在分析", "项目结构"].enumerated() {
+            AgentTimelineProjector.apply(ToolEvent(
+                sessionID: sessionID,
+                sequence: UInt64(sequence),
+                occurredAt: Date(),
+                correlation: AgentCorrelation(
+                    turnID: "turn-a",
+                    itemID: nil,
+                    approvalID: nil
+                ),
+                payload: .reasoningDelta(text: text)
+            ), to: &items)
+        }
+
+        XCTAssertEqual(items, [.reasoning(id: "turn-a", text: "正在分析项目结构")])
+    }
+
     func testCapabilityIntersectionDoesNotInventSupport() {
         let provider: AgentCapabilities = [.streamingText, .reasoning, .approvals]
         let client: AgentCapabilities = [.streamingText, .approvals, .steering]

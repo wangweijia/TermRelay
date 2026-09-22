@@ -254,6 +254,7 @@ onBeforeUnmount(() => {
         :approvals="relay.pendingApprovals"
         :settings="relay.notificationSettings"
         :is-interactive="isSessionInteractive"
+        :resolving="relay.resolvingApprovals"
         @resolve="relay.resolveApprovalFromInbox"
         @toggle-notifications="relay.setApprovalNotifications"
       />

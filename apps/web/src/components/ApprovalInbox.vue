@@ -2,7 +2,12 @@
 import type { NotificationSettings, PendingApprovalRecord } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
-defineProps<{ approvals: PendingApprovalRecord[]; settings: NotificationSettings; isInteractive: (sessionId: string) => boolean }>();
+const props = defineProps<{
+  approvals: PendingApprovalRecord[];
+  settings: NotificationSettings;
+  isInteractive: (sessionId: string) => boolean;
+  resolving: Record<string, boolean>;
+}>();
 const emit = defineEmits<{
   resolve: [sessionId: string, approvalId: string, turnId: string, decision: Decision];
   toggleNotifications: [enabled: boolean];
@@ -12,6 +17,11 @@ function decisions(item: PendingApprovalRecord): Decision[] {
   return Array.isArray(item.request.availableDecisions) ? item.request.availableDecisions as Decision[] : ['allowOnce', 'deny'];
 }
 function label(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
+function isResolving(item: PendingApprovalRecord): boolean { return !!props.resolving[item.approvalId]; }
+function handleResolve(item: PendingApprovalRecord, decision: Decision): void {
+  if (isResolving(item)) return;
+  emit('resolve', item.sessionId, item.approvalId, item.turnId, decision);
+}
 </script>
 
 <template>
@@ -23,16 +33,19 @@ function label(value: Decision): string { return ({ allowOnce: '允许一次', a
         <span>手机通知</span>
       </label>
     </div>
-    <div class="approval-inbox-list">
-      <article v-for="item in approvals" :key="`${item.sessionId}:${item.approvalId}`" class="inbox-approval" :data-risk="item.risk">
+    <TransitionGroup tag="div" name="inbox-approval" class="approval-inbox-list">
+      <article v-for="item in approvals" :key="`${item.sessionId}:${item.approvalId}`" class="inbox-approval" :class="{ 'is-resolving': isResolving(item) }" :data-risk="item.risk">
         <div class="inbox-session"><strong>{{ item.sessionName }}</strong><small>{{ item.risk }}</small></div>
         <h3>{{ text(item, 'title') || text(item, 'kind') || '操作审批' }}</h3>
         <pre v-if="text(item, 'detail')">{{ text(item, 'detail') }}</pre>
-        <div class="inbox-actions">
-          <button v-for="decision in decisions(item)" :key="decision" type="button" :class="{ approve: decision === 'allowOnce' }" :disabled="!isInteractive(item.sessionId)" @click="emit('resolve', item.sessionId, item.approvalId, item.turnId, decision)">{{ label(decision) }}</button>
+        <div v-if="isResolving(item)" class="inbox-resolving">
+          <span class="inbox-spinner" /> 正在处理…
+        </div>
+        <div v-else class="inbox-actions">
+          <button v-for="decision in decisions(item)" :key="decision" type="button" :class="{ approve: decision === 'allowOnce' }" :disabled="!isInteractive(item.sessionId)" @click="handleResolve(item, decision)">{{ label(decision) }}</button>
         </div>
       </article>
-      <div v-if="!approvals.length" class="inbox-empty">当前没有待审批任务</div>
-    </div>
+      <div v-if="!approvals.length" key="empty" class="inbox-empty">当前没有待审批任务</div>
+    </TransitionGroup>
   </aside>
 </template>

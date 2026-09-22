@@ -29,6 +29,7 @@ const MAX_MEMORY_SESSIONS = 5;
 const SESSION_REFRESH_INTERVAL_MS = 5_000;
 const CACHE_WRITE_DELAY_MS = 500;
 const pendingRealtimeEvents = new Map<string, Map<number, SessionEventRecord>>();
+const pendingApprovalCommands = new Map<string, string>();
 const dirtyCacheSessions = new Set<string>();
 let realtimeFlushFrame: number | undefined;
 let cacheWriteTimer: number | undefined;
@@ -38,6 +39,7 @@ export const useRelayStore = defineStore('relay', {
     sessions: [] as SessionRecord[],
     devices: [] as DeviceRecord[],
     pendingApprovals: [] as PendingApprovalRecord[],
+    resolvingApprovals: {} as Record<string, boolean>,
     notificationSettings: { enabled: false, configured: false } as NotificationSettings,
     selectedSessionId: undefined as string | undefined,
     eventsBySession: {} as Record<string, SessionEventRecord[]>,
@@ -133,6 +135,10 @@ export const useRelayStore = defineStore('relay', {
         this.sessions = (await sessionsResponse.json()) as SessionRecord[];
         this.devices = (await devicesResponse.json()) as DeviceRecord[];
         this.pendingApprovals = (await approvalsResponse.json()) as PendingApprovalRecord[];
+        const stillPending = new Set(this.pendingApprovals.map((item) => item.approvalId));
+        for (const approvalId of Object.keys(this.resolvingApprovals)) {
+          if (!stillPending.has(approvalId)) delete this.resolvingApprovals[approvalId];
+        }
         if (
           this.selectedSessionId &&
           !this.sessions.some((item) => item.id === this.selectedSessionId)
@@ -356,17 +362,17 @@ export const useRelayStore = defineStore('relay', {
       sessionId: string,
       type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
       payload: Record<string, unknown>,
-    ): void {
+    ): string | undefined {
       const session = this.sessions.find((item) => item.id === sessionId);
-      if (!session) { this.error = '会话不存在。'; return; }
+      if (!session) { this.error = '会话不存在。'; return undefined; }
       if (!this.isSessionInteractive(session)) {
         this.error = '该会话当前不可操作：Mac 已离线或会话已经结束。';
         this.commandStatus = '命令未发送';
-        return;
+        return undefined;
       }
       if (this.socket?.readyState !== WebSocket.OPEN) {
         this.error = 'Mac 命令无法发送：实时连接尚未建立。';
-        return;
+        return undefined;
       }
       const commandId = createUuid();
       const envelope: WireEnvelope = {
@@ -381,6 +387,7 @@ export const useRelayStore = defineStore('relay', {
       };
       this.socket.send(JSON.stringify({ event: 'message', data: envelope }));
       this.commandStatus = `命令 ${shortId(commandId)} 已发送`;
+      return commandId;
     },
 
     sendTerminalInput(data: Uint8Array): void {
@@ -419,7 +426,11 @@ export const useRelayStore = defineStore('relay', {
     },
 
     resolveApprovalFromInbox(sessionId: string, approvalId: string, turnId: string, decision: 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel'): void {
-      this.sendCommandForSession(sessionId, 'tool.approval.resolve', { approvalId, turnId, decision });
+      if (this.resolvingApprovals[approvalId]) return;
+      this.resolvingApprovals[approvalId] = true;
+      const commandId = this.sendCommandForSession(sessionId, 'tool.approval.resolve', { approvalId, turnId, decision });
+      if (commandId) pendingApprovalCommands.set(commandId, approvalId);
+      else delete this.resolvingApprovals[approvalId];
     },
 
     async loadNotificationSettings(): Promise<void> {
@@ -458,6 +469,14 @@ export const useRelayStore = defineStore('relay', {
           this.commandStatus = `命令 ${shortId(payload.commandId)}：${payload.status}`;
           if (payload.status === 'failed' || payload.status === 'rejected') {
             this.error = payload.message ?? `命令执行失败 (${payload.errorCode ?? payload.status})`;
+          }
+          const approvalId = pendingApprovalCommands.get(payload.commandId);
+          if (approvalId && payload.status !== 'accepted') {
+            pendingApprovalCommands.delete(payload.commandId);
+            delete this.resolvingApprovals[approvalId];
+            if (payload.status === 'completed') {
+              this.pendingApprovals = this.pendingApprovals.filter((item) => item.approvalId !== approvalId);
+            }
           }
           return;
         }

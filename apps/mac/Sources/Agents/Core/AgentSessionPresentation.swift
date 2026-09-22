@@ -89,7 +89,10 @@ enum AgentTimelineProjector {
                 in: &items
             )
         case .reasoningDelta(let text):
-            upsertText(kind: "reasoning", id: itemID, text: text, append: true, in: &items)
+            let reasoningID = event.correlation.itemID
+                ?? event.correlation.turnID
+                ?? fallbackID
+            upsertText(kind: "reasoning", id: reasoningID, text: text, append: true, in: &items)
         case .planUpdated(let text):
             upsertText(
                 kind: "plan",
