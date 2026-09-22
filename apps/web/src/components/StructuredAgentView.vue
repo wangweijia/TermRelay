@@ -38,6 +38,9 @@ const answers = reactive<Record<string, string>>({});
 const customAnswers = reactive<Record<string, string>>({});
 const timeline = shallowRef<TimelineItem[]>([]);
 const timelineById = new Map<string, TimelineItem>();
+const turnActive = ref(false);
+const awaitingHuman = ref(false);
+const showTurnLoading = computed(() => turnActive.value && !awaitingHuman.value);
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
 let loadingOlderRequested = false;
@@ -64,6 +67,8 @@ function syncTimeline(): void {
     timelineById.clear();
     processedEventCount = 0;
     processedLastSeq = undefined;
+    turnActive.value = false;
+    awaitingHuman.value = false;
   }
   let changed = false;
   for (let index = processedEventCount; index < props.events.length; index += 1) {
@@ -79,11 +84,15 @@ function syncTimeline(): void {
 
 function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void {
     const { kind, data, correlation } = event.payload;
+    if (kind === 'turn.started') { turnActive.value = true; awaitingHuman.value = false; return; }
+    if (kind === 'turn.completed') { turnActive.value = false; awaitingHuman.value = false; return; }
+    if (kind === 'approval.requested' || kind === 'user-input.requested') awaitingHuman.value = true;
     if (kind === 'approval.resolved' || kind === 'user-input.resolved') {
       const prefix = kind === 'approval.resolved' ? 'approval' : 'input';
       const key = kind === 'approval.resolved' ? 'approvalId' : 'requestId';
       const prior = timelineById.get(`${prefix}:${text(data, key)}`);
       if (prior) prior.resolved = true;
+      awaitingHuman.value = false;
       return;
     }
     const identity = correlation.itemId || correlation.turnId || String(event.seq);
@@ -181,6 +190,7 @@ onMounted(() => void scrollToLatest(true));
 watch([() => props.events.length, () => props.events.at(-1)?.seq], syncTimeline, { immediate: true });
 watch(() => props.scrollRevision, () => void scrollToLatest(true));
 watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
+watch(showTurnLoading, () => void scrollToLatest(false));
 watch(() => props.loadingOlder, async (loading, wasLoading) => {
   if (loading || !wasLoading || !loadingOlderRequested) return;
   await nextTick();
@@ -255,7 +265,14 @@ function submitAnswers(item: TimelineItem): void {
         </template>
       </article>
       </div>
-      <div v-if="!timeline.length" class="terminal-placeholder">还没有 ACP 消息</div>
+      <div v-if="!timeline.length && !showTurnLoading" class="terminal-placeholder">还没有 ACP 消息</div>
+      <div v-if="showTurnLoading" class="agent-event turn-loading" data-kind="turn.loading" aria-live="polite">
+        <small>codex</small>
+        <p class="turn-loading-text">
+          <span class="turn-loading-dots"><i /><i /><i /></span>
+          正在处理…
+        </p>
+      </div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
       <textarea v-model="prompt" rows="3" placeholder="发送消息给 Codex…" :disabled="!interactive" @keydown="handlePromptKeydown" />

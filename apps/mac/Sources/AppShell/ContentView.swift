@@ -146,6 +146,10 @@ private struct StructuredAgentSessionView: View {
                             AgentTimelineRow(item: item, session: session)
                                 .id(item.id)
                         }
+                        if session.state == .running {
+                            AgentTurnLoadingBubble()
+                                .id("turn-loading-bubble")
+                        }
                         Color.clear
                             .frame(height: 1)
                             .id(Self.timelineBottomID)
@@ -166,6 +170,12 @@ private struct StructuredAgentSessionView: View {
                 }
                 .onChange(of: session.timeline.last?.id) { _, id in
                     guard id != nil else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
+                    }
+                }
+                .onChange(of: session.state) { _, state in
+                    guard state == .running else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
@@ -289,6 +299,46 @@ private struct AgentTimelineRow: View {
                 .font(.callout)
                 .foregroundStyle(isError ? Color.red : Color.secondary)
         }
+    }
+}
+
+private struct AgentTurnLoadingBubble: View {
+    @State private var isAnimating = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .scaleEffect(isAnimating ? 1 : 0.5)
+                        .opacity(isAnimating ? 1 : 0.35)
+                        .animation(
+                            .easeInOut(duration: 0.6)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.15),
+                            value: isAnimating
+                        )
+                }
+            }
+            Text("Codex 正在处理…")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.accentColor.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.accentColor.opacity(isAnimating ? 0.55 : 0.15), lineWidth: 1.2)
+                .animation(
+                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                    value: isAnimating
+                )
+        }
+        .onAppear { isAnimating = true }
     }
 }
 
