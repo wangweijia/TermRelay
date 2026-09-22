@@ -80,7 +80,7 @@ case "$public_origin" in
   *)
     echo "PUBLIC_ORIGIN is missing or invalid in $env_file." >&2
     echo "Set it to the browser-facing origin, for example:" >&2
-    echo "  PUBLIC_ORIGIN=https://termrelay.wqyhomes.com" >&2
+    echo "  PUBLIC_ORIGIN=https://termrelay.example.com" >&2
     exit 2
     ;;
 esac

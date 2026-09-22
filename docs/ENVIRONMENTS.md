@@ -49,7 +49,7 @@ pnpm dev:server
 
 公网配对还需要配置：
 
-- `PUBLIC_ORIGIN`：浏览器授权 URL 的 HTTPS origin，例如 `https://termrelay.wqyhomes.com`。
+- `PUBLIC_ORIGIN`：浏览器授权 URL 的 HTTPS origin，例如 `https://termrelay.example.com`。
 - `CLIENT_CREDENTIAL_LIFETIME_MS`：可选；留空表示凭据只在主动撤销时失效。
 
 公网浏览器身份由 Cloudflare Access 在边缘完成验证。Server 信任经过 Access 放行的管理请求，不再

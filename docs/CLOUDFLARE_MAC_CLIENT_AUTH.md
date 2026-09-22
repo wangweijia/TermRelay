@@ -36,7 +36,7 @@ POST /api/client-approvals
 
 - `/ws/web` 继续要求 Cloudflare Access Cookie。
 - `/ws/client` 继续作为受信局域网兼容入口，不通过公网 Bypass 暴露。
-- 公网 Mac 使用 `wss://termrelay.wqyhomes.com/ws/client-public`。
+- 公网 Mac 使用 `wss://termrelay.example.com/ws/client-public`。
 
 Bypass 只关闭 Cloudflare Access 身份校验和 Access 审计，不会关闭 Cloudflare Tunnel、HTTPS 或可单独
 配置的 WAF/Rate Limiting。被 Bypass 的路径必须视为公网入口，由 TermRelay 完整承担认证责任。
@@ -75,7 +75,7 @@ Mac 调用公开的 `POST /api/client-pairings`，提交设备 ID、显示名称
   "pairingId": "opaque-id",
   "deviceCode": "256-bit-secret",
   "userCode": "ABCD-EFGH",
-  "verificationURL": "https://termrelay.wqyhomes.com/client/authorize?code=ABCD-EFGH",
+  "verificationURL": "https://termrelay.example.com/client/authorize?code=ABCD-EFGH",
   "expiresIn": 600,
   "pollInterval": 3
 }
@@ -138,7 +138,7 @@ let task = urlSession.webSocketTask(with: request)
 
 ## Cloudflare 配置
 
-保留当前覆盖 `termrelay.wqyhomes.com` 的 Access Application 和用户 Allow Policy。另建一个路径更
+保留当前覆盖 `termrelay.example.com` 的 Access Application 和用户 Allow Policy。另建一个路径更
 具体的 Self-hosted Application，例如 `termrelay-client-public`：
 
 | Path | Policy | 用途 |
@@ -269,7 +269,7 @@ App 在撤销时离线，凭据也无法通过下一次 Upgrade。若 `expires_a
 - 将 `deviceCode` 仅保存在配对过程内存中；取消、失败或超时后立即清除。
 - 将正式 device credential 保存到现有 macOS Keychain，不进入 `UserDefaults`。
 - `RemoteClient` 接受按目标生成的认证 Header；只向明确配置的公网入口发送凭据。
-- 公网连接默认使用 `wss://termrelay.wqyhomes.com/ws/client-public`。
+- 公网连接默认使用 `wss://termrelay.example.com/ws/client-public`。
 - 局域网 `ws://.../ws/client` 保留无凭据连接能力。
 - App 每次启动及每次断线重连都由 Server 在 Upgrade 阶段重新校验 Keychain 中的凭据。
 - 收到 `client.authorization-revoked`、关闭码 `4003` 或 Upgrade `401` 后删除凭据、停止指数重连并
@@ -329,7 +329,7 @@ App 在撤销时离线，凭据也无法通过下一次 Upgrade。若 `expires_a
 2. 未授权客户端不能连接 `/ws/client-public`。
 3. Mac 创建配对后，用户可在浏览器核对并批准指定设备。
 4. 配对凭据只能兑换一次，过期或拒绝后不能兑换。
-5. 批准后 Mac 自动连接 `wss://termrelay.wqyhomes.com/ws/client-public`。
+5. 批准后 Mac 自动连接 `wss://termrelay.example.com/ws/client-public`。
 6. 公网下注册、心跳、Session 同步、输入、resize、interrupt 和审批正常。
 7. Web 管理页撤销设备后，现有连接收到 `client.authorization-revoked`、清除凭据并断开，新连接立即
   失败。

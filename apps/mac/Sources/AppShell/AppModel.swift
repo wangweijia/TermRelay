@@ -136,7 +136,7 @@ final class AppModel: ObservableObject {
     }
 
     func useDefaultPublicServer() {
-        serverURL = "wss://termrelay.wqyhomes.com/ws/client-public"
+        serverURL = "wss://termrelay.example.com/ws/client-public"
     }
 
     func authorizeClient() {

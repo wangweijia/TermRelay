@@ -83,7 +83,7 @@ chmod 600 /home/weijia/deploy/termrelay/shared/.env.production
 如果这个稳定配置由旧版本创建，请在升级前同步新增的必填项。当前至少需要配置浏览器实际访问的 origin：
 
 ```dotenv
-PUBLIC_ORIGIN=https://termrelay.wqyhomes.com
+PUBLIC_ORIGIN=https://termrelay.example.com
 ```
 
 部署脚本会在加载镜像前检查该值，避免 Compose 在迁移阶段才因缺少变量退出。
