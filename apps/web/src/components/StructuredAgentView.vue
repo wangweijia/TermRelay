@@ -263,7 +263,7 @@ function submitAnswers(item: TimelineItem): void {
           </div>
         </div>
         <div v-else-if="item.kind === 'user-input.requested'" class="approval-card user-input-card">
-          <strong>Codex 需要你的回答</strong>
+          <strong>Agent 需要你的回答</strong>
           <template v-for="question in records(item.data.questions)" :key="text(question, 'id')">
             <label>{{ text(question, 'header') }}<small>{{ text(question, 'question') }}</small></label>
             <select v-if="records(question.options).length" v-model="answers[answerKey(text(item.data, 'requestId'), text(question, 'id'))]" :disabled="item.resolved || !interactive">
@@ -282,7 +282,7 @@ function submitAnswers(item: TimelineItem): void {
       </div>
       <div v-if="!timeline.length && !showTurnLoading" class="terminal-placeholder">还没有 ACP 消息</div>
       <div v-if="showTurnLoading" class="agent-event turn-loading" data-kind="turn.loading" aria-live="polite">
-        <small>codex</small>
+        <small>agent</small>
         <p class="turn-loading-text">
           <span class="turn-loading-dots"><i /><i /><i /></span>
           正在处理…
@@ -290,7 +290,7 @@ function submitAnswers(item: TimelineItem): void {
       </div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
-      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Codex…" :disabled="!interactive" @keydown="handlePromptKeydown" />
+      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Agent…" :disabled="!interactive" @keydown="handlePromptKeydown" />
       <div class="composer-actions">
         <label v-if="shortcutEnabled" class="shortcut-picker">
           <span>发送快捷键</span>

@@ -68,7 +68,7 @@ struct ContentView: View {
         } else if let session = selectedStructuredSession {
             StructuredAgentSessionView(
                 session: session,
-                displayName: selectedSession?.displayName ?? "Codex Agent"
+                displayName: selectedSession?.displayName ?? "Agent"
             )
         } else if let selectedSession {
             SessionSummaryView(session: selectedSession) {
@@ -276,7 +276,7 @@ private struct AgentTimelineRow: View {
             HStack {
                 if message.role == .user { Spacer(minLength: 80) }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(message.role == .user ? "你" : "Codex")
+                    Text(message.role == .user ? "你" : "Agent")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(message.text).textSelection(.enabled)
@@ -350,7 +350,7 @@ private struct AgentTurnLoadingBubble: View {
                         )
                 }
             }
-            Text("Codex 正在处理…")
+            Text("正在处理…")
                 .font(.callout.weight(.medium))
                 .foregroundStyle(Color.accentColor)
         }
@@ -472,7 +472,7 @@ private struct AgentUserInputCard: View {
     @State private var custom: [String: String] = [:]
 
     var body: some View {
-        AgentCard(title: "Codex 需要你的回答", icon: "questionmark.bubble") {
+        AgentCard(title: "Agent 需要你的回答", icon: "questionmark.bubble") {
             if let answers = value.answers {
                 ForEach(value.request.questions, id: \.id) { question in
                     Text("\(question.header)：\(answers[question.id]?.joined(separator: "、") ?? "—")")
