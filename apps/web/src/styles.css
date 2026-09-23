@@ -246,7 +246,28 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   scrollbar-gutter: stable;
   padding: 18px;
 }
-.timeline-history-status { position: sticky; top: 0; z-index: 4; padding: 7px; color: #7f8e9d; background: rgb(13 18 24 / 92%); text-align: center; font-size: 11px; }
+.timeline-history-status {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  justify-content: center;
+  min-height: 30px;
+  margin: -6px 0 10px;
+  pointer-events: none;
+}
+.timeline-history-status span {
+  align-self: flex-start;
+  padding: 5px 10px;
+  border: 1px solid #2d3945;
+  border-radius: 999px;
+  color: #8796a5;
+  background: rgb(13 18 24 / 94%);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 24%);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.timeline-history-status span[data-loading="true"] { color: #9fd1ff; border-color: #3d5978; }
 .agent-virtual-list { position: relative; width: 100%; }
 .agent-virtual-row { position: absolute; top: 0; left: 0; width: 100%; margin-bottom: 0; }
 .agent-view-approval { height: 100%; }
@@ -265,7 +286,24 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .agent-event > small { color: #708091; font: 10px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
 .agent-event p { margin-top: 7px; color: #c4ced8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-event pre { margin: 8px 0 0; padding: 10px; overflow: auto; border-radius: 6px; color: #dce7f0; background: #080c10; white-space: pre-wrap; }
-.agent-event[data-kind="assistant.delta"] { border-left: 3px solid #72e0a5; }
+.agent-event[data-kind="user.message"] {
+  width: min(82%, 760px);
+  margin-left: auto;
+  border-color: #3a607a;
+  border-right: 3px solid #73b7df;
+  background: #142635;
+}
+.agent-event[data-kind="user.message"] > small { display: block; color: #8dc9ea; text-align: right; }
+.agent-event[data-kind="user.message"] p { color: #e3f0f7; }
+.agent-event[data-kind="assistant"] {
+  width: min(88%, 820px);
+  margin-right: auto;
+  border-color: #315743;
+  border-left: 3px solid #72e0a5;
+  background: #12221a;
+}
+.agent-event[data-kind="assistant"] > small { color: #86d9ab; }
+.agent-event[data-kind="assistant"] p { color: #dcebe3; }
 .agent-event[data-kind="reasoning.delta"] { border-left: 3px solid #6aa7e8; opacity: .88; }
 .agent-event[data-kind="error"] { border-color: #6c3438; }
 .agent-event.turn-loading {

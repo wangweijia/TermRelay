@@ -156,6 +156,13 @@ function appendBounded(current: string, addition: string, maximum: number): stri
 function strings(data: Record<string, unknown>, field: string): string[] { return Array.isArray(data[field]) ? (data[field] as unknown[]).filter((value): value is string => typeof value === 'string') : []; }
 function records(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object') : []; }
 function answerKey(requestId: string, questionId: string): string { return `${requestId}:${questionId}`; }
+function itemLabel(kind: string): string {
+  if (kind === 'user.message') return '你';
+  if (kind === 'assistant') return 'Agent';
+  if (kind === 'reasoning.delta') return '思考过程';
+  if (kind === 'plan.updated') return '执行计划';
+  return kind;
+}
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
 function submitTurn(): void { const value = prompt.value.trim(); if (value) { emit('startTurn', value); prompt.value = ''; } }
 function loadSendShortcut(): SendShortcut {
@@ -228,7 +235,9 @@ function submitAnswers(item: TimelineItem): void {
   <section class="agent-view">
     <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll">
       <div v-if="hasOlder || loadingOlder" class="timeline-history-status">
-        {{ loadingOlder ? '正在加载更早内容…' : '向上滚动加载更早内容' }}
+        <span :data-loading="loadingOlder">
+          {{ loadingOlder ? '正在加载更早内容…' : '继续向上滚动以加载更早内容' }}
+        </span>
       </div>
       <div
         v-if="timeline.length"
@@ -246,7 +255,7 @@ function submitAnswers(item: TimelineItem): void {
         >
         <template v-if="timeline[virtualRow.index]" :key="timeline[virtualRow.index]!.id">
         <template v-for="item in [timeline[virtualRow.index]!]" :key="item.id">
-        <small>{{ item.kind }}</small>
+        <small>{{ itemLabel(item.kind) }}</small>
         <p v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">{{ item.text }}</p>
         <div v-else-if="item.kind === 'command'">
           <pre v-if="text(item.data, 'command')">{{ text(item.data, 'command') }}</pre>
