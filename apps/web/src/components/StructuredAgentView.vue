@@ -10,6 +10,8 @@ type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnte
 const sendShortcutStorageKey = 'termrelay.acpSendShortcut';
 const MAX_COMMAND_TEXT = 200_000;
 const MAX_STREAMING_TEXT = 1_000_000;
+const HISTORY_TRIGGER_MOUSE_PX = 72;
+const HISTORY_TRIGGER_TOUCH_PX = 112;
 const shortcutOptions: { value: SendShortcut; label: string }[] = [
   { value: 'commandEnter', label: '⌘ + 回车' },
   { value: 'controlEnter', label: '⌃ + 回车' },
@@ -55,13 +57,14 @@ let processedEventCount = 0;
 let processedLastSeq: number | undefined;
 let loadingOlderRequested = false;
 let previousVirtualSize = 0;
+let previousTimelineScrollTop = 0;
 
 const virtualizer = useVirtualizer(computed(() => ({
   count: timeline.value.length,
   getScrollElement: () => timelineElement.value ?? null,
-  estimateSize: () => 108,
-  overscan: 8,
-  gap: 12,
+  estimateSize: () => 112,
+  overscan: 10,
+  useAnimationFrameWithResizeObserver: true,
 })));
 
 function measureVirtualElement(value: unknown): void {
@@ -185,15 +188,31 @@ function handlePromptKeydown(event: KeyboardEvent): void {
   if (props.interactive && prompt.value.trim()) submitTurn();
 }
 let timelinePinnedToBottom = true;
+function requestOlderHistory(): void {
+  if (!props.hasOlder || props.loadingOlder || loadingOlderRequested) return;
+  loadingOlderRequested = true;
+  previousVirtualSize = virtualizer.value.getTotalSize();
+  emit('loadOlder');
+}
 function handleTimelineScroll(): void {
   const element = timelineElement.value;
   if (!element) return;
+  const currentScrollTop = Math.max(0, element.scrollTop);
+  const scrollingUp = currentScrollTop < previousTimelineScrollTop;
+  const historyThreshold = window.matchMedia('(pointer: coarse)').matches
+    ? HISTORY_TRIGGER_TOUCH_PX
+    : HISTORY_TRIGGER_MOUSE_PX;
   timelinePinnedToBottom = element.scrollHeight - element.scrollTop - element.clientHeight <= 80;
-  if (element.scrollTop <= 120 && props.hasOlder && !props.loadingOlder && !loadingOlderRequested) {
-    loadingOlderRequested = true;
-    previousVirtualSize = virtualizer.value.getTotalSize();
-    emit('loadOlder');
+  if (
+    scrollingUp
+    && currentScrollTop <= historyThreshold
+    && props.hasOlder
+    && !props.loadingOlder
+    && !loadingOlderRequested
+  ) {
+    requestOlderHistory();
   }
+  previousTimelineScrollTop = currentScrollTop;
 }
 async function scrollToLatest(force: boolean): Promise<void> {
   if (!force && !timelinePinnedToBottom) return;
@@ -201,6 +220,7 @@ async function scrollToLatest(force: boolean): Promise<void> {
   const element = timelineElement.value;
   if (!element) return;
   element.scrollTop = element.scrollHeight;
+  previousTimelineScrollTop = element.scrollTop;
   timelinePinnedToBottom = true;
 }
 onMounted(() => void scrollToLatest(true));
@@ -213,8 +233,14 @@ watch(() => props.loadingOlder, async (loading, wasLoading) => {
   await nextTick();
   const sizeDelta = virtualizer.value.getTotalSize() - previousVirtualSize;
   const element = timelineElement.value;
-  if (element && sizeDelta > 0) element.scrollTop += sizeDelta;
+  if (element && sizeDelta > 0) {
+    element.scrollTop += sizeDelta;
+    previousTimelineScrollTop = element.scrollTop;
+  }
   loadingOlderRequested = false;
+});
+watch(() => props.hasOlder, (hasOlder) => {
+  if (!hasOlder && !props.loadingOlder) loadingOlderRequested = false;
 });
 watch(sendShortcut, (value) => window.localStorage.setItem(sendShortcutStorageKey, value));
 function updateAutoApprove(event: Event): void {
@@ -234,10 +260,10 @@ function submitAnswers(item: TimelineItem): void {
 <template>
   <section class="agent-view">
     <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll">
-      <div v-if="hasOlder || loadingOlder" class="timeline-history-status">
-        <span :data-loading="loadingOlder">
-          {{ loadingOlder ? '正在加载更早内容…' : '继续向上滚动以加载更早内容' }}
-        </span>
+      <div v-if="hasOlder || loadingOlder" class="timeline-history-status" :data-loading="loadingOlder">
+        <span v-if="loadingOlder" class="timeline-history-spinner" aria-hidden="true" />
+        <span v-if="loadingOlder">正在载入更早记录</span>
+        <button v-else type="button" @click="requestOlderHistory">加载更早记录</button>
       </div>
       <div
         v-if="timeline.length"
@@ -249,12 +275,12 @@ function submitAnswers(item: TimelineItem): void {
           :key="timeline[virtualRow.index]!.id"
           :ref="measureVirtualElement"
           :data-index="virtualRow.index"
-          class="agent-event agent-virtual-row"
-          :data-kind="timeline[virtualRow.index]!.kind"
+          class="agent-virtual-row"
           :style="{ transform: `translateY(${virtualRow.start}px)` }"
         >
         <template v-if="timeline[virtualRow.index]" :key="timeline[virtualRow.index]!.id">
         <template v-for="item in [timeline[virtualRow.index]!]" :key="item.id">
+        <div class="agent-event" :data-kind="item.kind">
         <small>{{ itemLabel(item.kind) }}</small>
         <p v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">{{ item.text }}</p>
         <div v-else-if="item.kind === 'command'">
@@ -283,17 +309,15 @@ function submitAnswers(item: TimelineItem): void {
         </div>
         <p v-else-if="item.kind === 'file.changed'">{{ item.text }}</p>
         <p v-else-if="item.kind === 'warning' || item.kind === 'error'">{{ text(item.data, 'message') }}</p>
+        </div>
         </template>
         </template>
       </article>
       </div>
       <div v-if="!timeline.length && !showTurnLoading" class="terminal-placeholder">还没有 ACP 消息</div>
-      <div v-if="showTurnLoading" class="agent-event turn-loading" data-kind="turn.loading" aria-live="polite">
-        <small>agent</small>
-        <p class="turn-loading-text">
-          <span class="turn-loading-dots"><i /><i /><i /></span>
-          正在处理…
-        </p>
+      <div v-if="showTurnLoading" class="turn-loading" aria-live="polite">
+        <span class="turn-loading-dots"><i /><i /><i /></span>
+        <span>Agent 正在处理</span>
       </div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
