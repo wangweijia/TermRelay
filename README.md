@@ -54,6 +54,16 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 - **实时同步与恢复**：设备注册、心跳、Session 状态、历史事件回放、实时 WebSocket 订阅和命令 ACK。
 - **两种安全部署边界**：Web 走 Cloudflare Access；Mac App 可选局域网直连，或通过公网配对 + 设备凭据连接。
 
+## 界面预览
+
+### Mac App：原生 ACP 会话与审批
+
+![TermRelay Mac App 中的 GitHub Copilot ACP 会话、思考过程、命令执行与审批](docs/images/mac-app-acp.jpg)
+
+### Web：远程终端与统一审批中心
+
+![TermRelay Web 三栏工作台中的会话列表、远程终端和审批中心](docs/images/web-workbench.jpg)
+
 ## 界面结构
 
 ### PC 工作台
