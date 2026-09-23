@@ -58,6 +58,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
 
   private async pushApproval(notification: SessionEventNotification, payload: ToolEventPayload): Promise<void> {
     const session = await this.sessions.findById(notification.sessionId);
+    if (session?.autoApproveEnabled) return;
     const data = payload.data as Record<string, unknown>;
     const sessionName = session?.displayName?.trim() || session?.toolKey || notification.sessionId;
     const detail = String(data.detail || data.title || data.kind || 'Codex 请求批准一项操作');
