@@ -154,6 +154,8 @@ enum AgentTimelineProjector {
                 isError: status == .failed,
                 in: &items
             )
+        case .configurationUpdated:
+            break
         case .warning(let code, let message):
             upsertNotice(id: "\(code)-\(fallbackID)", text: message, isError: false, in: &items)
         case .failed(let code, let message):

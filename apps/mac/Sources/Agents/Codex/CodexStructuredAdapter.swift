@@ -101,6 +101,10 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
     private var threadID: String?
+    private var models: [String: [AgentConfigOption.Choice]] = [:]
+    private var selectedModel: String?
+    private var selectedEffort: String?
+    private var defaultEfforts: [String: String] = [:]
     private var didEmitSessionStarted = false
     private var activeTurnID: String?
     private var pendingApprovals: [String: PendingApproval] = [:]
@@ -176,13 +180,16 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
             guard !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw AgentError.protocolFailure("Turn 输入不能为空")
             }
-            let result = try await request(method: "turn/start", params: .object([
+            var params: [String: JSONValue] = [
                 "threadId": .string(threadID),
                 "clientUserMessageId": .string(idempotencyKey.uuidString.lowercased()),
                 "input": .array([
                     .object(["type": .string("text"), "text": .string(input.text)]),
                 ]),
-            ]))
+            ]
+            if let selectedModel { params["model"] = .string(selectedModel) }
+            if let selectedEffort { params["effort"] = .string(selectedEffort) }
+            let result = try await request(method: "turn/start", params: .object(params))
             guard let turnID = result.object?["turn"]?.object?["id"]?.string else {
                 throw AgentError.protocolFailure("turn/start 未返回 turn.id")
             }
@@ -254,6 +261,70 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 itemID: pending.request.itemID
             )
         }
+    }
+
+    func configurationOptions() async throws -> [AgentConfigOption] {
+        guard threadID != nil else {
+            throw AgentError.invalidState(expected: "thread created", actual: .starting)
+        }
+        let result = try await request(method: "model/list", params: .object([:]))
+        let available = (result.object?["data"]?.array ?? []).compactMap { item -> (String, String, [AgentConfigOption.Choice])? in
+            guard let object = item.object,
+                  let id = object["id"]?.string,
+                  !id.isEmpty,
+                  object["hidden"]?.bool != true else { return nil }
+            let choices = (object["supportedReasoningEfforts"]?.array ?? []).compactMap { effort -> AgentConfigOption.Choice? in
+                guard let name = effort.object?["reasoningEffort"]?.string else { return nil }
+                return .init(value: name, name: name)
+            }
+            return (id, object["displayName"]?.string ?? id, choices)
+        }
+        models = Dictionary(uniqueKeysWithValues: available.map { ($0.0, $0.2) })
+        defaultEfforts = Dictionary(uniqueKeysWithValues: (result.object?["data"]?.array ?? []).compactMap { item -> (String, String)? in
+            guard let model = item.object?["id"]?.string,
+                  let effort = item.object?["defaultReasoningEffort"]?.string else { return nil }
+            return (model, effort)
+        })
+        let modelChoices = available.map { AgentConfigOption.Choice(value: $0.0, name: $0.1) }
+        guard !modelChoices.isEmpty else { return [] }
+        if selectedModel == nil {
+            selectedModel = (result.object?["data"]?.array ?? []).first(where: {
+                $0.object?["isDefault"]?.bool == true && models[$0.object?["id"]?.string ?? ""] != nil
+            })?.object?["id"]?.string ?? modelChoices[0].value
+            selectedEffort = selectedModel.flatMap { defaultEfforts[$0] }
+        }
+        return currentOptions(modelChoices: modelChoices)
+    }
+
+    func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {
+        let options = try await configurationOptions()
+        guard let option = options.first(where: { $0.id == id }),
+              option.choices.contains(where: { $0.value == value }) else {
+            throw AgentError.protocolFailure("未公布的 Codex 配置选项")
+        }
+        if id == "model" {
+            selectedModel = value
+            selectedEffort = defaultEfforts[value]
+        } else if id == "effort" {
+            selectedEffort = value
+        }
+        return currentOptions(modelChoices: options[0].choices)
+    }
+
+    private func currentOptions(modelChoices: [AgentConfigOption.Choice]) -> [AgentConfigOption] {
+        guard let selectedModel else { return [] }
+        var options = [AgentConfigOption(id: "model", name: "模型", currentValue: selectedModel, choices: modelChoices)]
+        let efforts = models[selectedModel] ?? []
+        if !efforts.isEmpty {
+            options.append(AgentConfigOption(
+                id: "effort", name: "推理强度", currentValue: selectedEffort ?? efforts[0].value, choices: efforts
+            ))
+        }
+        return options
+    }
+
+    func publishConfiguration(_ options: [AgentConfigOption]) {
+        emit(.configurationUpdated(options: options))
     }
 
     func stop() async {

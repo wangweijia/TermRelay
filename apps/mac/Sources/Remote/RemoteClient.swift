@@ -355,6 +355,10 @@ actor RemoteClient {
             guard let text = payload["text"]?.string,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return .startTurn(commandId: commandId, sessionId: sessionId, text: text)
+          case "tool.config.set":
+            guard let id = payload["id"]?.string, ["model", "effort"].contains(id),
+                let value = payload["value"]?.string, !value.isEmpty, value.count <= 128 else { return nil }
+            return .setConfiguration(commandId: commandId, sessionId: sessionId, id: id, value: value)
         case "tool.turn.interrupt":
             return .interruptTurn(commandId: commandId, sessionId: sessionId)
         case "tool.approval.resolve":
@@ -724,6 +728,17 @@ extension RelayToolEvent {
             kind = "plan.updated"; data = ["text": .string(text)]
         case .turnCompleted(let turnID, let status):
             kind = "turn.completed"; data = ["turnId": .string(turnID), "status": .string(status.rawValue)]
+        case .configurationUpdated(let options):
+            kind = "config.updated"
+            data = ["options": .array(options.map { option in
+                .object([
+                    "id": .string(option.id), "name": .string(option.name),
+                    "currentValue": .string(option.currentValue),
+                    "choices": .array(option.choices.map { choice in
+                        .object(["value": .string(choice.value), "name": .string(choice.name)])
+                    }),
+                ])
+            })]
         case .warning(let code, let message):
             kind = "warning"; data = ["code": .string(code), "message": .string(message)]
         case .failed(let code, let message):

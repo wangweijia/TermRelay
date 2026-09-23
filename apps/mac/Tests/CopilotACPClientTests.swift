@@ -3,6 +3,100 @@ import XCTest
 @testable import TermRelay
 
 final class CopilotACPClientTests: XCTestCase {
+    func testCopilotAdvertisedModelCommandWithoutConfigOptions() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let runtime = CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+        )
+        let starting = Task {
+            try await runtime.start()
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
+            ))
+        }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: ["protocolVersion": 1])
+        transport.respond(to: try await transport.waitForSentMessage(at: 1), result: ["sessionId": "copilot-command"])
+        try await starting.value
+        let initial = try await runtime.configurationOptions()
+        XCTAssertTrue(initial.isEmpty)
+        transport.receive([
+            "jsonrpc": "2.0", "method": "session/update", "params": [
+                "sessionId": "copilot-command", "update": [
+                    "sessionUpdate": "available_commands_update",
+                    "availableCommands": [["name": "model", "description": "Change model"]],
+                ],
+            ],
+        ])
+        for _ in 0..<50 {
+            let options = try await runtime.configurationOptions()
+            if !options.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let options = try await runtime.configurationOptions()
+        XCTAssertEqual(options.map(\.id), ["model"])
+        XCTAssertTrue(options[0].choices.isEmpty)
+        await runtime.stop()
+    }
+
+    func testCopilotModelOptionsAndIdleUpdates() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let runtime = CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+        )
+        let starting = Task {
+            try await runtime.start()
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
+            ))
+        }
+        let initialize = try await transport.waitForSentMessage(at: 0)
+        transport.respond(to: initialize, result: ["protocolVersion": 1])
+        let newSession = try await transport.waitForSentMessage(at: 1)
+        let initial = [[
+            "id": "provider-model", "name": "Model", "category": "model", "type": "select",
+            "currentValue": "model-a", "options": [
+                ["value": "model-a", "name": "Model A"], ["value": "model-b", "name": "Model B"],
+            ],
+        ] as [String: Any]]
+        transport.respond(to: newSession, result: ["sessionId": "copilot-model", "configOptions": initial])
+        try await starting.value
+        let options = try await runtime.configurationOptions()
+        XCTAssertEqual(options.first?.currentValue, "model-a")
+
+        let changing = Task { try await runtime.setConfiguration(id: "model", value: "model-b") }
+        let request = try await transport.waitForSentMessage(at: 2)
+        XCTAssertEqual(request["method"] as? String, "session/set_config_option")
+        XCTAssertEqual((request["params"] as? [String: Any])?["configId"] as? String, "provider-model")
+        let changed = initial.map { option -> [String: Any] in
+            var copy = option
+            copy["currentValue"] = "model-b"
+            return copy
+        }
+        transport.respond(to: request, result: ["configOptions": changed])
+        let confirmed = try await changing.value
+        XCTAssertEqual(confirmed.first?.currentValue, "model-b")
+
+        transport.receive([
+            "jsonrpc": "2.0", "method": "session/update", "params": [
+                "sessionId": "copilot-model", "update": [
+                    "sessionUpdate": "config_option_update", "configOptions": initial,
+                ],
+            ],
+        ])
+        for _ in 0..<50 {
+            let latest = try await runtime.configurationOptions()
+            if latest.first?.currentValue == "model-a" { break }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let refreshed = try await runtime.configurationOptions()
+        XCTAssertEqual(refreshed.first?.currentValue, "model-a")
+        await runtime.stop()
+    }
+
     func testCopilotACPHandshakeTurnPermissionAndShutdown() async throws {
         let transport = FakeCopilotACPTransport()
         let client = CopilotACPClient(transport: transport)

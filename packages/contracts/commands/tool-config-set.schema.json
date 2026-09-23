@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-config-set.schema.json",
+  "title": "tool.config.set payload",
+  "type": "object",
+  "required": ["id", "value"],
+  "properties": {
+    "id": { "enum": ["model", "effort"] },
+    "value": { "type": "string", "minLength": 1, "maxLength": 128 }
+  },
+  "additionalProperties": false
+}

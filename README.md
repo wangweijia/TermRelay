@@ -41,6 +41,8 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 | **GitHub Copilot CLI** | ACP | 通过 Copilot CLI 官方 **ACP Server** 连接；使用前需在终端执行一次 `copilot login` |
 | **DeepSeek DSH** | ACP | 标准 **ACP v1**，每次以 `session/new` 创建隔离会话；API Key 只保存在 macOS 钥匙串，注入本地 DSH 子进程 |
 
+在已启动的结构化会话中，Codex 可从 CLI 提供的模型与推理强度列表选择，变更从下一轮开始生效。Copilot ACP 若公布模型配置选项，可直接切换；若仅公布 `/model` 命令，可在 Mac 或 Web 输入模型 ID 执行会话内模型切换（CLI 的响应会显示在会话中）。Copilot 的推理强度目前只能在启动 ACP Server 时配置，不提供会话内切换。PTY 与 DSH 不显示这些控件。
+
 新增 Agent Provider 时请先阅读 [结构化 Agent 适配层设计](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)；其中定义了通用能力模型、事件流和生命周期，接入新智能体不需要改动 Server 或 Web 的核心逻辑。
 
 ## 核心能力

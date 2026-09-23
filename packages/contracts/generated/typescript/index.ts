@@ -270,26 +270,557 @@ export const terminalOutputSchema = {
 } as const;
 
 export const toolEventSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://termrelay.local/contracts/events/tool-event.schema.json',
-  title: 'tool.event payload',
-  type: 'object',
-  required: ['kind', 'occurredAt', 'correlation', 'data'],
-  properties: {
-    kind: { enum: ['turn.started', 'user.message', 'assistant.delta', 'assistant.completed', 'reasoning.delta', 'command.started', 'command.output', 'command.completed', 'file.changed', 'approval.requested', 'approval.resolved', 'user-input.requested', 'user-input.resolved', 'plan.updated', 'turn.completed', 'warning', 'error'] },
-    occurredAt: { type: 'string', format: 'date-time' },
-    correlation: {
-      type: 'object',
-      properties: {
-        turnId: { type: 'string', minLength: 1, maxLength: 256 },
-        itemId: { type: 'string', minLength: 1, maxLength: 256 },
-        approvalId: { type: 'string', minLength: 1, maxLength: 256 },
-      },
-      additionalProperties: false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/tool-event.schema.json",
+  "title": "tool.event payload",
+  "type": "object",
+  "required": [
+    "kind",
+    "occurredAt",
+    "correlation",
+    "data"
+  ],
+  "properties": {
+    "kind": {
+      "enum": [
+        "turn.started",
+        "user.message",
+        "assistant.delta",
+        "assistant.completed",
+        "reasoning.delta",
+        "command.started",
+        "command.output",
+        "command.completed",
+        "file.changed",
+        "approval.requested",
+        "approval.resolved",
+        "user-input.requested",
+        "user-input.resolved",
+        "plan.updated",
+        "turn.completed",
+        "config.updated",
+        "warning",
+        "error"
+      ]
     },
-    data: { type: 'object' },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "itemId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object"
+    }
   },
-  additionalProperties: false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "config.updated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "options"
+            ],
+            "properties": {
+              "options": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "currentValue",
+                    "choices"
+                  ],
+                  "properties": {
+                    "id": {
+                      "enum": [
+                        "model",
+                        "effort"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "currentValue": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "choices": {
+                      "type": "array",
+                      "maxItems": 200,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "value",
+                          "name"
+                        ],
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "name": {
+                            "type": "string",
+                            "maxLength": 128
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "assistant.delta",
+              "assistant.completed",
+              "reasoning.delta",
+              "plan.updated"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 1048576
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.output"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "commandId",
+              "text"
+            ],
+            "properties": {
+              "commandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 1048576
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "turn.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "turnId"
+            ],
+            "properties": {
+              "turnId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "commandId",
+              "command"
+            ],
+            "properties": {
+              "commandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 65536
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "commandId"
+            ],
+            "properties": {
+              "commandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "exitCode": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "file.changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "itemId",
+              "summary"
+            ],
+            "properties": {
+              "itemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "approval.requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "approvalId",
+              "turnId",
+              "kind",
+              "risk",
+              "title",
+              "availableDecisions",
+              "expiresAt"
+            ],
+            "properties": {
+              "approvalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "turnId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "itemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "risk": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "detail": {
+                "type": "string",
+                "maxLength": 65536
+              },
+              "availableDecisions": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "allowOnce",
+                    "allowSession",
+                    "allowPolicy",
+                    "deny",
+                    "cancel"
+                  ]
+                }
+              },
+              "expiresAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "turn.completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "turnId",
+              "status"
+            ],
+            "properties": {
+              "turnId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "status": {
+                "enum": [
+                  "completed",
+                  "interrupted",
+                  "failed"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "approval.resolved"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "approvalId",
+              "turnId",
+              "decision"
+            ],
+            "properties": {
+              "approvalId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "turnId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "decision": {
+                "enum": [
+                  "allowOnce",
+                  "allowSession",
+                  "allowPolicy",
+                  "deny",
+                  "cancel"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "warning",
+              "error"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8192
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+} as const;
+
+export const toolConfigSetSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-config-set.schema.json",
+  "title": "tool.config.set payload",
+  "type": "object",
+  "required": [
+    "id",
+    "value"
+  ],
+  "properties": {
+    "id": {
+      "enum": [
+        "model",
+        "effort"
+      ]
+    },
+    "value": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
 } as const;
 
 export const toolTurnStartSchema = {

@@ -4,6 +4,59 @@ import XCTest
 @testable import TermRelay
 
 final class CodexAppServerClientTests: XCTestCase {
+    func testCodexModelAndEffortApplyToNextTurn() async throws {
+        let sessionID = UUID()
+        let transport = FakeCodexTransport()
+        let runtime = CodexStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "0.155.1", client: CodexAppServerClient(transport: transport, timeout: .seconds(1))
+        )
+        let starting = Task {
+            try await runtime.start()
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
+            ))
+        }
+        try await transport.respondToRequest(at: 0, result: [:])
+        try await transport.respondToRequest(at: 2, result: ["thread": ["id": "thread-model"]])
+        try await starting.value
+
+        let loading = Task { try await runtime.configurationOptions() }
+        let list = try await transport.waitForSentMessage(at: 3)
+        XCTAssertEqual(list["method"] as? String, "model/list")
+        try await transport.respondToRequest(at: 3, result: ["data": [
+            ["id": "model-a", "displayName": "Model A", "isDefault": true,
+             "defaultReasoningEffort": "low", "supportedReasoningEfforts": [
+                ["reasoningEffort": "low"], ["reasoningEffort": "high"],
+             ]],
+            ["id": "model-b", "displayName": "Model B", "defaultReasoningEffort": "medium",
+             "supportedReasoningEfforts": [["reasoningEffort": "medium"]]],
+        ]])
+        let options = try await loading.value
+        XCTAssertEqual(options.first?.currentValue, "model-a")
+        XCTAssertEqual(options.last?.currentValue, "low")
+
+        let changing = Task { try await runtime.setConfiguration(id: "effort", value: "high") }
+        try await transport.respondToRequest(at: 4, result: ["data": [
+            ["id": "model-a", "displayName": "Model A", "isDefault": true,
+             "defaultReasoningEffort": "low", "supportedReasoningEfforts": [
+                ["reasoningEffort": "low"], ["reasoningEffort": "high"],
+             ]],
+        ]])
+        let changedOptions = try await changing.value
+        XCTAssertEqual(changedOptions.last?.currentValue, "high")
+
+        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello"), idempotencyKey: UUID())) }
+        let turn = try await transport.waitForSentMessage(at: 5)
+        let params = try XCTUnwrap(turn["params"] as? [String: Any])
+        XCTAssertEqual(params["threadId"] as? String, "thread-model")
+        XCTAssertEqual(params["model"] as? String, "model-a")
+        XCTAssertEqual(params["effort"] as? String, "high")
+        try await transport.respondToRequest(at: 5, result: ["turn": ["id": "turn-model"]])
+        try await sending.value
+        await runtime.stop()
+    }
+
     func testUnixProxyCodecPerformsWebSocketUpgradeAndReadsTextFrame() async throws {
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         let codec = WebSocketPipeCodec(continuation: stream.continuation)

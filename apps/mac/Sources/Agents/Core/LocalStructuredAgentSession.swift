@@ -14,6 +14,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     @Published private(set) var timeline: [AgentTimelineItem] = []
     @Published private(set) var failureMessage: String?
     @Published private(set) var autoApproveEnabled = false
+    @Published private(set) var configurationOptions: [AgentConfigOption] = []
+    @Published private(set) var configurationUpdating = false
 
     private let adapter: any StructuredAgentAdapter
     private let environment: [String: String]
@@ -65,6 +67,9 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                         self.events.removeFirst(self.events.count - Self.maximumRetainedEvents)
                     }
                     self.eventHandler(event)
+                    if case .configurationUpdated(let options) = event.payload {
+                        self.configurationOptions = options
+                    }
                     self.scheduleAutoApproval(for: event)
                     self.enqueueTimelineEvent(event)
                 }
@@ -74,6 +79,10 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 workspaceURL: directory
             ), afterRuntimeStart: runtimeReadyHandler)
             await refreshState()
+            if let options = try? await coordinator.configurationOptions(), !options.isEmpty {
+                configurationOptions = options
+                await coordinator.publishConfiguration(options)
+            }
         } catch {
             failureMessage = error.localizedDescription
             eventTask?.cancel()
@@ -120,6 +129,24 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         guard autoApproveEnabled != enabled else { return }
         autoApproveEnabled = enabled
         if enabled { schedulePendingAutoApprovals() }
+    }
+
+    func setConfiguration(id: String, value: String) async -> RemoteCommandResult {
+        guard let coordinator else {
+            return .rejected("agent_not_ready", "The structured Agent is not ready.")
+        }
+        guard !configurationUpdating else {
+            return .rejected("agent_config_busy", "A session configuration change is already in progress.")
+        }
+        configurationUpdating = true
+        defer { configurationUpdating = false }
+        do {
+            let options = try await coordinator.setConfiguration(id: id, value: value)
+            await coordinator.publishConfiguration(options)
+            return .completed
+        } catch {
+            return .rejected("agent_config_failed", error.localizedDescription)
+        }
     }
 
     func stop() async {

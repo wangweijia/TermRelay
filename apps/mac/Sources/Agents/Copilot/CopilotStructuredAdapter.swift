@@ -89,6 +89,9 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     private var messageTask: Task<Void, Never>?
     private var promptTask: Task<Void, Never>?
     private var providerSessionID: String?
+    private var configOptions: [AgentConfigOption] = []
+    private var modelConfigID: String?
+    private var modelCommandAvailable = false
     private var activeTurnID: String?
     private var pendingApprovals: [String: PendingApproval] = [:]
     private var assistantMessages: [String: String] = [:]
@@ -146,9 +149,66 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
             throw AgentError.protocolFailure("session/new 未返回 sessionId")
         }
         providerSessionID = id
+        updateConfigOptions(result.object?["configOptions"])
         let reference = AgentSessionReference(providerID: .copilot, opaqueID: id)
         emit(.sessionStarted(reference: reference))
         return reference
+    }
+
+    func configurationOptions() async throws -> [AgentConfigOption] { visibleConfigurationOptions() }
+
+    private func visibleConfigurationOptions() -> [AgentConfigOption] {
+        if configOptions.isEmpty && modelCommandAvailable {
+            return [AgentConfigOption(id: "model", name: "模型 ID", currentValue: "", choices: [])]
+        }
+        return configOptions
+    }
+
+    func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {
+        guard let providerSessionID,
+              let option = configOptions.first(where: { $0.id == id }),
+              let modelConfigID,
+              option.choices.contains(where: { $0.value == value }) else {
+            throw AgentError.unsupportedCapability("Copilot ACP model configuration")
+        }
+        let result = try await client.request(method: "session/set_config_option", params: .object([
+            "sessionId": .string(providerSessionID), "configId": .string(modelConfigID), "value": .string(value),
+        ]))
+        guard result.object?["configOptions"]?.array != nil else {
+            throw AgentError.protocolFailure("Copilot 未确认配置变更")
+        }
+        updateConfigOptions(result.object?["configOptions"])
+        return configOptions
+    }
+
+    func publishConfiguration(_ options: [AgentConfigOption]) {
+        emit(.configurationUpdated(options: options))
+    }
+
+    private func updateConfigOptions(_ value: JSONValue?) {
+        let models = (value?.array ?? []).compactMap { item -> AgentConfigOption? in
+            guard let option = item.object,
+                  option["type"]?.string == "select",
+                  let category = option["category"]?.string,
+                  category == "model",
+                  let id = option["id"]?.string,
+                  let name = option["name"]?.string,
+                  let current = option["currentValue"]?.string else { return nil }
+            let values = (option["options"]?.array ?? []).flatMap { choice -> [JSONValue] in
+                choice.object?["options"]?.array ?? [choice]
+            }
+            let choices = values.compactMap { choice -> AgentConfigOption.Choice? in
+                guard let value = choice.object?["value"]?.string,
+                      let name = choice.object?["name"]?.string else { return nil }
+                return .init(value: value, name: name)
+            }
+            guard !choices.isEmpty else { return nil }
+            return AgentConfigOption(id: id, name: name, currentValue: current, choices: choices)
+        }
+        modelConfigID = models.first?.id
+        configOptions = models.prefix(1).map {
+            AgentConfigOption(id: "model", name: $0.name, currentValue: $0.currentValue, choices: $0.choices)
+        }
     }
 
     func send(_ action: ToolAction) async throws {
@@ -281,11 +341,23 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     }
 
     private func receiveSessionUpdate(_ params: JSONValue) {
-        guard let object = params.object,
+          guard let object = params.object,
               object["sessionId"]?.string == providerSessionID,
               let update = object["update"]?.object,
-              let kind = update["sessionUpdate"]?.string,
-              let turnID = activeTurnID else { return }
+              let kind = update["sessionUpdate"]?.string else { return }
+          if kind == "config_option_update" {
+            updateConfigOptions(update["configOptions"])
+            emit(.configurationUpdated(options: visibleConfigurationOptions()))
+            return
+        }
+        if kind == "available_commands_update" {
+            modelCommandAvailable = (update["availableCommands"]?.array ?? []).contains {
+                $0.object?["name"]?.string == "model"
+            }
+            emit(.configurationUpdated(options: visibleConfigurationOptions()))
+            return
+          }
+          guard let turnID = activeTurnID else { return }
         let itemID = update["messageId"]?.string ?? update["toolCallId"]?.string
         switch kind {
         case "agent_message_chunk":

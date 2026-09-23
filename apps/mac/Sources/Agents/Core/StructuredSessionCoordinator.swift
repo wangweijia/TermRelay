@@ -109,6 +109,22 @@ actor StructuredSessionCoordinator {
         }
     }
 
+    func configurationOptions() async throws -> [AgentConfigOption] {
+        guard state == .ready else { return [] }
+        return try await runtime.configurationOptions()
+    }
+
+    func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {
+        guard state == .ready else {
+            throw AgentError.invalidState(expected: "ready", actual: state)
+        }
+        return try await runtime.setConfiguration(id: id, value: value)
+    }
+
+    func publishConfiguration(_ options: [AgentConfigOption]) async {
+        await runtime.publishConfiguration(options)
+    }
+
     func stop() async {
         guard !stopped else { return }
         stopped = true

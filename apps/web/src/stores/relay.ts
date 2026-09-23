@@ -348,7 +348,7 @@ export const useRelayStore = defineStore('relay', {
     },
 
     sendCommand(
-      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.config.set' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
       payload: Record<string, unknown>,
     ): void {
       const session = this.selectedSession;
@@ -361,7 +361,7 @@ export const useRelayStore = defineStore('relay', {
 
     sendCommandForSession(
       sessionId: string,
-      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
+      type: 'terminal.input' | 'terminal.resize' | 'session.interrupt' | 'session.stop' | 'tool.turn.start' | 'tool.config.set' | 'tool.turn.interrupt' | 'tool.approval.resolve' | 'tool.user-input.resolve',
       payload: Record<string, unknown>,
     ): string | undefined {
       const session = this.sessions.find((item) => item.id === sessionId);
@@ -416,6 +416,10 @@ export const useRelayStore = defineStore('relay', {
       const trimmed = text.trim();
       if (!trimmed) return;
       this.sendCommand('tool.turn.start', { text: trimmed });
+    },
+
+    setToolConfiguration(id: string, value: string): void {
+      this.sendCommand('tool.config.set', { id, value });
     },
 
     interruptToolTurn(): void {

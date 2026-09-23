@@ -178,6 +178,7 @@ enum ToolEventPayload: Sendable, Equatable {
     case userInputResolved(requestID: String, turnID: String, answers: [String: [String]])
     case planUpdated(text: String)
     case turnCompleted(turnID: String, status: TurnCompletionStatus)
+    case configurationUpdated(options: [AgentConfigOption])
     case warning(code: String, message: String)
     case failed(code: String, message: String)
 }

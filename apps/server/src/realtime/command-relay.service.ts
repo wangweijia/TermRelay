@@ -11,6 +11,7 @@ export type RemoteCommandType =
   | 'session.interrupt'
   | 'session.stop'
   | 'tool.turn.start'
+  | 'tool.config.set'
   | 'tool.turn.interrupt'
   | 'tool.approval.resolve'
   | 'tool.user-input.resolve';

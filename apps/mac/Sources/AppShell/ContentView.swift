@@ -119,6 +119,8 @@ private struct StructuredAgentSessionView: View {
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
     @State private var prompt = ""
+    @State private var manualModel = ""
+    @State private var configurationError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,6 +186,39 @@ private struct StructuredAgentSessionView: View {
             .background(Color(nsColor: .textBackgroundColor))
 
             VStack(alignment: .trailing, spacing: 10) {
+                if !session.configurationOptions.isEmpty {
+                    HStack(spacing: 12) {
+                        ForEach(session.configurationOptions, id: \.id) { option in
+                            if option.choices.isEmpty && option.id == "model" {
+                                TextField("模型 ID", text: $manualModel)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 220)
+                                Button("切换模型") { submitManualModel() }
+                                    .disabled(session.state != .ready || session.configurationUpdating || !validManualModel)
+                            } else if !option.choices.isEmpty {
+                                Picker(option.name, selection: Binding(
+                                    get: { option.currentValue },
+                                    set: { value in
+                                        Task {
+                                            let result = await session.setConfiguration(id: option.id, value: value)
+                                            configurationError = result.message
+                                        }
+                                    }
+                                )) {
+                                    ForEach(option.choices, id: \.value) { choice in
+                                        Text(choice.name).tag(choice.value)
+                                    }
+                                }
+                                .fixedSize()
+                                .disabled(session.state != .ready || session.configurationUpdating)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                if let configurationError {
+                    Text(configurationError).font(.caption).foregroundStyle(.red)
+                }
                 TextEditor(text: $prompt)
                     .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
@@ -220,6 +255,23 @@ private struct StructuredAgentSessionView: View {
 
     private var canSend: Bool {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && session.state == .ready
+    }
+
+    private var validManualModel: Bool {
+        let value = manualModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !value.isEmpty && value.count <= 128 && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-")
+        }
+    }
+
+    private func submitManualModel() {
+        guard session.state == .ready, validManualModel else { return }
+        let model = manualModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        manualModel = ""
+        Task {
+            let result = await session.startTurn("/model --session \(model)", idempotencyKey: UUID())
+            configurationError = result.message
+        }
     }
 
     private func submitPrompt() {

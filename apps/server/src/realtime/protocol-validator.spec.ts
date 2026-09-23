@@ -135,6 +135,19 @@ test('accepts normalized structured Agent events and rejects incomplete approval
   assert.equal(rejected.ok, false);
 });
 
+test('validates acknowledged session configuration snapshots', () => {
+  const snapshot = (options: unknown) => ({
+    ...envelope('tool.event', {
+      kind: 'config.updated', occurredAt: new Date().toISOString(), correlation: {}, data: { options },
+    }),
+    sessionId: 'session-a', seq: 1,
+  });
+  assert.equal(validator.validate(snapshot([
+    { id: 'model', name: '模型', currentValue: 'model-a', choices: [{ value: 'model-a', name: 'Model A' }] },
+  ])).ok, true);
+  assert.equal(validator.validate(snapshot([{ id: 'sandbox', name: 'Unsafe', currentValue: 'off', choices: [] }])).ok, false);
+});
+
 test('rejects session events without context and malformed base64', () => {
   const missingContext = validator.validate(
     envelope('session.started', {

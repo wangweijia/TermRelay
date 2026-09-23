@@ -35,12 +35,24 @@ test('accepts structured turn and approval commands with command context', () =>
   const validator = new BrowserProtocolValidator();
   for (const [type, payload] of [
     ['tool.turn.start', { text: 'Inspect the failing tests' }],
+    ['tool.config.set', { id: 'model', value: 'gpt-5.4' }],
     ['tool.turn.interrupt', {}],
     ['tool.approval.resolve', { approvalId: 'approval-1', turnId: 'turn-1', decision: 'allowOnce' }],
     ['tool.user-input.resolve', { requestId: 'input-1', turnId: 'turn-1', answers: { strategy: ['修复'] } }],
   ] as const) {
     assert.equal(validator.validate({ ...envelope(type, payload), commandId: randomUUID() }).ok, true);
   }
+});
+
+test('rejects unadvertised configuration keys and values before routing', () => {
+  for (const payload of [
+    { id: 'sandbox', value: 'danger' },
+    { id: 'model', value: '' },
+    { id: 'effort', value: 'x'.repeat(129) },
+  ]) {
+    assert.equal(validator.validate({ ...envelope('tool.config.set', payload), commandId: randomUUID() }).ok, false);
+  }
+  assert.equal(validator.validate(envelope('tool.config.set', { id: 'model', value: 'gpt-5.4' })).ok, false);
 });
 
 test('rejects missing sessions, invalid payloads, and unknown messages', () => {

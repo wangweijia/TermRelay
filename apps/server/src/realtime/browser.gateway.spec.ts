@@ -120,6 +120,23 @@ test('routes validated terminal commands through the command relay', async () =>
   assert.deepEqual(commands.routed, [commandId]);
 });
 
+test('routes validated structured configuration commands through the command relay', async () => {
+  const commands = new FakeCommands();
+  const gateway = new BrowserGateway(
+    new BrowserProtocolValidator(),
+    new FakeSessionsService() as unknown as SessionsService,
+    commands as unknown as CommandRelayService,
+  );
+  const socket = new FakeSocket();
+  gateway.handleConnection(socket.asWebSocket());
+  const commandId = randomUUID();
+  await gateway.handleMessage(socket.asWebSocket(), {
+    ...envelope('tool.config.set', { id: 'model', value: 'model-a' }),
+    commandId,
+  });
+  assert.deepEqual(commands.routed, [commandId]);
+});
+
 test('sends WebSocket ping frames to connected browsers', () => {
   const gateway = new BrowserGateway(
     new BrowserProtocolValidator(),

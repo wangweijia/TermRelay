@@ -5,6 +5,7 @@ import type { SessionEventRecord, ToolEventPayload } from '../types';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
 type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean };
+type ConfigOption = { id: string; name: string; currentValue: string; choices: { value: string; name: string }[] };
 type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnter';
 
 const sendShortcutStorageKey = 'termrelay.acpSendShortcut';
@@ -42,8 +43,20 @@ const emit = defineEmits<{
   resolveApproval: [approvalId: string, turnId: string, decision: Decision];
   resolveUserInput: [requestId: string, turnId: string, answers: Record<string, string[]>];
   setAutoApprove: [enabled: boolean];
+  setConfiguration: [id: string, value: string];
 }>();
 const prompt = ref('');
+const manualModel = ref('');
+const configOptions = computed<ConfigOption[]>(() => {
+  const event = [...props.events].reverse().find((item) => item.type === 'tool.event' && item.payload.kind === 'config.updated');
+  if (!event) return [];
+  const data = event.payload.data as Record<string, unknown> | undefined;
+  if (!data) return [];
+  return records(data.options).filter((option) => ['model', 'effort'].includes(text(option, 'id'))).map((option) => ({
+    id: text(option, 'id'), name: text(option, 'name'), currentValue: text(option, 'currentValue'),
+    choices: records(option.choices).map((choice) => ({ value: text(choice, 'value'), name: text(choice, 'name') })),
+  }));
+});
 const timelineElement = ref<HTMLElement>();
 const sendShortcut = ref<SendShortcut>(loadSendShortcut());
 const answers = reactive<Record<string, string>>({});
@@ -180,6 +193,16 @@ function itemLabel(kind: string): string {
 }
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
 function submitTurn(): void { const value = prompt.value.trim(); if (value) { emit('startTurn', value); prompt.value = ''; } }
+function setOption(option: ConfigOption, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value !== option.currentValue) emit('setConfiguration', option.id, value);
+}
+function submitManualModel(): void {
+  const value = manualModel.value.trim();
+  if (!props.interactive || turnActive.value || !/^[\w.\-]{1,128}$/.test(value)) return;
+  emit('startTurn', `/model --session ${value}`);
+  manualModel.value = '';
+}
 function loadSendShortcut(): SendShortcut {
   const stored = window.localStorage.getItem(sendShortcutStorageKey);
   return shortcutOptions.some((option) => option.value === stored)
@@ -338,6 +361,21 @@ function submitAnswers(item: TimelineItem): void {
       </div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
+      <div v-if="configOptions.length" class="agent-config" aria-label="会话配置">
+        <template v-for="option in configOptions" :key="option.id">
+          <label v-if="option.choices.length" class="shortcut-picker">
+            <span>{{ option.name }}</span>
+            <select :value="option.currentValue" :disabled="!interactive || turnActive" @change="setOption(option, $event)">
+              <option v-for="choice in option.choices" :key="choice.value" :value="choice.value">{{ choice.name }}</option>
+            </select>
+          </label>
+          <div v-else-if="option.id === 'model'" class="manual-model">
+            <label for="agent-manual-model">模型 ID</label>
+            <input id="agent-manual-model" v-model="manualModel" maxlength="128" placeholder="模型 ID" :disabled="!interactive || turnActive" @keydown.enter.prevent="submitManualModel">
+            <button type="button" :disabled="!interactive || turnActive || !/^[\w.\-]{1,128}$/.test(manualModel.trim())" @click="submitManualModel">切换</button>
+          </div>
+        </template>
+      </div>
       <textarea v-model="prompt" rows="3" placeholder="发送消息给 Agent…" :disabled="!interactive" @keydown="handlePromptKeydown" />
       <div class="composer-actions">
         <label v-if="shortcutEnabled" class="shortcut-picker">

@@ -154,6 +154,7 @@ enum RemoteTerminalCommand: Sendable {
     case interrupt(commandId: UUID, sessionId: UUID)
     case stop(commandId: UUID, sessionId: UUID)
     case startTurn(commandId: UUID, sessionId: UUID, text: String)
+    case setConfiguration(commandId: UUID, sessionId: UUID, id: String, value: String)
     case interruptTurn(commandId: UUID, sessionId: UUID)
     case resolveApproval(commandId: UUID, sessionId: UUID, approvalId: String, turnId: String, decision: ApprovalDecision)
     case resolveUserInput(commandId: UUID, sessionId: UUID, requestId: String, turnId: String, answers: [String: [String]])
@@ -162,7 +163,7 @@ enum RemoteTerminalCommand: Sendable {
         switch self {
         case .input(let id, _, _), .resize(let id, _, _, _),
              .interrupt(let id, _), .stop(let id, _),
-             .startTurn(let id, _, _), .interruptTurn(let id, _),
+             .startTurn(let id, _, _), .setConfiguration(let id, _, _, _), .interruptTurn(let id, _),
              .resolveApproval(let id, _, _, _, _),
              .resolveUserInput(let id, _, _, _, _): id
         }
@@ -172,7 +173,7 @@ enum RemoteTerminalCommand: Sendable {
         switch self {
         case .input(_, let id, _), .resize(_, let id, _, _),
              .interrupt(_, let id), .stop(_, let id),
-             .startTurn(_, let id, _), .interruptTurn(_, let id),
+             .startTurn(_, let id, _), .setConfiguration(_, let id, _, _), .interruptTurn(_, let id),
              .resolveApproval(_, let id, _, _, _),
              .resolveUserInput(_, let id, _, _, _): id
         }

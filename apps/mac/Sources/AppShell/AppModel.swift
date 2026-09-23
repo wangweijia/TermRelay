@@ -527,6 +527,11 @@ final class AppModel: ObservableObject {
                 return .rejected("unknown_session", "The requested structured session is not active.")
             }
             return await session.startTurn(text, idempotencyKey: commandID)
+        case .setConfiguration(_, let sessionID, let id, let value):
+            guard let session = structuredSessions[sessionID] else {
+                return .rejected("unknown_session", "The requested structured session is not active.")
+            }
+            return await session.setConfiguration(id: id, value: value)
         case .interruptTurn(_, let sessionID):
             guard let session = structuredSessions[sessionID] else {
                 return .rejected("unknown_session", "The requested structured session is not active.")
@@ -565,7 +570,7 @@ final class AppModel: ObservableObject {
         case .stop:
             session.terminate()
             updateActiveSessionCount()
-        case .startTurn, .interruptTurn, .resolveApproval, .resolveUserInput:
+        case .startTurn, .setConfiguration, .interruptTurn, .resolveApproval, .resolveUserInput:
             break
         }
         return .completed

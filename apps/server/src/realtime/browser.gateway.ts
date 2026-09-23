@@ -133,6 +133,7 @@ export class BrowserGateway
       result.message.type === 'session.interrupt' ||
       result.message.type === 'session.stop' ||
       result.message.type === 'tool.turn.start' ||
+      result.message.type === 'tool.config.set' ||
       result.message.type === 'tool.turn.interrupt' ||
       result.message.type === 'tool.approval.resolve' ||
       result.message.type === 'tool.user-input.resolve'

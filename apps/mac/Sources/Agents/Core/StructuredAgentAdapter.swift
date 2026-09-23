@@ -17,5 +17,30 @@ protocol StructuredAgentRuntime: Actor {
     func start() async throws
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference
     func send(_ action: ToolAction) async throws
+    func configurationOptions() async throws -> [AgentConfigOption]
+    func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption]
+    func publishConfiguration(_ options: [AgentConfigOption]) async
     func stop() async
+}
+
+struct AgentConfigOption: Sendable, Equatable {
+    struct Choice: Sendable, Equatable {
+        let value: String
+        let name: String
+    }
+
+    let id: String
+    let name: String
+    let currentValue: String
+    let choices: [Choice]
+}
+
+extension StructuredAgentRuntime {
+    func configurationOptions() async throws -> [AgentConfigOption] { [] }
+
+    func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {
+        throw AgentError.unsupportedCapability("session configuration")
+    }
+
+    func publishConfiguration(_ options: [AgentConfigOption]) async {}
 }

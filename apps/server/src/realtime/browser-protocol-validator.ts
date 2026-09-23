@@ -14,6 +14,7 @@ import type {
 } from '@termrelay/contracts';
 import {
   envelopeSchema,
+  toolConfigSetSchema,
   sessionInterruptSchema,
   sessionStopSchema,
   sessionSubscribeSchema,
@@ -38,6 +39,7 @@ export type ValidBrowserMessage =
   | { type: 'session.interrupt'; envelope: Envelope<SessionInterruptPayload> }
   | { type: 'session.stop'; envelope: Envelope<SessionStopPayload> }
   | { type: 'tool.turn.start'; envelope: Envelope<ToolTurnStartPayload> }
+  | { type: 'tool.config.set'; envelope: Envelope<{ id: 'model' | 'effort'; value: string }> }
   | { type: 'tool.turn.interrupt'; envelope: Envelope<ToolTurnInterruptPayload> }
   | { type: 'tool.approval.resolve'; envelope: Envelope<ToolApprovalResolvePayload> }
   | { type: 'tool.user-input.resolve'; envelope: Envelope<ToolUserInputResolvePayload> };
@@ -71,6 +73,7 @@ export class BrowserProtocolValidator {
       ['session.interrupt', ajv.compile(sessionInterruptSchema)],
       ['session.stop', ajv.compile(sessionStopSchema)],
       ['tool.turn.start', ajv.compile(toolTurnStartSchema)],
+      ['tool.config.set', ajv.compile(toolConfigSetSchema)],
       ['tool.turn.interrupt', ajv.compile(toolTurnInterruptSchema)],
       ['tool.approval.resolve', ajv.compile(toolApprovalResolveSchema)],
       ['tool.user-input.resolve', ajv.compile(toolUserInputResolveSchema)],
@@ -135,6 +138,8 @@ function asValidBrowserMessage(envelope: Envelope): BrowserValidationResult {
       return valid(envelope.type, envelope as unknown as Envelope<SessionStopPayload>);
     case 'tool.turn.start':
       return valid(envelope.type, envelope as unknown as Envelope<ToolTurnStartPayload>);
+    case 'tool.config.set':
+      return valid(envelope.type, envelope as unknown as Envelope<{ id: 'model' | 'effort'; value: string }>);
     case 'tool.turn.interrupt':
       return valid(envelope.type, envelope as unknown as Envelope<ToolTurnInterruptPayload>);
     case 'tool.approval.resolve':
@@ -154,7 +159,7 @@ function valid<TType extends ValidBrowserMessage['type']>(
 }
 
 function isRemoteCommand(type: string): boolean {
-  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop', 'tool.turn.start', 'tool.turn.interrupt', 'tool.approval.resolve', 'tool.user-input.resolve'].includes(type);
+  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop', 'tool.turn.start', 'tool.config.set', 'tool.turn.interrupt', 'tool.approval.resolve', 'tool.user-input.resolve'].includes(type);
 }
 
 function invalid(

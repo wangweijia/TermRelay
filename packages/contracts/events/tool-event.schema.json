@@ -22,6 +22,7 @@
         "user-input.resolved",
         "plan.updated",
         "turn.completed",
+        "config.updated",
         "warning",
         "error"
       ]
@@ -39,6 +40,45 @@
     "data": { "type": "object" }
   },
   "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "config.updated" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "array", "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "required": ["id", "name", "currentValue", "choices"],
+                  "properties": {
+                    "id": { "enum": ["model", "effort"] },
+                    "name": { "type": "string", "maxLength": 128 },
+                    "currentValue": { "type": "string", "maxLength": 128 },
+                    "choices": {
+                      "type": "array", "maxItems": 200,
+                      "items": {
+                        "type": "object",
+                        "required": ["value", "name"],
+                        "properties": {
+                          "value": { "type": "string", "minLength": 1, "maxLength": 128 },
+                          "name": { "type": "string", "maxLength": 128 }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     {
       "if": { "properties": { "kind": { "enum": ["assistant.delta", "assistant.completed", "reasoning.delta", "plan.updated"] } } },
       "then": {
