@@ -348,6 +348,28 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
   color: #8fa5b8;
   font-size: 12px;
 }
+.turn-completed {
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+  padding: 8px 11px;
+  color: #91cdaa;
+  font-size: 12px;
+}
+.turn-completed-icon {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 1px solid #3d7657;
+  border-radius: 50%;
+  color: #9ce1b8;
+  background: #14261c;
+  font-size: 11px;
+  line-height: 1;
+}
 .turn-loading-dots { display: inline-flex; gap: 4px; }
 .turn-loading-dots i { width: 6px; height: 6px; border-radius: 50%; background: #6aa7e8; animation: turn-loading-bounce 1s ease-in-out infinite; }
 .turn-loading-dots i:nth-child(2) { animation-delay: .15s; }

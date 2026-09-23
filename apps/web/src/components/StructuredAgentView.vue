@@ -52,6 +52,7 @@ const timeline = shallowRef<TimelineItem[]>([]);
 const timelineById = new Map<string, TimelineItem>();
 const turnActive = ref(false);
 const awaitingHuman = ref(false);
+const turnCompleted = ref(false);
 const showTurnLoading = computed(() => turnActive.value && !awaitingHuman.value);
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
@@ -82,6 +83,7 @@ function syncTimeline(): void {
     processedLastSeq = undefined;
     turnActive.value = false;
     awaitingHuman.value = false;
+    turnCompleted.value = false;
   }
   let changed = false;
   for (let index = processedEventCount; index < props.events.length; index += 1) {
@@ -97,8 +99,18 @@ function syncTimeline(): void {
 
 function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void {
     const { kind, data, correlation } = event.payload;
-    if (kind === 'turn.started') { turnActive.value = true; awaitingHuman.value = false; return; }
-    if (kind === 'turn.completed') { turnActive.value = false; awaitingHuman.value = false; return; }
+    if (kind === 'turn.started') {
+      turnActive.value = true;
+      awaitingHuman.value = false;
+      turnCompleted.value = false;
+      return;
+    }
+    if (kind === 'turn.completed') {
+      turnActive.value = false;
+      awaitingHuman.value = false;
+      turnCompleted.value = text(data, 'status') === 'completed';
+      return;
+    }
     if (kind === 'approval.requested' || kind === 'user-input.requested') awaitingHuman.value = true;
     if (kind === 'approval.resolved' || kind === 'user-input.resolved') {
       const prefix = kind === 'approval.resolved' ? 'approval' : 'input';
@@ -228,6 +240,7 @@ watch([() => props.events.length, () => props.events.at(-1)?.seq], syncTimeline,
 watch(() => props.scrollRevision, () => void scrollToLatest(true));
 watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
 watch(showTurnLoading, () => void scrollToLatest(false));
+watch(turnCompleted, () => void scrollToLatest(false));
 watch(() => props.loadingOlder, async (loading, wasLoading) => {
   if (loading || !wasLoading || !loadingOlderRequested) return;
   await nextTick();
@@ -318,6 +331,10 @@ function submitAnswers(item: TimelineItem): void {
       <div v-if="showTurnLoading" class="turn-loading" aria-live="polite">
         <span class="turn-loading-dots"><i /><i /><i /></span>
         <span>Agent 正在处理</span>
+      </div>
+      <div v-else-if="turnCompleted" class="turn-completed" role="status">
+        <span class="turn-completed-icon" aria-hidden="true">✓</span>
+        <span>任务已完成</span>
       </div>
     </div>
     <form class="agent-composer" @submit.prevent="submitTurn">
