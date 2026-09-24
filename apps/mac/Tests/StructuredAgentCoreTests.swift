@@ -193,22 +193,21 @@ final class StructuredAgentCoreTests: XCTestCase {
         await session.stop()
     }
 
+    @MainActor
     func testLocalSessionRestoresLastModelAndEffortPerProvider() async throws {
         let suiteName = "AgentConfiguration-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let firstRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
-        let first = await MainActor.run {
-            LocalStructuredAgentSession(
-                directory: URL(fileURLWithPath: "/tmp"),
-                adapter: FixedRuntimeAdapter(runtime: firstRuntime),
-                defaults: defaults,
-                eventHandler: { _ in }, stateHandler: { _, _ in }
-            )
-        }
+        let first = LocalStructuredAgentSession(
+            directory: URL(fileURLWithPath: "/tmp"),
+            adapter: FixedRuntimeAdapter(runtime: firstRuntime),
+            defaults: defaults,
+            eventHandler: { _ in }, stateHandler: { _, _ in }
+        )
         await first.start()
-        let initialOptions = await first.configurationOptions
+        let initialOptions = first.configurationOptions
         XCTAssertEqual(initialOptions.first?.currentValue, "model-a")
         let modelChange = await first.setConfiguration(id: "model", value: "model-b")
         XCTAssertTrue(modelChange.succeeded)
@@ -217,30 +216,26 @@ final class StructuredAgentCoreTests: XCTestCase {
         await first.stop()
 
         let otherRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
-        let other = await MainActor.run {
-            LocalStructuredAgentSession(
-                directory: URL(fileURLWithPath: "/tmp"),
-                adapter: FixedRuntimeAdapter(providerID: .copilot, runtime: otherRuntime),
-                defaults: defaults,
-                eventHandler: { _ in }, stateHandler: { _, _ in }
-            )
-        }
+        let other = LocalStructuredAgentSession(
+            directory: URL(fileURLWithPath: "/tmp"),
+            adapter: FixedRuntimeAdapter(providerID: .copilot, runtime: otherRuntime),
+            defaults: defaults,
+            eventHandler: { _ in }, stateHandler: { _, _ in }
+        )
         await other.start()
-        let otherOptions = await other.configurationOptions
+        let otherOptions = other.configurationOptions
         XCTAssertEqual(otherOptions.first?.currentValue, "model-a")
         await other.stop()
 
         let secondRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
-        let second = await MainActor.run {
-            LocalStructuredAgentSession(
-                directory: URL(fileURLWithPath: "/tmp"),
-                adapter: FixedRuntimeAdapter(runtime: secondRuntime),
-                defaults: defaults,
-                eventHandler: { _ in }, stateHandler: { _, _ in }
-            )
-        }
+        let second = LocalStructuredAgentSession(
+            directory: URL(fileURLWithPath: "/tmp"),
+            adapter: FixedRuntimeAdapter(runtime: secondRuntime),
+            defaults: defaults,
+            eventHandler: { _ in }, stateHandler: { _, _ in }
+        )
         await second.start()
-        let restored = await second.configurationOptions
+        let restored = second.configurationOptions
         XCTAssertEqual(restored.first(where: { $0.id == "model" })?.currentValue, "model-b")
         XCTAssertEqual(restored.first(where: { $0.id == "effort" })?.currentValue, "high")
         let changes = await secondRuntime.configurationChanges()
