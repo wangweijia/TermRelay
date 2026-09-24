@@ -70,16 +70,21 @@ const showTurnLoading = computed(() => turnActive.value && !awaitingHuman.value)
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
 let loadingOlderRequested = false;
-let previousVirtualSize = 0;
 let previousTimelineScrollTop = 0;
 
-const virtualizer = useVirtualizer(computed(() => ({
-  count: timeline.value.length,
-  getScrollElement: () => timelineElement.value ?? null,
-  estimateSize: () => 112,
-  overscan: 10,
-  useAnimationFrameWithResizeObserver: true,
-})));
+const virtualizer = useVirtualizer(computed(() => {
+  const items = timeline.value;
+  return {
+    count: items.length,
+    getScrollElement: () => timelineElement.value ?? null,
+    getItemKey: (index: number) => items[index]!.id,
+    estimateSize: () => 112,
+    overscan: 10,
+    anchorTo: 'end',
+    followOnAppend: true,
+    scrollEndThreshold: 80,
+  };
+}));
 
 function measureVirtualElement(value: unknown): void {
   if (value instanceof Element) virtualizer.value.measureElement(value);
@@ -226,7 +231,6 @@ let timelinePinnedToBottom = true;
 function requestOlderHistory(): void {
   if (!props.hasOlder || props.loadingOlder || loadingOlderRequested) return;
   loadingOlderRequested = true;
-  previousVirtualSize = virtualizer.value.getTotalSize();
   emit('loadOlder');
 }
 function handleTimelineScroll(): void {
@@ -264,15 +268,8 @@ watch(() => props.scrollRevision, () => void scrollToLatest(true));
 watch(() => props.events.at(-1)?.seq, () => void scrollToLatest(false));
 watch(showTurnLoading, () => void scrollToLatest(false));
 watch(turnCompleted, () => void scrollToLatest(false));
-watch(() => props.loadingOlder, async (loading, wasLoading) => {
+watch(() => props.loadingOlder, (loading, wasLoading) => {
   if (loading || !wasLoading || !loadingOlderRequested) return;
-  await nextTick();
-  const sizeDelta = virtualizer.value.getTotalSize() - previousVirtualSize;
-  const element = timelineElement.value;
-  if (element && sizeDelta > 0) {
-    element.scrollTop += sizeDelta;
-    previousTimelineScrollTop = element.scrollTop;
-  }
   loadingOlderRequested = false;
 });
 watch(() => props.hasOlder, (hasOlder) => {

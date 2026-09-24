@@ -193,6 +193,61 @@ final class StructuredAgentCoreTests: XCTestCase {
         await session.stop()
     }
 
+    func testLocalSessionRestoresLastModelAndEffortPerProvider() async throws {
+        let suiteName = "AgentConfiguration-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let firstRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
+        let first = await MainActor.run {
+            LocalStructuredAgentSession(
+                directory: URL(fileURLWithPath: "/tmp"),
+                adapter: FixedRuntimeAdapter(runtime: firstRuntime),
+                defaults: defaults,
+                eventHandler: { _ in }, stateHandler: { _, _ in }
+            )
+        }
+        await first.start()
+        let initialOptions = await first.configurationOptions
+        XCTAssertEqual(initialOptions.first?.currentValue, "model-a")
+        let modelChange = await first.setConfiguration(id: "model", value: "model-b")
+        XCTAssertTrue(modelChange.succeeded)
+        let effortChange = await first.setConfiguration(id: "effort", value: "high")
+        XCTAssertTrue(effortChange.succeeded)
+        await first.stop()
+
+        let otherRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
+        let other = await MainActor.run {
+            LocalStructuredAgentSession(
+                directory: URL(fileURLWithPath: "/tmp"),
+                adapter: FixedRuntimeAdapter(providerID: .copilot, runtime: otherRuntime),
+                defaults: defaults,
+                eventHandler: { _ in }, stateHandler: { _, _ in }
+            )
+        }
+        await other.start()
+        let otherOptions = await other.configurationOptions
+        XCTAssertEqual(otherOptions.first?.currentValue, "model-a")
+        await other.stop()
+
+        let secondRuntime = FakeAgentRuntime(sessionID: UUID(), supportsConfiguration: true)
+        let second = await MainActor.run {
+            LocalStructuredAgentSession(
+                directory: URL(fileURLWithPath: "/tmp"),
+                adapter: FixedRuntimeAdapter(runtime: secondRuntime),
+                defaults: defaults,
+                eventHandler: { _ in }, stateHandler: { _, _ in }
+            )
+        }
+        await second.start()
+        let restored = await second.configurationOptions
+        XCTAssertEqual(restored.first(where: { $0.id == "model" })?.currentValue, "model-b")
+        XCTAssertEqual(restored.first(where: { $0.id == "effort" })?.currentValue, "high")
+        let changes = await secondRuntime.configurationChanges()
+        XCTAssertEqual(changes, ["model", "effort"])
+        await second.stop()
+    }
+
     private func settle() async {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(10))
@@ -220,9 +275,14 @@ private struct FakeAgentAdapter: StructuredAgentAdapter {
 }
 
 private struct FixedRuntimeAdapter: StructuredAgentAdapter {
-    let providerID = AgentProviderID.fake
+    let providerID: AgentProviderID
     let displayName = "Fixed Fake Agent"
     let runtime: FakeAgentRuntime
+
+    init(providerID: AgentProviderID = .fake, runtime: FakeAgentRuntime) {
+        self.providerID = providerID
+        self.runtime = runtime
+    }
 
     func detect() async throws -> AgentInstallation {
         AgentInstallation(
@@ -255,9 +315,14 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
     private(set) var actions: [ToolAction] = []
     private(set) var stopCount = 0
     private var shouldFailNextSend = false
+    private let supportsConfiguration: Bool
+    private var selectedModel = "model-a"
+    private var selectedEffort = "low"
+    private var changedConfigurationIDs: [String] = []
 
-    init(sessionID: UUID) {
+    init(sessionID: UUID, supportsConfiguration: Bool = false) {
         self.sessionID = sessionID
+        self.supportsConfiguration = supportsConfiguration
         let stream = AsyncStream<ToolEvent>.makeStream()
         events = stream.stream
         continuation = stream.continuation
@@ -268,6 +333,34 @@ private actor FakeAgentRuntime: StructuredAgentRuntime {
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference {
         AgentSessionReference(providerID: .fake, opaqueID: request.sessionID.uuidString)
     }
+
+    func configurationOptions() throws -> [AgentConfigOption] {
+        guard supportsConfiguration else { return [] }
+        return [
+            AgentConfigOption(id: "model", name: "Model", currentValue: selectedModel, choices: [
+                .init(value: "model-a", name: "Model A"), .init(value: "model-b", name: "Model B")
+            ]),
+            AgentConfigOption(id: "effort", name: "Effort", currentValue: selectedEffort, choices: [
+                .init(value: "low", name: "Low"), .init(value: "high", name: "High")
+            ])
+        ]
+    }
+
+    func setConfiguration(id: String, value: String) throws -> [AgentConfigOption] {
+        guard try configurationOptions().contains(where: {
+            $0.id == id && $0.choices.contains(where: { $0.value == value })
+        }) else { throw AgentError.protocolFailure("unsupported configuration") }
+        changedConfigurationIDs.append(id)
+        if id == "model" {
+            selectedModel = value
+            selectedEffort = "low"
+        } else {
+            selectedEffort = value
+        }
+        return try configurationOptions()
+    }
+
+    func configurationChanges() -> [String] { changedConfigurationIDs }
 
     func send(_ action: ToolAction) async throws {
         if shouldFailNextSend {

@@ -406,6 +406,7 @@ final class AppModel: ObservableObject {
             id: sessionID,
             directory: sessionDirectory,
             adapter: adapter,
+            defaults: defaults,
             environment: environment,
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }

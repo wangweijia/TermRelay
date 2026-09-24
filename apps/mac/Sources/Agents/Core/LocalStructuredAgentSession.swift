@@ -18,6 +18,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     @Published private(set) var configurationUpdating = false
 
     private let adapter: any StructuredAgentAdapter
+    private let defaults: UserDefaults
     private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
@@ -32,6 +33,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         id: UUID = UUID(),
         directory: URL,
         adapter: any StructuredAgentAdapter,
+        defaults: UserDefaults = .standard,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
@@ -40,6 +42,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.id = id
         self.directory = directory
         self.adapter = adapter
+        self.defaults = defaults
         self.environment = environment
         self.eventHandler = eventHandler
         self.stateHandler = stateHandler
@@ -79,9 +82,19 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 workspaceURL: directory
             ), afterRuntimeStart: runtimeReadyHandler)
             await refreshState()
-            if let options = try? await coordinator.configurationOptions(), !options.isEmpty {
+            if var options = try? await coordinator.configurationOptions(), !options.isEmpty {
+                let saved = defaults.dictionary(forKey: configurationKey) as? [String: String] ?? [:]
+                for id in ["model", "effort"] {
+                    guard let value = saved[id],
+                          let option = options.first(where: { $0.id == id }),
+                          option.currentValue != value,
+                          option.choices.contains(where: { $0.value == value }),
+                          let restored = try? await coordinator.setConfiguration(id: id, value: value) else { continue }
+                    options = restored
+                }
                 configurationOptions = options
                 await coordinator.publishConfiguration(options)
+                persistConfiguration(options)
             }
         } catch {
             failureMessage = error.localizedDescription
@@ -143,6 +156,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         do {
             let options = try await coordinator.setConfiguration(id: id, value: value)
             await coordinator.publishConfiguration(options)
+            persistConfiguration(options)
             return .completed
         } catch {
             return .rejected("agent_config_failed", error.localizedDescription)
@@ -178,6 +192,20 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         guard let coordinator else { return }
         let snapshot = await coordinator.snapshot()
         setState(snapshot.state)
+    }
+
+    private var configurationKey: String {
+        "agentConfiguration.\(adapter.providerID.rawValue)"
+    }
+
+    private func persistConfiguration(_ options: [AgentConfigOption]) {
+        let values = Dictionary(uniqueKeysWithValues: options.compactMap { option -> (String, String)? in
+            guard (option.id == "model" || option.id == "effort"),
+                  !option.currentValue.isEmpty,
+                  option.choices.contains(where: { $0.value == option.currentValue }) else { return nil }
+            return (option.id, option.currentValue)
+        })
+        if !values.isEmpty { defaults.set(values, forKey: configurationKey) }
     }
 
     private func setState(_ value: StructuredSessionState) {
