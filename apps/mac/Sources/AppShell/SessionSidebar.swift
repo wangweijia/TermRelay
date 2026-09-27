@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct SessionSidebar: View {
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     let sessions: [ManagedSession]
     let terminalSessions: [UUID: LocalTerminalSession]
     let structuredSessions: [UUID: LocalStructuredAgentSession]
@@ -26,6 +28,7 @@ struct SessionSidebar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            .overlay(alignment: .bottom) { horizontalSeparator }
 
             if sessions.isEmpty {
                 VStack(spacing: 8) {
@@ -58,13 +61,33 @@ struct SessionSidebar: View {
                     }
                 }
                 .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
             }
 
-            Divider()
             ConnectionFooter()
+                .overlay(alignment: .top) { horizontalSeparator }
         }
         .navigationTitle("TermRelay")
         .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(separatorColor)
+                .frame(width: separatorWidth)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var horizontalSeparator: some View {
+        Rectangle()
+            .fill(separatorColor)
+            .frame(height: separatorWidth)
+            .allowsHitTesting(false)
+    }
+
+    private var separatorWidth: CGFloat { 1 / displayScale }
+
+    private var separatorColor: Color {
+        Color.primary.opacity(colorSchemeContrast == .increased ? 0.38 : 0.24)
     }
 }
 
