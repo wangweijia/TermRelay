@@ -317,8 +317,10 @@ private struct CopilotHistoryView: View {
                 }
                 .padding()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: archive.id) {
             do { _ = try await appModel.loadCopilotHistory(archive) }
             catch { self.error = error.localizedDescription }
@@ -332,8 +334,6 @@ private struct StructuredAgentSessionView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
-    @State private var prompt = ""
-    @State private var manualModel = ""
     @State private var configurationError: String?
 
     var body: some View {
@@ -410,7 +410,7 @@ private struct StructuredAgentSessionView: View {
                     HStack(spacing: 12) {
                         ForEach(session.configurationOptions, id: \.id) { option in
                             if option.choices.isEmpty && option.id == "model" {
-                                TextField("模型 ID", text: $manualModel)
+                                TextField("模型 ID", text: $session.manualModelDraft)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: 220)
                                 Button("切换模型") { submitManualModel() }
@@ -439,7 +439,7 @@ private struct StructuredAgentSessionView: View {
                 if let configurationError {
                     Text(configurationError).font(.caption).foregroundStyle(.red)
                 }
-                TextEditor(text: $prompt)
+                TextEditor(text: $session.promptDraft)
                     .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
@@ -481,7 +481,8 @@ private struct StructuredAgentSessionView: View {
     }
 
     private var canSend: Bool {
-        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && session.state == .ready
+        !session.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && session.state == .ready
     }
 
     private var visibleTimeline: [AgentTimelineItem] {
@@ -492,7 +493,7 @@ private struct StructuredAgentSessionView: View {
     }
 
     private var validManualModel: Bool {
-        let value = manualModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = session.manualModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         return !value.isEmpty && value.count <= 128 && value.allSatisfy {
             $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-")
         }
@@ -500,8 +501,8 @@ private struct StructuredAgentSessionView: View {
 
     private func submitManualModel() {
         guard session.state == .ready, validManualModel else { return }
-        let model = manualModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        manualModel = ""
+        let model = session.manualModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        session.manualModelDraft = ""
         Task {
             let result = await session.startTurn("/model --session \(model)", idempotencyKey: UUID())
             configurationError = result.message
@@ -510,8 +511,8 @@ private struct StructuredAgentSessionView: View {
 
     private func submitPrompt() {
         guard canSend else { return }
-        let text = prompt
-        prompt = ""
+        let text = session.promptDraft
+        session.promptDraft = ""
         Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
     }
 
@@ -535,7 +536,6 @@ private extension ACPSendShortcut {
 private struct AgentTimelineRow: View {
     let item: AgentTimelineItem
     @ObservedObject var session: LocalStructuredAgentSession
-
     @ViewBuilder
     var body: some View {
         switch item {
@@ -783,8 +783,14 @@ private struct AgentApprovalToast: View {
 private struct AgentUserInputCard: View {
     let value: AgentUserInputViewState
     @ObservedObject var session: LocalStructuredAgentSession
-    @State private var selected: [String: String] = [:]
-    @State private var custom: [String: String] = [:]
+
+    private var selected: [String: String] {
+        session.userInputSelections[value.request.requestID] ?? [:]
+    }
+
+    private var custom: [String: String] {
+        session.userInputCustomAnswers[value.request.requestID] ?? [:]
+    }
 
     var body: some View {
         AgentCard(title: "Agent 需要你的回答", icon: "questionmark.bubble") {
@@ -822,11 +828,15 @@ private struct AgentUserInputCard: View {
                         return (question.id, [answer?.isEmpty == false ? answer! : selected[question.id] ?? ""])
                     })
                     Task {
-                        _ = await session.resolveUserInput(
+                        let result = await session.resolveUserInput(
                             requestID: value.request.requestID,
                             turnID: value.request.turnID,
                             answers: answers
                         )
+                        if result.succeeded {
+                            session.userInputSelections[value.request.requestID] = nil
+                            session.userInputCustomAnswers[value.request.requestID] = nil
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -843,11 +853,17 @@ private struct AgentUserInputCard: View {
     }
 
     private func binding(for id: String) -> Binding<String> {
-        Binding(get: { selected[id] ?? "" }, set: { selected[id] = $0 })
+        Binding(
+            get: { selected[id] ?? "" },
+            set: { session.userInputSelections[value.request.requestID, default: [:]][id] = $0 }
+        )
     }
 
     private func customBinding(for id: String) -> Binding<String> {
-        Binding(get: { custom[id] ?? "" }, set: { custom[id] = $0 })
+        Binding(
+            get: { custom[id] ?? "" },
+            set: { session.userInputCustomAnswers[value.request.requestID, default: [:]][id] = $0 }
+        )
     }
 }
 

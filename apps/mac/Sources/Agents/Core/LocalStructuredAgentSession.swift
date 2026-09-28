@@ -17,6 +17,10 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     @Published private(set) var autoApproveEnabled = false
     @Published private(set) var configurationOptions: [AgentConfigOption] = []
     @Published private(set) var configurationUpdating = false
+    @Published var promptDraft = ""
+    @Published var manualModelDraft = ""
+    @Published var userInputSelections: [String: [String: String]] = [:]
+    @Published var userInputCustomAnswers: [String: [String: String]] = [:]
 
     private let adapter: any StructuredAgentAdapter
     let providerSessionID: String?
@@ -80,6 +84,10 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                     self.eventHandler(event)
                     if case .configurationUpdated(let options) = event.payload {
                         self.configurationOptions = options
+                    }
+                    if case .userInputResolved(let requestID, _, _) = event.payload {
+                        self.userInputSelections[requestID] = nil
+                        self.userInputCustomAnswers[requestID] = nil
                     }
                     self.scheduleAutoApproval(for: event)
                     self.enqueueTimelineEvent(event)

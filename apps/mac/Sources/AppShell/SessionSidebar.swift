@@ -73,6 +73,7 @@ struct SessionSidebar: View {
                     systemImage: "clock.arrow.circlepath",
                     description: Text("连接 Server 后可查看这台 Mac 的 Copilot 历史。")
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $selection) {
                     if tab == .active {
@@ -120,6 +121,7 @@ struct SessionSidebar: View {
             ConnectionFooter()
                 .overlay(alignment: .top) { horizontalSeparator }
         }
+        .frame(maxHeight: .infinity)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
