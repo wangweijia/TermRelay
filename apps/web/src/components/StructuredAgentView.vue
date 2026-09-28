@@ -6,7 +6,7 @@ import { isAgentMarkdown, renderAgentMarkdown } from '../agent-markdown';
 import { approvalPresentation } from '../approval-presentation';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
-type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean; decision?: unknown };
+type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean; decision?: unknown; sourceId?: string; turnId?: string; isStreaming?: boolean };
 type ConfigOption = { id: string; name: string; currentValue: string; choices: { value: string; name: string }[] };
 type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnter';
 
@@ -68,6 +68,7 @@ const timelineById = new Map<string, TimelineItem>();
 const turnActive = ref(false);
 const awaitingHuman = ref(false);
 const turnCompleted = ref(false);
+const turnCompletedWithAnswer = ref(false);
 const showTurnLoading = computed(() => turnActive.value && !awaitingHuman.value);
 let processedEventCount = 0;
 let processedLastSeq: number | undefined;
@@ -104,6 +105,7 @@ function syncTimeline(): void {
     turnActive.value = false;
     awaitingHuman.value = false;
     turnCompleted.value = false;
+    turnCompletedWithAnswer.value = false;
   }
   let changed = false;
   for (let index = processedEventCount; index < props.events.length; index += 1) {
@@ -123,12 +125,17 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
       turnActive.value = true;
       awaitingHuman.value = false;
       turnCompleted.value = false;
+      turnCompletedWithAnswer.value = false;
       return;
     }
     if (kind === 'turn.completed') {
       turnActive.value = false;
       awaitingHuman.value = false;
       turnCompleted.value = text(data, 'status') === 'completed';
+      const lastAnswer = [...timeline.value].reverse().find((item) =>
+        item.kind === 'assistant' && item.turnId === text(data, 'turnId') && !item.isStreaming);
+      if (turnCompleted.value && lastAnswer) moveToEnd(lastAnswer);
+      turnCompletedWithAnswer.value = turnCompleted.value && !!lastAnswer;
       return;
     }
     if (kind === 'approval.requested' || kind === 'user-input.requested') awaitingHuman.value = true;
@@ -159,12 +166,7 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
       return;
     }
     if (kind === 'assistant.delta' || kind === 'assistant.completed') {
-      const id = `assistant:${identity}`;
-      const prior = timelineById.get(id);
-      if (prior) prior.text = kind === 'assistant.completed'
-        ? text(data, 'text').slice(-MAX_STREAMING_TEXT)
-        : appendBounded(prior.text ?? '', text(data, 'text'), MAX_STREAMING_TEXT);
-      else { const item = { id, kind: 'assistant', data, text: text(data, 'text') }; timeline.value.push(item); timelineById.set(id, item); }
+      updateAssistant(kind, identity, correlation.turnId, text(data, 'text'), event.seq, data);
       return;
     }
     if (kind === 'file.changed') {
@@ -185,6 +187,54 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
     const item = { id, kind, data, text: text(data, 'text'), resolved: false };
     timeline.value.push(item); timelineById.set(id, item);
 }
+function moveToEnd(item: TimelineItem): void {
+  const index = timeline.value.indexOf(item);
+  if (index >= 0 && index !== timeline.value.length - 1) {
+    timeline.value.splice(index, 1);
+    timeline.value.push(item);
+  }
+}
+function updateAssistant(
+  kind: 'assistant.delta' | 'assistant.completed',
+  sourceId: string,
+  turnId: string | undefined,
+  content: string,
+  seq: number,
+  data: Record<string, unknown>,
+): void {
+  const segments = timeline.value.filter((item) =>
+    item.kind === 'assistant' && item.sourceId === sourceId && item.turnId === turnId);
+  const last = segments.at(-1);
+  if (kind === 'assistant.delta') {
+    if (last?.isStreaming && timeline.value.at(-1) === last) {
+      last.text = appendBounded(last.text ?? '', content, MAX_STREAMING_TEXT);
+      last.isStreaming = true;
+    } else {
+      const id = segments.length ? `assistant:${sourceId}:segment-${seq}` : `assistant:${sourceId}`;
+      const item: TimelineItem = { id, kind: 'assistant', data, text: content, sourceId, turnId, isStreaming: true };
+      timeline.value.push(item);
+      timelineById.set(id, item);
+    }
+    return;
+  }
+  const completeText = content.slice(-MAX_STREAMING_TEXT);
+  const streamedText = segments.map((item) => item.text ?? '').join('');
+  if (!last || !content.startsWith(streamedText)) {
+    for (const segment of segments) {
+      timeline.value.splice(timeline.value.indexOf(segment), 1);
+      timelineById.delete(segment.id);
+    }
+    const id = `assistant:${sourceId}`;
+    const item: TimelineItem = { id, kind: 'assistant', data, text: completeText, sourceId, turnId, isStreaming: false };
+    timeline.value.push(item);
+    timelineById.set(id, item);
+    return;
+  }
+  const precedingLength = streamedText.length - (last.text?.length ?? 0);
+  last.text = content.slice(precedingLength).slice(-MAX_STREAMING_TEXT);
+  last.isStreaming = false;
+  moveToEnd(last);
+}
 function text(data: Record<string, unknown>, field: string): string { return typeof data[field] === 'string' ? data[field] : ''; }
 function appendBounded(current: string, addition: string, maximum: number): string {
   const combined = current + addition;
@@ -202,7 +252,13 @@ function itemLabel(kind: string): string {
   return kind;
 }
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
-function submitTurn(): void { const value = prompt.value.trim(); if (value) { emit('startTurn', value); prompt.value = ''; } }
+function submitTurn(): void {
+  const value = prompt.value.trim();
+  if (props.interactive && !turnActive.value && value) {
+    emit('startTurn', value);
+    prompt.value = '';
+  }
+}
 function setOption(option: ConfigOption, event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
   if (value !== option.currentValue) emit('setConfiguration', option.id, value);
@@ -363,7 +419,7 @@ function submitAnswers(item: TimelineItem): void {
         <span class="turn-loading-dots"><i /><i /><i /></span>
         <span>Agent 正在处理</span>
       </div>
-      <div v-else-if="turnCompleted" class="turn-completed" role="status">
+      <div v-else-if="turnCompleted && !turnCompletedWithAnswer" class="turn-completed" role="status">
         <span class="turn-completed-icon" aria-hidden="true">✓</span>
         <span>任务已完成</span>
       </div>
@@ -397,8 +453,8 @@ function submitAnswers(item: TimelineItem): void {
             <input :checked="autoApproveEnabled" :disabled="autoApproveUpdating" type="checkbox" @change="updateAutoApprove">
             <span>自动审批通过</span>
           </label>
-          <button type="button" :disabled="!interactive" @click="emit('interrupt')">中断</button>
-          <button type="submit" class="approve" :disabled="!interactive || !prompt.trim()">发送</button>
+          <button type="button" class="interrupt-turn" title="取消本次发送后正在执行的任务；不会关闭会话，也不能从中断处继续" :disabled="!interactive || !turnActive" @click="emit('interrupt')">中断当前任务</button>
+          <button type="submit" class="approve" :disabled="!interactive || turnActive || !prompt.trim()">发送并执行</button>
         </div>
       </div>
     </form>

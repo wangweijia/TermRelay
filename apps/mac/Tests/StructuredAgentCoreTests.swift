@@ -156,6 +156,64 @@ final class StructuredAgentCoreTests: XCTestCase {
         XCTAssertEqual(items, [.reasoning(id: "turn-a", text: "正在分析项目结构")])
     }
 
+    func testAssistantAnswerFollowsCommandAndCompletionWithoutDuplicatingText() {
+        let sessionID = UUID()
+        var items: [AgentTimelineItem] = []
+        func apply(_ sequence: UInt64, _ payload: ToolEventPayload, itemID: String? = nil) {
+            AgentTimelineProjector.apply(ToolEvent(
+                sessionID: sessionID,
+                sequence: sequence,
+                occurredAt: Date(),
+                correlation: AgentCorrelation(turnID: "turn-a", itemID: itemID, approvalID: nil),
+                payload: payload
+            ), to: &items)
+        }
+
+        apply(0, .turnStarted(turnID: "turn-a"))
+        apply(1, .assistantTextDelta(text: "我先检查"), itemID: "answer")
+        apply(2, .commandStarted(commandID: "cmd", command: "ls"), itemID: "cmd")
+        apply(3, .commandOutput(commandID: "cmd", text: "files"), itemID: "cmd")
+        apply(4, .commandCompleted(commandID: "cmd", exitCode: 0), itemID: "cmd")
+        apply(5, .assistantTextDelta(text: "最终答案"), itemID: "answer")
+        apply(6, .assistantMessageCompleted(text: "我先检查最终答案"), itemID: "answer")
+        apply(7, .turnCompleted(turnID: "turn-a", status: .completed))
+
+        XCTAssertEqual(items.map(\.id), [
+            "notice:turn-start-turn-a", "message:answer", "command:cmd",
+            "notice:turn-complete-turn-a", "message:answer:segment-5",
+        ])
+        let messages = items.compactMap { item -> String? in
+            if case .message(let value) = item { return value.text }
+            return nil
+        }
+        XCTAssertEqual(messages, ["我先检查", "最终答案"])
+    }
+
+    func testCompletedAssistantMovesBelowCommandWhenNoFurtherChunksArrive() {
+        let sessionID = UUID()
+        var items: [AgentTimelineItem] = []
+        for (sequence, payload) in [
+            ToolEventPayload.assistantTextDelta(text: "回答"),
+            .commandStarted(commandID: "cmd", command: "ls"),
+            .commandCompleted(commandID: "cmd", exitCode: 0),
+            .assistantMessageCompleted(text: "回答"),
+            .turnCompleted(turnID: "turn-a", status: .completed),
+        ].enumerated() {
+            AgentTimelineProjector.apply(ToolEvent(
+                sessionID: sessionID,
+                sequence: UInt64(sequence),
+                occurredAt: Date(),
+                correlation: AgentCorrelation(
+                    turnID: "turn-a", itemID: sequence == 1 || sequence == 2 ? "cmd" : "answer",
+                    approvalID: nil
+                ),
+                payload: payload
+            ), to: &items)
+        }
+        XCTAssertEqual(items.last?.id, "message:answer")
+        XCTAssertEqual(items.count, 3)
+    }
+
     func testCapabilityIntersectionDoesNotInventSupport() {
         let provider: AgentCapabilities = [.streamingText, .reasoning, .approvals]
         let client: AgentCapabilities = [.streamingText, .approvals, .steering]

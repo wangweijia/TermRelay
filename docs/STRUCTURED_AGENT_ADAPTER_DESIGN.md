@@ -12,6 +12,16 @@
 > 实现更新：2026-09-21。Mac 新增 GitHub Copilot CLI 官方 ACP Server 适配；各 AI
 > 工具继续使用独立 provider 目录、进程管理和协议映射实现。
 >
+> 实现更新：Mac 可在创建 Copilot 会话时查询当前工作目录的 ACP 历史会话，并通过
+> `session/load` 继续原 Copilot 上下文。历史对话重放到新建的 TermRelay 会话；
+> 原 TermRelay 记录不合并或覆盖。该功能要求 Copilot CLI 公布 `sessionCapabilities.list`
+> 和 `loadSession`，且原会话不被另一个进程占用。单条历史消息或全部历史超出
+> TermRelay 事件限制时会报错，不静默截断。
+>
+> 展示更新：Mac/Web 的 Agent 时间线将同一条流式回复在命令等后续条目之后的增量
+> 展示为新段；完成时将该轮最后的完整回复放到时间线末尾。命令保留原有事件
+> 顺序与内容，不改变 Provider 协议或 Relay 事件。
+>
 > 关联决策：[ADR-001：Codex 结构化集成使用官方 App Server Protocol](ADR-001-CODEX-APP-SERVER.md)
 
 ## 1. 目标

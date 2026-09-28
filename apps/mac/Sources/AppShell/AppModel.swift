@@ -346,18 +346,41 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func startLocalSession() -> UUID? {
+    func startLocalSession(resuming savedSession: CopilotSavedSession? = nil) -> UUID? {
         // TODO: Remove CodexInteractionMode and Codex PTY launch support after the ACP-only UI migration settles.
-        selectedTool == .codex
+        if savedSession != nil && selectedTool != .copilot {
+            errorMessage = "只能使用 Copilot 继续 Copilot 会话。"
+            return nil
+        }
+        return selectedTool == .codex
             || selectedTool == .copilot
             || selectedTool == .dsh
-            ? startStructuredSession()
+            ? startStructuredSession(resuming: savedSession)
             : startLocalTerminal()
     }
 
+    func listCopilotSessions() async throws -> [CopilotSavedSession] {
+        let proxy = proxyConfiguration(for: .copilot)
+        if let message = proxy.validationMessage {
+            throw AgentError.providerUnavailable(message)
+        }
+        let executable = configuredExecutableURL(for: .copilot)
+            ?? ExecutableLocator.find(named: "copilot")
+        guard let executable else {
+            throw AgentError.providerUnavailable("找不到 copilot 可执行程序")
+        }
+        let adapter = CopilotStructuredAdapter(
+            configuredExecutableURL: executable, reasoningEffort: copilotReasoningEffort
+        )
+        return try await adapter.listSessions(
+            in: workingDirectory,
+            environment: TerminalEnvironment.make(proxy: proxy, executableURL: executable)
+        )
+    }
+
     @discardableResult
-    private func startStructuredSession() -> UUID? {
-                guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
+    private func startStructuredSession(resuming savedSession: CopilotSavedSession? = nil) -> UUID? {
+        guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
               let remoteClient else {
             errorMessage = "该工具不支持结构化模式。"
             return nil
@@ -365,6 +388,19 @@ final class AppModel: ObservableObject {
         let proxy = proxyConfiguration(for: selectedTool)
         if let validationMessage = proxy.validationMessage {
             errorMessage = validationMessage
+            return nil
+        }
+        if let savedSession,
+           savedSession.directory.standardizedFileURL != workingDirectory.standardizedFileURL {
+            errorMessage = "会话工作目录与当前工作目录不一致，请重新选择。"
+            return nil
+        }
+        if let savedSession, structuredSessions.values.contains(where: {
+            $0.state.isActive && (
+                $0.providerSessionID == savedSession.id || $0.providerReference?.opaqueID == savedSession.id
+            )
+        }) {
+            errorMessage = "该 Copilot 会话已在 TermRelay 中运行。"
             return nil
         }
         let displayName = normalizedSessionName
@@ -410,6 +446,7 @@ final class AppModel: ObservableObject {
             id: sessionID,
             directory: sessionDirectory,
             adapter: adapter,
+            providerSessionID: savedSession?.id,
             defaults: defaults,
             environment: environment,
             eventHandler: { event in

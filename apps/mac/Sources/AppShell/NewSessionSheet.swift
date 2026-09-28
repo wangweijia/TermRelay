@@ -4,6 +4,11 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appModel: AppModel
     let didCreate: () -> Void
+    let didResume: (CopilotSavedSession) -> Void
+    @State private var savedSessions: [CopilotSavedSession] = []
+    @State private var loadingSavedSessions = false
+    @State private var savedSessionsError: String?
+    @State private var selectedSavedSessionID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -144,6 +149,48 @@ struct NewSessionSheet: View {
                     Text("创建会话时设置；只有 CLI 通过 ACP 公布推理强度选项时，才能在会话内切换。可用等级取决于模型。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("继续已有 Copilot 会话")
+                            .font(.headline)
+                        Spacer()
+                        Button("查找当前工作目录的会话") {
+                            Task { await loadSavedSessions() }
+                        }
+                        .disabled(loadingSavedSessions)
+                    }
+                    if loadingSavedSessions { ProgressView() }
+                    if let savedSessionsError {
+                        Text(savedSessionsError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    if !savedSessions.isEmpty {
+                        Picker("已有会话", selection: $selectedSavedSessionID) {
+                            Text("选择会话").tag(String?.none)
+                            ForEach(savedSessions) { session in
+                                Text(
+                                    session.updatedAt.map { "\(session.title) · \($0.prefix(10))" }
+                                        ?? session.title
+                                )
+                                .tag(Optional(session.id))
+                            }
+                        }
+                        Text("继续原 Copilot 上下文；历史会复制到新的 TermRelay 记录，原记录不变。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let session = savedSessions.first(where: { $0.id == selectedSavedSessionID }) {
+                            Button("继续所选会话") {
+                                didResume(session)
+                                if appModel.errorMessage == nil { dismiss() }
+                            }
+                        }
+                    }
+                }
+                .onChange(of: appModel.workingDirectory) { _, _ in
+                    savedSessions = []
+                    selectedSavedSessionID = nil
+                    savedSessionsError = nil
                 }
             }
 
@@ -190,6 +237,24 @@ struct NewSessionSheet: View {
         case .inherit: "启动代理：跟随 App 环境"
         case .disabled: "启动代理：已禁用"
         case .custom: "启动代理：使用 \(appModel.selectedTool.displayName) 的独立配置"
+        }
+    }
+
+    @MainActor
+    private func loadSavedSessions() async {
+        loadingSavedSessions = true
+        defer { loadingSavedSessions = false }
+        savedSessionsError = nil
+        savedSessions = []
+        selectedSavedSessionID = nil
+        let directory = appModel.workingDirectory
+        do {
+            let sessions = try await appModel.listCopilotSessions()
+            guard appModel.workingDirectory == directory else { return }
+            savedSessions = sessions
+            if sessions.isEmpty { savedSessionsError = "当前工作目录没有可继续的 Copilot 会话。" }
+        } catch {
+            savedSessionsError = error.localizedDescription
         }
     }
 }

@@ -7,6 +7,8 @@ struct AgentMessageViewState: Identifiable, Sendable, Equatable {
     let role: AgentMessageRole
     var text: String
     var isStreaming: Bool
+    let sourceID: String
+    let turnID: String?
 }
 
 struct AgentCommandViewState: Identifiable, Sendable, Equatable {
@@ -72,22 +74,20 @@ enum AgentTimelineProjector {
             upsertNotice(id: "turn-start-\(turnID)", text: "开始执行", isError: false, in: &items)
         case .userMessage(let messageID, let text):
             upsertMessage(
-                AgentMessageViewState(id: messageID, role: .user, text: text, isStreaming: false),
+                AgentMessageViewState(
+                    id: messageID, role: .user, text: text, isStreaming: false,
+                    sourceID: messageID, turnID: event.correlation.turnID
+                ),
                 append: false,
                 in: &items
             )
         case .assistantTextDelta(let text):
-            upsertMessage(
-                AgentMessageViewState(id: itemID, role: .assistant, text: text, isStreaming: true),
-                append: true,
-                in: &items
+            appendAssistant(
+                text, sourceID: itemID, turnID: event.correlation.turnID,
+                sequence: event.sequence, in: &items
             )
         case .assistantMessageCompleted(let text):
-            upsertMessage(
-                AgentMessageViewState(id: itemID, role: .assistant, text: text, isStreaming: false),
-                append: false,
-                in: &items
-            )
+            completeAssistant(text, sourceID: itemID, turnID: event.correlation.turnID, in: &items)
         case .reasoningDelta(let text):
             let reasoningID = event.correlation.itemID
                 ?? event.correlation.turnID
@@ -154,6 +154,15 @@ enum AgentTimelineProjector {
                 isError: status == .failed,
                 in: &items
             )
+            if status == .completed,
+               let index = items.lastIndex(where: {
+                   if case .message(let message) = $0 {
+                       return message.role == .assistant && message.turnID == turnID && !message.isStreaming
+                   }
+                   return false
+               }) {
+                items.append(items.remove(at: index))
+            }
         case .configurationUpdated:
             break
         case .warning(let code, let message):
@@ -161,6 +170,70 @@ enum AgentTimelineProjector {
         case .failed(let code, let message):
             upsertNotice(id: "\(code)-\(fallbackID)", text: message, isError: true, in: &items)
         }
+    }
+
+    private static func appendAssistant(
+        _ text: String, sourceID: String, turnID: String?, sequence: UInt64,
+        in items: inout [AgentTimelineItem]
+    ) {
+        if let index = items.lastIndex(where: {
+            if case .message(let message) = $0 {
+                return message.role == .assistant && message.sourceID == sourceID && message.turnID == turnID
+            }
+            return false
+        }), index == items.count - 1,
+           case .message(var message) = items[index], message.isStreaming {
+            message.text = appendBounded(message.text, text, maximum: maximumStreamingTextCharacters)
+            message.isStreaming = true
+            items[index] = .message(message)
+        } else {
+            let id = items.contains(where: {
+                if case .message(let message) = $0 {
+                    return message.role == .assistant && message.sourceID == sourceID && message.turnID == turnID
+                }
+                return false
+            }) ? "\(sourceID):segment-\(sequence)" : sourceID
+            items.append(.message(AgentMessageViewState(
+                id: id, role: .assistant, text: text, isStreaming: true,
+                sourceID: sourceID, turnID: turnID
+            )))
+        }
+    }
+
+    private static func completeAssistant(
+        _ text: String, sourceID: String, turnID: String?, in items: inout [AgentTimelineItem]
+    ) {
+        let indices = items.indices.filter {
+            if case .message(let message) = items[$0] {
+                return message.role == .assistant && message.sourceID == sourceID && message.turnID == turnID
+            }
+            return false
+        }
+        guard let last = indices.last else {
+            items.append(.message(AgentMessageViewState(
+                id: sourceID, role: .assistant, text: text, isStreaming: false,
+                sourceID: sourceID, turnID: turnID
+            )))
+            return
+        }
+        let priorText = indices.compactMap { index -> String? in
+            if case .message(let message) = items[index] { return message.text }
+            return nil
+        }.joined()
+        if !text.hasPrefix(priorText) {
+            for index in indices.reversed() { items.remove(at: index) }
+            items.append(.message(AgentMessageViewState(
+                id: sourceID, role: .assistant, text: text, isStreaming: false,
+                sourceID: sourceID, turnID: turnID
+            )))
+            return
+        }
+        guard case .message(var message) = items[last] else { return }
+        let precedingCount = priorText.count - message.text.count
+        message.text = String(text.dropFirst(precedingCount).suffix(maximumStreamingTextCharacters))
+        message.isStreaming = false
+        items[last] = .message(message)
+        if last != items.count - 1 { items.append(items.remove(at: last)) }
     }
 
     private static func upsertMessage(

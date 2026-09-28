@@ -13,11 +13,13 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private(set) var events: [ToolEvent] = []
     @Published private(set) var timeline: [AgentTimelineItem] = []
     @Published private(set) var failureMessage: String?
+    private(set) var providerReference: AgentSessionReference?
     @Published private(set) var autoApproveEnabled = false
     @Published private(set) var configurationOptions: [AgentConfigOption] = []
     @Published private(set) var configurationUpdating = false
 
     private let adapter: any StructuredAgentAdapter
+    let providerSessionID: String?
     private let defaults: UserDefaults
     private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
@@ -33,6 +35,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         id: UUID = UUID(),
         directory: URL,
         adapter: any StructuredAgentAdapter,
+        providerSessionID: String? = nil,
         defaults: UserDefaults = .standard,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
@@ -42,6 +45,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.id = id
         self.directory = directory
         self.adapter = adapter
+        self.providerSessionID = providerSessionID
         self.defaults = defaults
         self.environment = environment
         self.eventHandler = eventHandler
@@ -79,8 +83,10 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
             }
             try await coordinator.start(request: AgentSessionRequest(
                 sessionID: id,
-                workspaceURL: directory
+                workspaceURL: directory,
+                providerSessionID: providerSessionID
             ), afterRuntimeStart: runtimeReadyHandler)
+            providerReference = await coordinator.snapshot().reference
             await refreshState()
             if var options = try? await coordinator.configurationOptions(), !options.isEmpty {
                 let saved = defaults.dictionary(forKey: configurationKey) as? [String: String] ?? [:]

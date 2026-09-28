@@ -24,11 +24,18 @@ struct ContentView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
         .sheet(isPresented: $isPresentingNewSession) {
-            NewSessionSheet {
-                if let sessionID = appModel.startLocalSession() {
-                    selectedSessionID = sessionID
+            NewSessionSheet(
+                didCreate: {
+                    if let sessionID = appModel.startLocalSession() {
+                        selectedSessionID = sessionID
+                    }
+                },
+                didResume: { savedSession in
+                    if let sessionID = appModel.startLocalSession(resuming: savedSession) {
+                        selectedSessionID = sessionID
+                    }
                 }
-            }
+            )
             .environmentObject(appModel)
         }
         .alert(
@@ -135,8 +142,6 @@ private struct StructuredAgentSessionView: View {
                 Label("ACP \(session.state.rawValue)", systemImage: "sparkles")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
-                Button("中断") { Task { _ = await session.interrupt() } }
-                    .disabled(![.running, .awaitingApproval, .awaitingUserInput].contains(session.state))
                 Button("停止", role: .destructive) { appModel.stopLocalTerminal(id: session.id) }
                     .disabled([.finished, .failed].contains(session.state))
             }
@@ -247,7 +252,12 @@ private struct StructuredAgentSessionView: View {
                         .font(.caption)
                         .disabled(appModel.connectionState != .connected)
                         .help("开关由 Server 按会话保存，审批只在此 Mac 执行一次")
-                    Button("发送") { submitPrompt() }
+                    Button("中断当前任务") { Task { _ = await session.interrupt() } }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .disabled(![.running, .awaitingApproval, .awaitingUserInput].contains(session.state))
+                        .help("取消本次发送后正在执行的任务；不会关闭会话，也不能从中断处继续")
+                    Button("发送并执行") { submitPrompt() }
                         .buttonStyle(.borderedProminent)
                         .disabled(!canSend)
                 }

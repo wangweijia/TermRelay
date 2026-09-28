@@ -1,5 +1,12 @@
 import Foundation
 
+struct CopilotSavedSession: Identifiable, Sendable, Equatable {
+    let id: String
+    let directory: URL
+    let title: String
+    let updatedAt: String?
+}
+
 struct CopilotStructuredAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.copilot
     let displayName = "GitHub Copilot"
@@ -54,6 +61,57 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
         )
     }
 
+    func listSessions(in directory: URL, environment: [String: String]) async throws -> [CopilotSavedSession] {
+        let installation = try await detect()
+        let transport = transportFactory?(
+            installation.executableURL, directory, environment
+        ) ?? CopilotACPProcess(
+            executableURL: installation.executableURL,
+            directory: directory,
+            environment: environment,
+            reasoningEffort: reasoningEffort
+        )
+        let client = CopilotACPClient(transport: transport)
+        defer { Task { await client.stop() } }
+        let initialized = try await client.start()
+        guard initialized.object?["protocolVersion"]?.integer == 1 else {
+            throw AgentError.protocolFailure("Copilot CLI 未协商到 ACP v1")
+        }
+        guard initialized.object?["agentCapabilities"]?.object?["sessionCapabilities"]?.object?["list"]?.object != nil else {
+            throw AgentError.unsupportedCapability("Copilot ACP session/list")
+        }
+        var sessions: [CopilotSavedSession] = []
+        var cursor: String?
+        var seenCursors = Set<String>()
+        repeat {
+            var params: [String: JSONValue] = ["cwd": .string(directory.path)]
+            if let cursor { params["cursor"] = .string(cursor) }
+            let result = try await client.request(method: "session/list", params: .object(params))
+            guard let page = result.object?["sessions"]?.array else {
+                throw AgentError.protocolFailure("session/list 未返回 sessions")
+            }
+            for item in page {
+                guard let id = item.object?["sessionId"]?.string, !id.isEmpty,
+                      let cwd = item.object?["cwd"]?.string else {
+                    throw AgentError.protocolFailure("session/list 返回无效会话")
+                }
+                let workspace = URL(fileURLWithPath: cwd).standardizedFileURL
+                guard workspace == directory.standardizedFileURL else { continue }
+                sessions.append(CopilotSavedSession(
+                    id: id,
+                    directory: workspace,
+                    title: item.object?["title"]?.string ?? id,
+                    updatedAt: item.object?["updatedAt"]?.string
+                ))
+            }
+            cursor = result.object?["nextCursor"]?.string
+            if let cursor, !seenCursors.insert(cursor).inserted {
+                throw AgentError.protocolFailure("session/list 返回重复的分页游标")
+            }
+        } while cursor != nil
+        return sessions
+    }
+
     private func readVersion(_ executable: URL) throws -> String {
         let process = Process()
         let output = Pipe()
@@ -93,12 +151,25 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     private var messageTask: Task<Void, Never>?
     private var promptTask: Task<Void, Never>?
     private var providerSessionID: String?
+    private var supportsLoadSession = false
+    private var replayingHistory = false
+    private var replayFinished = false
+    private var replayCompletion: CheckedContinuation<Void, Never>?
+    private var replayError: AgentError?
+    private var replaySize = 0
+    private struct ReplayedMessage {
+        let id: String
+        let isUser: Bool
+        var text: String
+    }
+    private var replayedMessages: [ReplayedMessage] = []
     private var configOptions: [AgentConfigOption] = []
     private var providerConfigIDs: [String: String] = [:]
     private var modelCommandAvailable = false
     private var activeTurnID: String?
     private var pendingApprovals: [String: PendingApproval] = [:]
     private var assistantMessages: [String: String] = [:]
+    private var assistantMessageOrder: [String] = []
     private var sequence: UInt64 = 0
     private var stopped = false
 
@@ -131,6 +202,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         guard initialized.object?["protocolVersion"]?.integer == 1 else {
             throw AgentError.protocolFailure("Copilot CLI 未协商到 ACP v1")
         }
+        supportsLoadSession = initialized.object?["agentCapabilities"]?.object?["loadSession"]?.bool == true
         let messages = client.messages
         messageTask = Task { [weak self] in
             for await message in messages {
@@ -145,10 +217,38 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
               request.workspaceURL.standardizedFileURL == workspaceURL.standardizedFileURL else {
             throw AgentError.correlationMismatch("创建请求不属于当前 Copilot runtime")
         }
-        let result = try await client.request(method: "session/new", params: .object([
-            "cwd": .string(workspaceURL.path),
-            "mcpServers": .array([]),
-        ]), timeout: .seconds(30))
+        let restoringID = request.providerSessionID
+        if restoringID != nil && !supportsLoadSession {
+            throw AgentError.unsupportedCapability("Copilot ACP session/load")
+        }
+        var params: [String: JSONValue] = [
+            "cwd": .string(workspaceURL.path), "mcpServers": .array([]),
+        ]
+        if let restoringID {
+            params["sessionId"] = .string(restoringID)
+            providerSessionID = restoringID
+            replayingHistory = true
+            replayFinished = false
+            replayError = nil
+            replaySize = 0
+        }
+        defer { replayingHistory = false }
+        let result = try await client.request(
+            method: restoringID == nil ? "session/new" : "session/load",
+            params: .object(params), timeout: restoringID == nil ? .seconds(30) : .seconds(120)
+        )
+        if let restoringID {
+            if !replayFinished {
+                await withCheckedContinuation { continuation in
+                    replayCompletion = continuation
+                }
+            }
+            if let replayError { throw replayError }
+            emitReplayedHistory()
+            updateConfigOptions(result.object?["configOptions"])
+            emit(.sessionStarted(reference: AgentSessionReference(providerID: .copilot, opaqueID: restoringID)))
+            return AgentSessionReference(providerID: .copilot, opaqueID: restoringID)
+        }
         guard let id = result.object?["sessionId"]?.string, !id.isEmpty else {
             throw AgentError.protocolFailure("session/new 未返回 sessionId")
         }
@@ -234,6 +334,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
             let turnID = idempotencyKey.uuidString.lowercased()
             activeTurnID = turnID
             assistantMessages.removeAll()
+            assistantMessageOrder.removeAll()
             emit(.userMessage(messageID: turnID, text: input.text), turnID: turnID, itemID: turnID)
             emit(.turnStarted(turnID: turnID), turnID: turnID)
             promptTask = Task { [weak self] in
@@ -285,6 +386,9 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     func stop() async {
         guard !stopped else { return }
         stopped = true
+        replayError = .providerUnavailable("Copilot ACP 会话已停止")
+        replayCompletion?.resume()
+        replayCompletion = nil
         for pending in pendingApprovals.values {
             try? await client.respond(
                 id: pending.rpcID,
@@ -317,8 +421,10 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
                 ])]),
             ]), timeout: nil)
             guard activeTurnID == turnID else { return }
-            for (messageID, text) in assistantMessages where !text.isEmpty {
-                emit(.assistantMessageCompleted(text: text), turnID: turnID, itemID: messageID)
+            for messageID in assistantMessageOrder {
+                if let text = assistantMessages[messageID], !text.isEmpty {
+                    emit(.assistantMessageCompleted(text: text), turnID: turnID, itemID: messageID)
+                }
             }
             let stopReason = result.object?["stopReason"]?.string
             let status: TurnCompletionStatus = stopReason == "cancelled" ? .interrupted
@@ -337,6 +443,12 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         switch message {
         case .notification(let method, let params):
             if method == "session/update" { receiveSessionUpdate(params) }
+        case .requestCompleted(let method):
+            if method == "session/load" {
+                replayFinished = true
+                replayCompletion?.resume()
+                replayCompletion = nil
+            }
         case .request(let id, let method, let params):
             if method == "session/request_permission" {
                 await receivePermissionRequest(id: id, params: params)
@@ -354,6 +466,32 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
               object["sessionId"]?.string == providerSessionID,
               let update = object["update"]?.object,
               let kind = update["sessionUpdate"]?.string else { return }
+        if replayingHistory && (kind == "user_message_chunk" || kind == "agent_message_chunk") {
+            guard let text = textContent(update["content"]), !text.isEmpty else { return }
+            guard replayError == nil else { return }
+            replaySize += text.utf8.count
+            if replaySize > 8_000_000 || text.utf8.count > 1_000_000 {
+                replayError = .protocolFailure("Copilot 历史记录过大，无法安全加载到 TermRelay")
+                replayedMessages.removeAll()
+                return
+            }
+            let isUser = kind == "user_message_chunk"
+            let previous = replayedMessages.last
+            let id = update["messageId"]?.string
+                ?? (previous?.isUser == isUser ? previous?.id : nil)
+                ?? "replay-\(replayedMessages.count)"
+            if let last = replayedMessages.indices.last,
+               replayedMessages[last].id == id && replayedMessages[last].isUser == isUser {
+                replayedMessages[last].text += text
+            } else {
+                replayedMessages.append(ReplayedMessage(id: id, isUser: isUser, text: text))
+            }
+            if replayedMessages.last?.text.utf8.count ?? 0 > 1_000_000 {
+                replayError = .protocolFailure("Copilot 历史消息超过 TermRelay 的单条消息限制")
+                replayedMessages.removeAll()
+            }
+            return
+        }
           if kind == "config_option_update" {
             updateConfigOptions(update["configOptions"])
             emit(.configurationUpdated(options: visibleConfigurationOptions()))
@@ -373,6 +511,8 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
             guard let text = textContent(update["content"]), !text.isEmpty else { return }
             let messageID = update["messageId"]?.string ?? "assistant-\(turnID)"
             assistantMessages[messageID, default: ""] += text
+            assistantMessageOrder.removeAll { $0 == messageID }
+            assistantMessageOrder.append(messageID)
             emit(.assistantTextDelta(text: text), turnID: turnID, itemID: messageID)
         case "agent_thought_chunk":
             if let text = textContent(update["content"]), !text.isEmpty {
@@ -410,6 +550,31 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         default:
             break
         }
+    }
+
+    private func emitReplayedHistory() {
+        var turn = 0
+        var turnID: String?
+        for message in replayedMessages {
+            if message.isUser {
+                if let turnID { emit(.turnCompleted(turnID: turnID, status: .completed), turnID: turnID) }
+                turn += 1
+                let id = "replay-\(turn)"
+                turnID = id
+                emit(.userMessage(messageID: message.id, text: message.text), turnID: id, itemID: message.id)
+                emit(.turnStarted(turnID: id), turnID: id)
+            } else {
+                if turnID == nil {
+                    turn += 1
+                    let id = "replay-\(turn)"
+                    turnID = id
+                    emit(.turnStarted(turnID: id), turnID: id)
+                }
+                emit(.assistantMessageCompleted(text: message.text), turnID: turnID, itemID: message.id)
+            }
+        }
+        if let turnID { emit(.turnCompleted(turnID: turnID, status: .completed), turnID: turnID) }
+        replayedMessages.removeAll()
     }
 
     private func receivePermissionRequest(id: JSONValue, params: JSONValue) async {

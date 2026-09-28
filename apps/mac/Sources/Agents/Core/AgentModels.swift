@@ -63,10 +63,12 @@ struct AgentLaunchConfiguration: Sendable {
 struct AgentSessionRequest: Sendable {
     let sessionID: UUID
     let workspaceURL: URL
+    let providerSessionID: String?
 
-    init(sessionID: UUID, workspaceURL: URL) {
+    init(sessionID: UUID, workspaceURL: URL, providerSessionID: String? = nil) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
+        self.providerSessionID = providerSessionID
     }
 }
 

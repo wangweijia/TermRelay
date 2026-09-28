@@ -3,6 +3,7 @@ import Foundation
 enum CopilotACPMessage: Sendable {
     case notification(method: String, params: JSONValue)
     case request(id: JSONValue, method: String, params: JSONValue)
+    case requestCompleted(method: String)
 }
 
 protocol CopilotACPTransport: Sendable {
@@ -19,6 +20,7 @@ actor CopilotACPClient {
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
         let timeoutTask: Task<Void, Never>?
+        let method: String
     }
 
     private let transport: any CopilotACPTransport
@@ -81,7 +83,7 @@ actor CopilotACPClient {
                     await self?.timeOut(id: id, method: method)
                 }
             }
-            pending[id] = PendingRequest(continuation: continuation, timeoutTask: timeoutTask)
+            pending[id] = PendingRequest(continuation: continuation, timeoutTask: timeoutTask, method: method)
             do {
                 try send(CopilotACPOutboundRequest(id: id, method: method, params: params))
             } catch {
@@ -131,6 +133,9 @@ actor CopilotACPClient {
                     "\(error.code): \(error.message)"
                 ))
             } else {
+                if request.method == "session/load" {
+                    messageContinuation.yield(.requestCompleted(method: request.method))
+                }
                 request.continuation.resume(returning: envelope.result ?? .null)
             }
         } catch {

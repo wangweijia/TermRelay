@@ -411,6 +411,7 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .approval-actions, .composer-actions > div { display: flex; justify-content: flex-end; gap: 8px; }
 .approval-actions button, .agent-composer button { padding: 7px 11px; border: 1px solid #3b4856; border-radius: 6px; color: #c8d2dc; background: #18212b; cursor: pointer; }
 .approval-actions button.approve, .agent-composer button.approve { border-color: #327453; color: #a8f0c8; background: #173025; }
+.agent-composer button.interrupt-turn { border-color: #86623c; color: #f2c492; background: #302318; }
 .approval-actions button:disabled, .agent-composer button:disabled { opacity: .45; cursor: not-allowed; }
 .user-input-card label { display: grid; gap: 3px; color: #e1e8ef; }
 .user-input-card label small { color: #8f9ca9; font-weight: 400; }

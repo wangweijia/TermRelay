@@ -3,6 +3,134 @@ import XCTest
 @testable import TermRelay
 
 final class CopilotACPClientTests: XCTestCase {
+    func testCopilotListsSavedSessionsAcrossPagesForWorkspace() async throws {
+        let transport = FakeCopilotACPTransport()
+        let adapter = CopilotStructuredAdapter(
+            configuredExecutableURL: URL(fileURLWithPath: "/bin/echo"),
+            transportFactory: { _, _, _ in transport }
+        )
+        let listing = Task {
+            try await adapter.listSessions(in: URL(fileURLWithPath: "/tmp"), environment: [:])
+        }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: [
+            "protocolVersion": 1,
+            "agentCapabilities": ["sessionCapabilities": ["list": [:]]],
+        ])
+        let first = try await transport.waitForSentMessage(at: 1)
+        XCTAssertEqual(first["method"] as? String, "session/list")
+        XCTAssertEqual((first["params"] as? [String: Any])?["cwd"] as? String, "/tmp")
+        transport.respond(to: first, result: [
+            "sessions": [
+                ["sessionId": "old-one", "cwd": "/tmp", "title": "Old conversation"],
+                ["sessionId": "other", "cwd": "/elsewhere"],
+            ],
+            "nextCursor": "page-two",
+        ])
+        let second = try await transport.waitForSentMessage(at: 2)
+        XCTAssertEqual((second["params"] as? [String: Any])?["cursor"] as? String, "page-two")
+        transport.respond(to: second, result: [
+            "sessions": [["sessionId": "old-two", "cwd": "/tmp", "title": "Later conversation"]],
+        ])
+        let result = try await listing.value
+        XCTAssertEqual(result.map(\.id), ["old-one", "old-two"])
+        XCTAssertEqual(result[0].title, "Old conversation")
+    }
+
+    func testCopilotLoadsPriorConversationBeforeNewPrompt() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let coordinator = StructuredSessionCoordinator(runtime: CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+        ))
+        let replayed = Task {
+            var events: [ToolEvent] = []
+            for await event in coordinator.events {
+                events.append(event)
+                if case .turnCompleted = event.payload { return events }
+            }
+            return events
+        }
+        let starting = Task {
+            try await coordinator.start(request: AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+                providerSessionID: "saved-copilot-session"
+            ))
+        }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: [
+            "protocolVersion": 1, "agentCapabilities": ["loadSession": true],
+        ])
+        let load = try await transport.waitForSentMessage(at: 1)
+        XCTAssertEqual(load["method"] as? String, "session/load")
+        XCTAssertEqual(
+            (load["params"] as? [String: Any])?["sessionId"] as? String, "saved-copilot-session"
+        )
+        transport.receive([
+            "jsonrpc": "2.0", "method": "session/update", "params": [
+                "sessionId": "saved-copilot-session", "update": [
+                    "sessionUpdate": "user_message_chunk", "messageId": "prior-user",
+                    "content": ["type": "text", "text": "Original question"],
+                ],
+            ],
+        ])
+        transport.receive([
+            "jsonrpc": "2.0", "method": "session/update", "params": [
+                "sessionId": "saved-copilot-session", "update": [
+                    "sessionUpdate": "agent_message_chunk", "messageId": "prior-answer",
+                    "content": ["type": "text", "text": "Original answer"],
+                ],
+            ],
+        ])
+        transport.respond(to: load, result: [:])
+        try await starting.value
+        let reference = await coordinator.reference
+        XCTAssertEqual(reference?.opaqueID, "saved-copilot-session")
+        let events = await replayed.value
+        XCTAssertEqual(events.compactMap { event -> String? in
+            if case .userMessage(_, let text) = event.payload { return text }
+            return nil
+        }, ["Original question"])
+        XCTAssertEqual(events.compactMap { event -> String? in
+            if case .assistantMessageCompleted(let text) = event.payload { return text }
+            return nil
+        }, ["Original answer"])
+        let state = await coordinator.snapshot().state
+        XCTAssertEqual(state, .ready)
+        try await coordinator.send(.startTurn(TurnInput(text: "Follow-up"), idempotencyKey: UUID()))
+        let prompt = try await transport.waitForSentMessage(at: 2)
+        XCTAssertEqual(prompt["method"] as? String, "session/prompt")
+        XCTAssertEqual(
+            (prompt["params"] as? [String: Any])?["sessionId"] as? String, "saved-copilot-session"
+        )
+        await coordinator.stop()
+    }
+
+    func testCopilotRejectsLoadWithoutCapability() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let runtime = CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+        )
+        let starting = Task { try await runtime.start() }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: [
+            "protocolVersion": 1, "agentCapabilities": ["loadSession": false],
+        ])
+        try await starting.value
+        do {
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+                providerSessionID: "old"
+            ))
+            XCTFail("Expected unsupported session/load")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("session/load"))
+        }
+        XCTAssertFalse(transport.sentMethods.contains("session/new"))
+        XCTAssertFalse(transport.sentMethods.contains("session/load"))
+        await runtime.stop()
+    }
+
     func testCopilotACPReasoningEffortLaunchArguments() {
         XCTAssertEqual(CopilotReasoningEffort.automatic.launchArguments, ["--acp", "--stdio"])
         for effort in CopilotReasoningEffort.allCases where effort != .automatic {
