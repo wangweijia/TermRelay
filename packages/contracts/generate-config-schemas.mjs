@@ -17,4 +17,58 @@ for (const [name, path, next] of [
     source = source.slice(0, end) + declaration + source.slice(end);
   }
 }
-await writeFile(indexURL, source);
+const historySchemas = [
+  ['sessionHistoryListSchema', 'session-history-list'],
+  ['sessionHistoryListedSchema', 'session-history-listed'],
+  ['sessionHistoryRequestSchema', 'session-history-request'],
+  ['sessionHistorySchema', 'session-history'],
+];
+const historyTypes = `export interface SessionHistoryListPayload {
+  cursor?: string;
+}
+
+export interface SessionHistoryEntry {
+  id: string;
+  workspaceId: string;
+  toolKey: string;
+  displayName: string | null;
+  runtimeMode: 'acp';
+  status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
+  startedAt: string | null;
+  updatedAt: string;
+}
+
+export interface SessionHistoryListedPayload {
+  sessions: SessionHistoryEntry[];
+  hasMore: boolean;
+  relatedMessageId: string;
+  nextCursor?: string;
+}
+
+export interface SessionHistoryRequestPayload {
+  beforeSeq?: number;
+  limit?: number;
+}
+
+export interface SessionHistoryEvent {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SessionHistoryPayload {
+  events: SessionHistoryEvent[];
+  hasMore: boolean;
+  relatedMessageId: string;
+}
+
+`;
+const historyDeclarations = await Promise.all(historySchemas.map(async ([name, file]) => {
+  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, import.meta.url), 'utf8'));
+  return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
+}));
+const marker = 'export interface SessionHistoryListPayload';
+const start = source.indexOf(marker);
+if (start >= 0) source = source.slice(0, start);
+await writeFile(indexURL, source + historyTypes + historyDeclarations.join('').trimEnd() + '\n');

@@ -4,6 +4,7 @@ import SwiftUI
 struct SessionSidebar: View {
     @Environment(\.displayScale) private var displayScale
     let sessions: [ManagedSession]
+    let copilotHistory: [CopilotHistorySession]
     let terminalSessions: [UUID: LocalTerminalSession]
     let structuredSessions: [UUID: LocalStructuredAgentSession]
     @Binding var selection: UUID?
@@ -29,7 +30,7 @@ struct SessionSidebar: View {
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) { horizontalSeparator }
 
-            if sessions.isEmpty {
+            if sessions.isEmpty && copilotHistory.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "rectangle.stack.badge.plus")
                         .font(.title2)
@@ -42,20 +43,30 @@ struct SessionSidebar: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(sessions, selection: $selection) { session in
-                    ClosableSessionSidebarRow(
-                        session: session,
-                        terminalSession: terminalSessions[session.id],
-                        structuredSession: structuredSessions[session.id],
-                        isSelected: selection == session.id,
-                        closeAction: { closeAction(session.id) }
-                    )
-                    .tag(session.id)
-                    .contextMenu {
-                        Button(role: .destructive) {
-                            closeAction(session.id)
-                        } label: {
-                            Label("关闭会话", systemImage: "xmark")
+                List(selection: $selection) {
+                    ForEach(sessions) { session in
+                        ClosableSessionSidebarRow(
+                            session: session,
+                            terminalSession: terminalSessions[session.id],
+                            structuredSession: structuredSessions[session.id],
+                            isSelected: selection == session.id,
+                            closeAction: { closeAction(session.id) }
+                        )
+                        .tag(session.id)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                closeAction(session.id)
+                            } label: {
+                                Label("关闭会话", systemImage: "xmark")
+                            }
+                        }
+                    }
+                    if !copilotHistory.isEmpty {
+                        Section("历史 · Copilot") {
+                            ForEach(copilotHistory) { archive in
+                                Label(archive.displayName, systemImage: "clock.arrow.circlepath")
+                                    .tag(archive.id)
+                            }
                         }
                     }
                 }

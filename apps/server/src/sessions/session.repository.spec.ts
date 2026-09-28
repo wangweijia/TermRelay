@@ -83,11 +83,82 @@ test('provider-only ACP events do not count as user messages', async () => {
     correlation: {},
     data: { code: 'provider_started', message: 'ready' },
   });
-
   assert.equal(result.status, 'accepted');
   assert.equal(store.rows.get('no-user')?.stateVersion, '1');
   assert.equal(await store.repository.finishById('no-user'), 'purged');
   assert.deepEqual(store.sessionIDs(), []);
+});
+
+test('history index filters device, deletion, mode, and tool before paging', async () => {
+    const store = new MemorySessions([
+      session('old', 'acp', { toolKey: 'copilot', updatedAt: new Date(1_000) }),
+      session('new', 'acp', { toolKey: 'copilot', updatedAt: new Date(2_000) }),
+      session('newer-tie', 'acp', { toolKey: 'copilot', updatedAt: new Date(2_000) }),
+      session('deleted', 'acp', { toolKey: 'copilot', deletedAt: new Date(3_000) }),
+      session('other-device', 'acp', { deviceId: 'device-b', toolKey: 'copilot' }),
+      session('other-tool', 'acp', { toolKey: 'codex' }),
+      session('pty', 'pty', { toolKey: 'copilot' }),
+    ]);
+    assert.deepEqual(
+      (await store.repository.listCopilotHistoryForDevice('device-a', undefined, 1)).map((row) => row.id),
+      ['newer-tie'],
+    );
+    assert.deepEqual(
+      (await store.repository.listCopilotHistoryForDevice(
+        'device-a', { updatedAt: new Date(2_000), id: 'newer-tie' }, 1,
+      )).map((row) => row.id),
+      ['new'],
+    );
+    assert.deepEqual(
+      (await store.repository.listCopilotHistoryForDevice(
+        'device-a', { updatedAt: new Date(2_000), id: 'new' }, 1,
+      )).map((row) => row.id),
+      ['old'],
+    );
+});
+
+test('PTY output retains its 24-hour TTL while ACP events default to 30 days and allow an override', async () => {
+  const previousTerminalTtl = process.env.TERMINAL_EVENT_TTL_HOURS;
+  const previousAcpTtl = process.env.ACP_EVENT_TTL_HOURS;
+  try {
+    process.env.TERMINAL_EVENT_TTL_HOURS = '24';
+    delete process.env.ACP_EVENT_TTL_HOURS;
+    const defaults = new MemorySessions([
+      session('pty', 'pty'),
+      session('acp', 'acp'),
+    ]);
+    const start = Date.now();
+    await defaults.repository.appendTerminalOutput('device-a', 'pty', 1, {
+      encoding: 'base64', data: 'dGVzdA==',
+    });
+    await defaults.repository.appendToolEvent('device-a', 'acp', 1, {
+      kind: 'warning', occurredAt: new Date().toISOString(),
+      correlation: {}, data: { code: 'ready', message: 'ready' },
+    });
+    const end = Date.now();
+    for (const [id, hours] of [['pty', 24], ['acp', 30 * 24]] as const) {
+      const expiry = defaults.events.find((event) => event.sessionId === id)?.expiresAt.getTime();
+      assert.ok(expiry !== undefined && expiry >= start + hours * 3_600_000);
+      assert.ok(expiry <= end + hours * 3_600_000);
+    }
+
+    process.env.ACP_EVENT_TTL_HOURS = '48';
+    const configured = new MemorySessions([session('configured', 'acp')]);
+    const configuredStart = Date.now();
+    await configured.repository.appendToolEvent('device-a', 'configured', 1, {
+      kind: 'warning', occurredAt: new Date().toISOString(),
+      correlation: {}, data: { code: 'ready', message: 'ready' },
+    });
+    const configuredEnd = Date.now();
+    const expiry = configured.events[0]?.expiresAt.getTime();
+    assert.ok(expiry !== undefined && expiry >= configuredStart + 48 * 3_600_000);
+    assert.ok(expiry <= configuredEnd + 48 * 3_600_000);
+  } finally {
+    if (previousTerminalTtl === undefined) delete process.env.TERMINAL_EVENT_TTL_HOURS;
+    else process.env.TERMINAL_EVENT_TTL_HOURS = previousTerminalTtl;
+    if (previousAcpTtl === undefined) delete process.env.ACP_EVENT_TTL_HOURS;
+    else process.env.ACP_EVENT_TTL_HOURS = previousAcpTtl;
+  }
 });
 
 function session(
@@ -117,7 +188,7 @@ function session(
 
 class MemorySessions {
   readonly rows: Map<string, SessionEntity>;
-  readonly events: Array<{ sessionId: string; seq: string; type: string }> = [];
+  readonly events: Array<{ sessionId: string; seq: string; type: string; expiresAt: Date }> = [];
   readonly purgedIDs: string[] = [];
   readonly deletedChildren: string[] = [];
   readonly repository: SessionRepository;
@@ -138,7 +209,7 @@ class MemorySessions {
     };
     const eventsRepo = {
       findOneBy: async () => null,
-      insert: async (event: { sessionId: string; seq: string; type: string }) => {
+      insert: async (event: { sessionId: string; seq: string; type: string; expiresAt: Date }) => {
         this.events.push(event);
       },
     };
@@ -171,12 +242,16 @@ class MemorySessions {
 class MemoryQuery {
   private clauses: Array<{ sql: string; params: Record<string, unknown> }> = [];
   private values: Partial<SessionEntity> = {};
+  private limitValue?: number;
 
   constructor(private readonly rows: Map<string, SessionEntity>) {}
 
   update(): this { return this; }
   set(values: Partial<SessionEntity>): this { this.values = values; return this; }
   setLock(): this { return this; }
+  orderBy(): this { return this; }
+  addOrderBy(): this { return this; }
+  limit(value: number): this { this.limitValue = value; return this; }
   where(sql: string, params: Record<string, unknown> = {}): this {
     this.clauses = [{ sql, params }];
     return this;
@@ -192,18 +267,28 @@ class MemoryQuery {
     return (await this.getMany())[0] ?? null;
   }
   async getMany(): Promise<SessionEntity[]> {
-    return [...this.rows.values()].filter((row) => this.clauses.every(({ sql, params }) => {
+    const filtered = [...this.rows.values()].filter((row) => this.clauses.every(({ sql, params }) => {
       if (sql.includes('status IN')) return (params.statuses as string[]).includes(row.status);
       if (sql.includes('device_id =')) return row.deviceId === params.deviceId;
       if (sql.includes('session_id =') || sql.includes('session.id =') || sql.includes('id =')) {
         return row.id === (params.sessionId ?? params.id);
       }
-      if (sql.includes('session.runtimeMode')) return row.runtimeMode === params.mode;
+      if (sql.includes('session.runtimeMode')) return row.runtimeMode === (params.mode ?? params.runtimeMode);
       if (sql.includes('session.status')) return row.status === params.status;
       if (sql.includes('session.hasUserMessage')) return row.hasUserMessage === params.hasUserMessage;
       if (sql.includes('session.deletedAt')) return row.deletedAt === null;
       if (sql.includes('session.deviceId')) return row.deviceId === params.deviceId;
+      if (sql.includes('session.updatedAt <')) {
+        const updatedAt = params.updatedAt as Date;
+        return row.updatedAt < updatedAt || (row.updatedAt.getTime() === updatedAt.getTime()
+          && row.id < params.cursorId!);
+      }
+      if (sql.includes('session.toolKey')) return row.toolKey === params.toolKey;
       throw new Error(`Unhandled test query: ${sql}`);
     }));
+    if (this.limitValue === undefined) return filtered;
+    return filtered
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || b.id.localeCompare(a.id))
+      .slice(0, this.limitValue);
   }
 }

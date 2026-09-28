@@ -954,3 +954,226 @@ export const commandAckSchema = {
   },
   additionalProperties: false,
 } as const;
+export interface SessionHistoryListPayload {
+  cursor?: string;
+}
+
+export interface SessionHistoryEntry {
+  id: string;
+  workspaceId: string;
+  toolKey: string;
+  displayName: string | null;
+  runtimeMode: 'acp';
+  status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
+  startedAt: string | null;
+  updatedAt: string;
+}
+
+export interface SessionHistoryListedPayload {
+  sessions: SessionHistoryEntry[];
+  hasMore: boolean;
+  relatedMessageId: string;
+  nextCursor?: string;
+}
+
+export interface SessionHistoryRequestPayload {
+  beforeSeq?: number;
+  limit?: number;
+}
+
+export interface SessionHistoryEvent {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface SessionHistoryPayload {
+  events: SessionHistoryEvent[];
+  hasMore: boolean;
+  relatedMessageId: string;
+}
+
+export const sessionHistoryListSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-list.schema.json",
+  "title": "session.history.list payload",
+  "type": "object",
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const sessionHistoryListedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-listed.schema.json",
+  "title": "session.history.listed payload",
+  "type": "object",
+  "required": [
+    "sessions",
+    "hasMore",
+    "relatedMessageId"
+  ],
+  "properties": {
+    "sessions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspaceId",
+          "toolKey",
+          "displayName",
+          "runtimeMode",
+          "status",
+          "startedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "toolKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "runtimeMode": {
+            "const": "acp"
+          },
+          "status": {
+            "enum": [
+              "starting",
+              "running",
+              "stopping",
+              "finished",
+              "failed"
+            ]
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "nextCursor": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const sessionHistoryRequestSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-request.schema.json",
+  "title": "session.history.request payload",
+  "type": "object",
+  "properties": {
+    "beforeSeq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const sessionHistorySchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history.schema.json",
+  "title": "session.history payload",
+  "type": "object",
+  "required": [
+    "events",
+    "hasMore",
+    "relatedMessageId"
+  ],
+  "properties": {
+    "events": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "seq",
+          "type",
+          "payload",
+          "createdAt"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "payload": {
+            "type": "object"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "hasMore": {
+      "type": "boolean"
+    },
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+} as const;

@@ -48,6 +48,30 @@ test('accepts command acknowledgements with matching command context', () => {
   assert.equal(mismatch.ok, false);
 });
 
+test('validates history requests and their envelope context', () => {
+    assert.equal(validator.validate(envelope('session.history.list', {})).ok, true);
+    assert.equal(validator.validate(envelope('session.history.list', { cursor: 'YWJj.ZGVm' })).ok, true);
+    assert.equal(validator.validate({
+      ...envelope('session.history.list', {}), sessionId: 'session-a',
+    }).ok, false);
+    assert.equal(validator.validate(envelope('session.history.list', { cursor: 'invalid' })).ok, false);
+    assert.equal(validator.validate(envelope('session.history.list', { unknown: true })).ok, false);
+    assert.equal(validator.validate({
+      ...envelope('session.history.request', { beforeSeq: 0, limit: 50 }),
+      sessionId: 'session-a',
+    }).ok, true);
+    assert.equal(validator.validate(envelope('session.history.request', {})).ok, false);
+    assert.equal(validator.validate({
+      ...envelope('session.history.request', { limit: 51 }), sessionId: 'session-a',
+    }).ok, false);
+    assert.equal(validator.validate({
+      ...envelope('session.history.request', { beforeSeq: -1 }), sessionId: 'session-a',
+    }).ok, false);
+    assert.equal(validator.validate({
+      ...envelope('session.history.request', {}), sessionId: 'session-a', seq: 0,
+    }).ok, false);
+});
+
 test('accepts workspace, session, and terminal events with required context', () => {
   const workspace = validator.validate(
     envelope('workspace.registered', {

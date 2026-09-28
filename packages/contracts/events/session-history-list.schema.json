@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-list.schema.json",
+  "title": "session.history.list payload",
+  "type": "object",
+  "properties": {
+    "cursor": { "type": "string", "minLength": 3, "maxLength": 1024, "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$" }
+  },
+  "additionalProperties": false
+}

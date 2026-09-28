@@ -16,6 +16,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessions: [ManagedSession] = []
     @Published private(set) var terminalSessions: [UUID: LocalTerminalSession] = [:]
     @Published private(set) var structuredSessions: [UUID: LocalStructuredAgentSession] = [:]
+    @Published private(set) var copilotHistory: [CopilotHistorySession] = []
+    @Published private(set) var historyMessages: [UUID: [CopilotHistoryMessage]] = [:]
+    @Published private(set) var historyLoadingID: UUID?
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published private(set) var dshAPIKeyConfigured = false
@@ -91,7 +94,10 @@ final class AppModel: ObservableObject {
                     self.connectionState = state
                     if let message { self.errorMessage = message }
                     else if state == .connected { self.errorMessage = nil }
-                    if state == .connected { self.syncRemoteState() }
+                    if state == .connected {
+                        self.syncRemoteState()
+                        Task { await self.refreshCopilotHistory() }
+                    }
                 }
             },
             commandHandler: { [weak self] command in
@@ -378,8 +384,65 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func refreshCopilotHistory() async {
+        guard let remoteClient else { return }
+        do {
+            let records = try await remoteClient.listCopilotHistory()
+            let directories = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
+            let pathsByID = Dictionary(uniqueKeysWithValues: directories.map { ($0.value, $0.key) })
+            copilotHistory = records.compactMap { record in
+                guard record.toolKey == BuiltInTool.copilot.rawValue,
+                      record.runtimeMode == SessionRuntimeMode.acp.rawValue,
+                      record.status == "finished" || record.status == "failed",
+                      let id = UUID(uuidString: record.id),
+                      structuredSessions[id] == nil else { return nil }
+                return CopilotHistorySession(
+                    id: id, workspaceId: record.workspaceId,
+                    displayName: record.displayName ?? "GitHub Copilot",
+                    directory: pathsByID[record.workspaceId].map { URL(fileURLWithPath: $0) },
+                    updatedAt: record.updatedAt
+                )
+            }
+        } catch {
+            errorMessage = "无法读取 Copilot 历史：\(error.localizedDescription)"
+        }
+    }
+
+    func loadCopilotHistory(_ archive: CopilotHistorySession) async throws -> [RelayHistoryEvent] {
+        guard let remoteClient else { throw AgentError.providerUnavailable("Server 未连接") }
+        historyLoadingID = archive.id
+        defer { historyLoadingID = nil }
+        let events = try await remoteClient.loadCopilotHistory(sessionID: archive.id)
+        historyMessages[archive.id] = CopilotHistory.messages(from: events)
+        return events
+    }
+
+    func importCopilotHistory(_ archive: CopilotHistorySession) async -> UUID? {
+        guard let directory = archive.directory,
+              FileManager.default.fileExists(atPath: directory.path) else {
+            errorMessage = "找不到原工作目录；请检查这台 Mac 的工作区设置。"
+            return nil
+        }
+        do {
+            let events = try await loadCopilotHistory(archive)
+            guard !CopilotHistory.messages(from: events).isEmpty,
+                  let context = CopilotHistory.context(from: events) else {
+                throw AgentError.providerUnavailable("Server 没有可用于继续的对话记录；历史可能已过期。")
+            }
+            workingDirectory = directory
+            selectedTool = .copilot
+            return startStructuredSession(initialContext: context)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     @discardableResult
-    private func startStructuredSession(resuming savedSession: CopilotSavedSession? = nil) -> UUID? {
+    private func startStructuredSession(
+        resuming savedSession: CopilotSavedSession? = nil,
+        initialContext: String? = nil
+    ) -> UUID? {
         guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
               let remoteClient else {
             errorMessage = "该工具不支持结构化模式。"
@@ -429,7 +492,8 @@ final class AppModel: ObservableObject {
         } else if selectedTool == .copilot {
             adapter = CopilotStructuredAdapter(
                 configuredExecutableURL: executableURL,
-                reasoningEffort: copilotReasoningEffort
+                reasoningEffort: copilotReasoningEffort,
+                initialContext: initialContext
             )
         } else {
             let host = CodexAppServerHost(

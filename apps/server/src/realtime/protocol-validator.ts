@@ -5,6 +5,8 @@ import type {
   DeviceRegisterPayload,
   Envelope,
   SessionEndedPayload,
+  SessionHistoryListPayload,
+  SessionHistoryRequestPayload,
   SessionSyncPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
@@ -17,6 +19,8 @@ import {
   deviceRegisterSchema,
   envelopeSchema,
   sessionEndedSchema,
+  sessionHistoryListSchema,
+  sessionHistoryRequestSchema,
   sessionSyncSchema,
   sessionStartedSchema,
   terminalOutputSchema,
@@ -35,6 +39,8 @@ export type ValidClientMessage =
   | { type: 'session.started'; envelope: Envelope<SessionStartedPayload> }
   | { type: 'session.ended'; envelope: Envelope<SessionEndedPayload> }
   | { type: 'session.sync'; envelope: Envelope<SessionSyncPayload> }
+  | { type: 'session.history.list'; envelope: Envelope<SessionHistoryListPayload> }
+  | { type: 'session.history.request'; envelope: Envelope<SessionHistoryRequestPayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
   | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
@@ -71,6 +77,8 @@ export class ProtocolValidator {
         properties: { autoApproveEnabled: { type: 'boolean' } },
         maxProperties: 1,
       })],
+      ['session.history.list', ajv.compile(sessionHistoryListSchema)],
+      ['session.history.request', ajv.compile(sessionHistoryRequestSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
@@ -119,7 +127,15 @@ export class ProtocolValidator {
       };
     }
 
-    if (envelope.type === 'session.started') {
+    if (envelope.type === 'session.history.list') {
+      if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
+        return invalidContext(envelope, 'session.history.list must not include sessionId, seq, or commandId.');
+      }
+    } else if (envelope.type === 'session.history.request') {
+      if (!envelope.sessionId || envelope.seq !== undefined || envelope.commandId !== undefined) {
+        return invalidContext(envelope, 'session.history.request requires sessionId and must not include seq or commandId.');
+      }
+    } else if (envelope.type === 'session.started') {
       if (!envelope.sessionId || envelope.seq !== 0) {
         return invalidContext(
           envelope,
@@ -218,6 +234,22 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
         message: {
           type: envelope.type,
           envelope: envelope as unknown as Envelope<SessionSyncPayload>,
+        },
+      };
+    case 'session.history.list':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionHistoryListPayload>,
+        },
+      };
+    case 'session.history.request':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionHistoryRequestPayload>,
         },
       };
     case 'terminal.output':

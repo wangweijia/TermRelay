@@ -10,6 +10,7 @@ struct ContentView: View {
         HSplitView {
             SessionSidebar(
                 sessions: visibleSessions,
+                copilotHistory: appModel.copilotHistory,
                 terminalSessions: appModel.terminalSessions,
                 structuredSessions: appModel.structuredSessions,
                 selection: $selectedSessionID,
@@ -59,9 +60,9 @@ struct ContentView: View {
         .onAppear {
             selectedSessionID = appModel.sessions.last?.id
         }
-        .onChange(of: visibleSessions.map(\.id)) { _, sessionIDs in
+        .onChange(of: visibleSessions.map(\.id) + appModel.copilotHistory.map(\.id)) { _, sessionIDs in
             guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
-                self.selectedSessionID = sessionIDs.last
+                self.selectedSessionID = visibleSessions.last?.id ?? appModel.copilotHistory.first?.id
                 return
             }
         }
@@ -82,6 +83,14 @@ struct ContentView: View {
         } else if let selectedSession {
             SessionSummaryView(session: selectedSession) {
                 isPresentingNewSession = true
+            }
+        } else if let archive = appModel.copilotHistory.first(where: { $0.id == selectedSessionID }) {
+            CopilotHistoryView(archive: archive) {
+                if let id = await appModel.importCopilotHistory(archive) {
+                    selectedSessionID = id
+                    return true
+                }
+                return false
             }
         } else {
             EmptySessionView {
@@ -121,6 +130,61 @@ struct ContentView: View {
     }
 }
 
+private struct CopilotHistoryView: View {
+    @EnvironmentObject private var appModel: AppModel
+    let archive: CopilotHistorySession
+    let resume: () async -> Bool
+    @State private var error: String?
+    @State private var importing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(archive.displayName).font(.headline)
+                    Text(archive.directory?.path ?? "原工作目录未知")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("历史记录 · 无法直接向旧会话发送消息")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("最多读取最近 1000 条事件；过期的历史无法恢复。新会话会在第一条消息中参考这些记录。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("以历史创建新 Copilot 会话") {
+                    importing = true
+                    Task {
+                        let success = await resume()
+                        error = success ? nil : appModel.errorMessage
+                        importing = false
+                    }
+                }
+                .disabled(importing || archive.directory == nil || appModel.connectionState != .connected)
+            }
+            if appModel.historyLoadingID == archive.id || importing {
+                ProgressView()
+            }
+            if let error { Text(error).foregroundStyle(.red) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array((appModel.historyMessages[archive.id] ?? []).enumerated()), id: \.offset) { _, message in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(message.role).font(.caption.bold()).foregroundStyle(.secondary)
+                            Text(message.text).textSelection(.enabled)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding()
+            }
+        }
+        .padding()
+        .task(id: archive.id) {
+            do { _ = try await appModel.loadCopilotHistory(archive) }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
 private struct StructuredAgentSessionView: View {
     private static let timelineBottomID = "structured-agent-timeline-bottom"
 
@@ -148,6 +212,13 @@ private struct StructuredAgentSessionView: View {
             .padding()
             .background(Color(nsColor: .windowBackgroundColor))
             .overlay(alignment: .bottom) { Divider() }
+
+            if let failure = session.failureMessage {
+                Label(failure, systemImage: "xmark.octagon")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {

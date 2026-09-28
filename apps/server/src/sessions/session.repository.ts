@@ -55,6 +55,8 @@ export type SessionDeleteResult = 'deleted' | 'not_found' | 'not_finished';
 export class SessionRepository {
   private readonly terminalEventTtlMs =
     readPositiveInteger('TERMINAL_EVENT_TTL_HOURS', 24) * 60 * 60 * 1_000;
+  private readonly acpEventTtlMs =
+    readPositiveInteger('ACP_EVENT_TTL_HOURS', 30 * 24) * 60 * 60 * 1_000;
 
   constructor(
     @Optional()
@@ -207,7 +209,8 @@ export class SessionRepository {
         type,
         payload: { ...payload },
         createdAt,
-        expiresAt: new Date(Date.now() + this.terminalEventTtlMs),
+        expiresAt: new Date(Date.now() + (type === 'tool.event'
+          ? this.acpEventTtlMs : this.terminalEventTtlMs)),
       });
       if (type === 'tool.event') {
         await persistApprovalProjection(manager, sessionId, payload as ToolEventPayload);
@@ -239,6 +242,32 @@ export class SessionRepository {
       where: { deletedAt: IsNull() },
       order: { updatedAt: 'DESC' },
     });
+    return sessions.map(toSessionRecord);
+  }
+
+  async listCopilotHistoryForDevice(
+    deviceId: string,
+    cursor: { updatedAt: Date; id: string } | undefined,
+    limit: number,
+  ): Promise<SessionRecord[]> {
+    if (!this.dataSource) return [];
+    const query = this.repository
+      .createQueryBuilder('session')
+      .where('session.deviceId = :deviceId', { deviceId })
+      .andWhere('session.deletedAt IS NULL')
+      .andWhere('session.toolKey = :toolKey', { toolKey: 'copilot' })
+      .andWhere('session.runtimeMode = :runtimeMode', { runtimeMode: 'acp' });
+    if (cursor) {
+      query.andWhere(
+        '(session.updatedAt < :updatedAt OR (session.updatedAt = :updatedAt AND session.id < :cursorId))',
+        { updatedAt: cursor.updatedAt, cursorId: cursor.id },
+      );
+    }
+    const sessions = await query
+      .orderBy('session.updatedAt', 'DESC')
+      .addOrderBy('session.id', 'DESC')
+      .limit(limit)
+      .getMany();
     return sessions.map(toSessionRecord);
   }
 

@@ -3,6 +3,60 @@ import XCTest
 @testable import TermRelay
 
 final class CopilotACPClientTests: XCTestCase {
+    func testServerHistoryImportsOnlyConversationAndRecentWork() {
+        let events: [RelayHistoryEvent] = [
+            .init(seq: 1, type: "tool.event", payload: .object([
+                "kind": .string("user.message"), "data": .object(["text": .string("Fix the parser")]),
+            ]), createdAt: ""),
+            .init(seq: 2, type: "tool.event", payload: .object([
+                "kind": .string("command.started"), "data": .object(["command": .string("pnpm test")]),
+            ]), createdAt: ""),
+            .init(seq: 3, type: "tool.event", payload: .object([
+                "kind": .string("assistant.delta"), "data": .object(["text": .string("Fixed")]),
+            ]), createdAt: ""),
+            .init(seq: 4, type: "tool.event", payload: .object([
+                "kind": .string("assistant.completed"), "data": .object(["text": .string("Fixed the parser")]),
+            ]), createdAt: ""),
+        ]
+        XCTAssertEqual(CopilotHistory.messages(from: events), [
+            .init(role: "用户", text: "Fix the parser"),
+            .init(role: "Copilot", text: "Fixed the parser"),
+        ])
+        let context = CopilotHistory.context(from: events)
+        XCTAssertTrue(context?.contains("用户：Fix the parser") == true)
+        XCTAssertTrue(context?.contains("执行命令：pnpm test") == true)
+        XCTAssertTrue(context?.contains("Copilot：Fixed the parser") == true)
+        XCTAssertFalse(context?.contains("assistant.delta") == true)
+        XCTAssertNil(CopilotHistory.context(from: []))
+        let bounded = CopilotHistory.context(from: events, maximumCharacters: 15)
+        XCTAssertFalse(bounded?.contains("Fix the parser") == true)
+    }
+
+    func testNewCopilotSessionReceivesImportedContextOnFirstPrompt() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let runtime = CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.0", initialContext: "Previous work: fixed parser",
+            client: CopilotACPClient(transport: transport)
+        )
+        let starting = Task {
+            try await runtime.start()
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
+            ))
+        }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: ["protocolVersion": 1])
+        transport.respond(to: try await transport.waitForSentMessage(at: 1), result: ["sessionId": "new-session"])
+        try await starting.value
+        try await runtime.send(.startTurn(TurnInput(text: "Continue"), idempotencyKey: UUID()))
+        let first = try await transport.waitForSentMessage(at: 2)
+        let prompt = (first["params"] as? [String: Any])?["prompt"] as? [[String: Any]]
+        XCTAssertTrue((prompt?.first?["text"] as? String)?.contains("Previous work: fixed parser") == true)
+        XCTAssertTrue((prompt?.first?["text"] as? String)?.contains("Continue") == true)
+        await runtime.stop()
+    }
+
     func testCopilotListsSavedSessionsAcrossPagesForWorkspace() async throws {
         let transport = FakeCopilotACPTransport()
         let adapter = CopilotStructuredAdapter(

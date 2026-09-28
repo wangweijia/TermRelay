@@ -34,6 +34,8 @@ actor RemoteClient {
     private var sessionsAwaitingSync = Set<UUID>()
     private var sessionsFinalizingSync = Set<UUID>()
     private var sessionsWithLocalGap = Set<UUID>()
+    private var historyRequests: [UUID: CheckedContinuation<IncomingRelayEnvelope, Error>] = [:]
+    private var historyTimeouts: [UUID: Task<Void, Never>] = [:]
     private let syncEveryEventCount = 64
     private let outbox: RelayOutboxStore
 
@@ -78,6 +80,7 @@ actor RemoteClient {
     }
 
     func disconnect() {
+        failHistoryRequests(URLError(.networkConnectionLost))
         shouldRun = false
         generation += 1
         registered = false
@@ -98,6 +101,103 @@ actor RemoteClient {
 
     func setActiveSessionCount(_ count: Int) {
         activeSessionCount = max(0, count)
+    }
+
+    func listCopilotHistory() async throws -> [RelayHistorySession] {
+        var cursor: String?
+        var result: [RelayHistorySession] = []
+        var seen = Set<String>()
+        repeat {
+            let payload: [String: JSONValue] = cursor.map { ["cursor": .string($0)] } ?? [:]
+            let response = try await requestHistory(type: "session.history.list", payload: payload)
+            guard response.type == "session.history.listed",
+                  let object = response.payload.object,
+                  let sessions = object["sessions"]?.array,
+                  let hasMore = object["hasMore"]?.bool else {
+                throw AgentError.protocolFailure("Server 返回的历史会话列表无效")
+            }
+            result += try sessions.map { try decodeHistory($0, as: RelayHistorySession.self) }
+            if !hasMore { return result }
+            guard let nextCursor = object["nextCursor"]?.string,
+                  seen.insert(nextCursor).inserted else {
+                throw AgentError.protocolFailure("Server 历史会话分页没有推进")
+            }
+            cursor = nextCursor
+        } while result.count < 5_000
+        throw AgentError.protocolFailure("历史会话超过 5000 条；无法完整加载")
+    }
+
+    func loadCopilotHistory(sessionID: UUID) async throws -> [RelayHistoryEvent] {
+        var beforeSeq: Int?
+        var pages = 0
+        var more = true
+        var result: [RelayHistoryEvent] = []
+        repeat {
+            var payload: [String: JSONValue] = ["limit": .number(20)]
+            if let beforeSeq { payload["beforeSeq"] = .number(Double(beforeSeq)) }
+            let response = try await requestHistory(
+                type: "session.history.request",
+                sessionId: sessionID.uuidString.lowercased(),
+                payload: payload
+            )
+            guard response.type == "session.history",
+                  response.sessionId?.caseInsensitiveCompare(sessionID.uuidString) == .orderedSame,
+                  let object = response.payload.object,
+                  let items = object["events"]?.array,
+                  let hasMore = object["hasMore"]?.bool else {
+                throw AgentError.protocolFailure("Server 返回的会话历史无效")
+            }
+            let page = try items.map { try decodeHistory($0, as: RelayHistoryEvent.self) }
+            guard !hasMore || (page.first.map { $0.seq < (beforeSeq ?? Int.max) } == true) else {
+                throw AgentError.protocolFailure("Server 历史分页没有推进")
+            }
+            result.insert(contentsOf: page, at: 0)
+            beforeSeq = page.first?.seq
+            pages += 1
+            more = hasMore
+        } while more && pages < 50
+        return result
+    }
+
+    private func decodeHistory<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
+        try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
+    }
+
+    private func requestHistory(
+        type: String,
+        sessionId: String? = nil,
+        payload: [String: JSONValue]
+    ) async throws -> IncomingRelayEnvelope {
+        guard registered else { throw AgentError.providerUnavailable("先连接 Server 才能读取历史会话") }
+        let id = UUID()
+        return try await withCheckedThrowingContinuation { continuation in
+            historyRequests[id] = continuation
+            Task {
+                do {
+                    try await sendRaw(type: type, sessionId: sessionId, messageId: id, payload: payload)
+                    if historyRequests[id] != nil {
+                        historyTimeouts[id] = Task {
+                            try? await Task.sleep(for: .seconds(20))
+                            guard !Task.isCancelled else { return }
+                            historyTimeouts.removeValue(forKey: id)
+                            historyRequests.removeValue(forKey: id)?.resume(
+                                throwing: AgentError.protocolFailure("读取 Server 会话历史超时")
+                            )
+                        }
+                    }
+                } catch {
+                    historyTimeouts.removeValue(forKey: id)?.cancel()
+                    historyRequests.removeValue(forKey: id)?.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func failHistoryRequests(_ error: Error) {
+        for timeout in historyTimeouts.values { timeout.cancel() }
+        historyTimeouts.removeAll()
+        for pending in historyRequests.values { pending.resume(throwing: error) }
+        historyRequests.removeAll()
     }
 
     func publishAutoApprove(sessionID: UUID, enabled: Bool) async {
@@ -208,6 +308,7 @@ actor RemoteClient {
             let task = URLSession.shared.webSocketTask(with: request)
             socket = task
             registered = false
+            failHistoryRequests(URLError(.networkConnectionLost))
             announcedSessions.removeAll()
             task.resume()
 
@@ -256,6 +357,19 @@ actor RemoteClient {
 
     private func handle(_ envelope: IncomingRelayEnvelope) async {
         guard envelope.deviceId.caseInsensitiveCompare(deviceID.uuidString) == .orderedSame else { return }
+        if let related = envelope.payload.object?["relatedMessageId"]?.string,
+           let id = UUID(uuidString: related),
+           let pending = historyRequests.removeValue(forKey: id) {
+            historyTimeouts.removeValue(forKey: id)?.cancel()
+            if envelope.type == "protocol.error" {
+                pending.resume(throwing: AgentError.protocolFailure(
+                    envelope.payload.object?["message"]?.string ?? "Server 拒绝了历史请求"
+                ))
+            } else {
+                pending.resume(returning: envelope)
+            }
+            return
+        }
         if envelope.type == "client.authorization-revoked" {
             invalidateAuthorization()
             return
@@ -620,13 +734,14 @@ actor RemoteClient {
         sessionId: String? = nil,
         commandId: UUID? = nil,
         seq: UInt64? = nil,
+        messageId: UUID = UUID(),
         payload: Payload
     ) async throws {
         guard let socket else { throw URLError(.notConnectedToInternet) }
         let envelope = RelayEnvelope(
             type: type,
             protocolVersion: "2",
-            messageId: UUID(),
+            messageId: messageId,
             deviceId: deviceID.uuidString.lowercased(),
             sessionId: sessionId,
             commandId: commandId,

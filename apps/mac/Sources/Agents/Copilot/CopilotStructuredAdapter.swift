@@ -12,15 +12,18 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
     let displayName = "GitHub Copilot"
     let configuredExecutableURL: URL?
     let reasoningEffort: CopilotReasoningEffort
+    let initialContext: String?
     let transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)?
 
     init(
         configuredExecutableURL: URL? = nil,
         reasoningEffort: CopilotReasoningEffort = .automatic,
+        initialContext: String? = nil,
         transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)? = nil
     ) {
         self.configuredExecutableURL = configuredExecutableURL
         self.reasoningEffort = reasoningEffort
+        self.initialContext = initialContext
         self.transportFactory = transportFactory
     }
 
@@ -57,6 +60,7 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
             sessionID: configuration.sessionID,
             workspaceURL: configuration.workspaceURL,
             providerVersion: installation.version,
+            initialContext: initialContext,
             client: CopilotACPClient(transport: transport)
         )
     }
@@ -146,6 +150,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
 
     private let sessionID: UUID
     private let workspaceURL: URL
+    private var initialContext: String?
     private let client: CopilotACPClient
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
@@ -177,10 +182,12 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         sessionID: UUID,
         workspaceURL: URL,
         providerVersion: String,
+        initialContext: String? = nil,
         client: CopilotACPClient
     ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
+        self.initialContext = initialContext
         self.client = client
         descriptor = AgentDescriptor(
             providerID: .copilot,
@@ -337,8 +344,12 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
             assistantMessageOrder.removeAll()
             emit(.userMessage(messageID: turnID, text: input.text), turnID: turnID, itemID: turnID)
             emit(.turnStarted(turnID: turnID), turnID: turnID)
+            let prompt = initialContext.map {
+                "\($0)\n\n当前用户请求（优先执行这一条）：\n\(input.text)"
+            }.flatMap { input.text.hasPrefix("/model --session ") ? nil : $0 } ?? input.text
+            if !input.text.hasPrefix("/model --session ") { initialContext = nil }
             promptTask = Task { [weak self] in
-                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, text: input.text)
+                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, text: prompt)
             }
         case .steer:
             throw AgentError.unsupportedCapability("steering")

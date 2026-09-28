@@ -55,6 +55,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 - **手机审批推送**：Server 可通过 Bark 将新审批推送到 iPhone；通知开关由 Web 控制并持久化。
 - **专用手机页面**：`/mobile` 使用独立的会话、工作区、审批三 Tab 布局，不是桌面页面的压缩版本。
 - **实时同步与恢复**：设备注册、心跳、Session 状态、历史事件回放、实时 WebSocket 订阅和命令 ACK。
+- **Mac 上继续 Copilot 历史**：连接 Server 后，侧边栏展示这台 Mac 设备的 Copilot 历史记录。选中历史可只读查看仍保留的对话；选择“以历史创建新 Copilot 会话”会在原工作目录启动新会话，首次发送消息时附上最近的历史对话与工作记录。此操作不是重新连接旧进程，不会恢复尚在执行的工具或审批。历史必须尚未过期，且原工作目录和 Copilot CLI 在本机可用；如果缺少可用对话，界面会明确报错。Copilot CLI 本地 `session/load` 仍可用于继续其原生会话。
 - **两种安全部署边界**：Web 走 Cloudflare Access；Mac App 可选局域网直连，或通过公网配对 + 设备凭据连接。
 
 ## 界面预览
@@ -319,6 +320,7 @@ Mac App 不是浏览器，无法完成 Cloudflare Access 的交互式登录；�
 | `DB_MIGRATION_USER` / `DB_MIGRATION_PASSWORD` | 仅生产 | 只用于一次性 migration，不留在长期运行容器中 |
 | `BARK_PUSH_URL` | `https://api.day.app/your-device-key` | 手机审批推送地址，留空则不推送 |
 | `TERMINAL_EVENT_TTL_HOURS` | `24` | 终端事件回放的保留时长 |
+| `ACP_EVENT_TTL_HOURS` | `720` | ACP 对话与工具事件的保留时长（小时）；旧版本已过期的内容无法找回 |
 | `WEB_MAX_SESSION_SUBSCRIPTIONS` | `16` | 单个 Web 连接可同时订阅的会话数上限 |
 | `WEB_MAX_REPLAY_EVENTS` | `10000` | 单次历史回放的事件数上限 |
 | `WEB_SOCKET_PING_INTERVAL_MS` | `25000` | `/ws/web` 心跳间隔；如 Cloudflare 空闲策略变化可调整 |

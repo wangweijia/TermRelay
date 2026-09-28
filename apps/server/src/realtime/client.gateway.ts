@@ -12,6 +12,8 @@ import type {
   Envelope,
   ProtocolErrorCode,
   ProtocolErrorPayload,
+  SessionHistoryListedPayload,
+  SessionHistoryPayload,
   SessionSyncedPayload,
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
@@ -24,6 +26,29 @@ import {
   ProtocolValidator,
   type ValidClientMessage,
 } from './protocol-validator';
+
+const HISTORY_LIST_LIMIT = 100;
+const HISTORY_EVENT_LIMIT = 50;
+const HISTORY_EVENT_BYTES = 2_000_000;
+
+function encodeHistoryCursor(session: { updatedAt: string; id: string }): string {
+  return `${Buffer.from(session.updatedAt).toString('base64url')}.${Buffer.from(session.id).toString('base64url')}`;
+}
+
+function parseHistoryCursor(cursor: string): { updatedAt: Date; id: string } | undefined {
+  const parts = cursor.split('.');
+  if (parts.length !== 2) return undefined;
+  const [encodedDate, encodedId] = parts;
+  if (!encodedDate || !encodedId) return undefined;
+  const dateText = Buffer.from(encodedDate, 'base64url').toString('utf8');
+  const id = Buffer.from(encodedId, 'base64url').toString('utf8');
+  if (!id || id.length > 128 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(dateText)
+    || Buffer.from(dateText).toString('base64url') !== encodedDate
+    || Buffer.from(id).toString('base64url') !== encodedId) return undefined;
+  const updatedAt = new Date(dateText);
+  return !Number.isNaN(updatedAt.getTime()) && updatedAt.toISOString() === dateText
+    ? { updatedAt, id } : undefined;
+}
 
 @WebSocketGateway({ path: '/ws/client' })
 export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -42,6 +67,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.close(1008, 'unauthorized');
       return;
     }
+
     this.registry.connect(client);
   }
 
@@ -160,6 +186,100 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'session.history.list') {
+      const { envelope } = result.message;
+      const cursor = envelope.payload.cursor === undefined
+        ? undefined : parseHistoryCursor(envelope.payload.cursor);
+      if (envelope.payload.cursor !== undefined && !cursor) {
+        this.sendProtocolError(
+          client, 'invalid_message', 'Invalid session history cursor.',
+          envelope.messageId,
+        );
+        return;
+      }
+      const records = await this.sessions.listCopilotHistoryForDevice(
+        envelope.deviceId, cursor, HISTORY_LIST_LIMIT + 1,
+      );
+      const hasMore = records.length > HISTORY_LIST_LIMIT;
+      const page = records.slice(0, HISTORY_LIST_LIMIT);
+      this.sendEnvelope<SessionHistoryListedPayload>(client, {
+        type: 'session.history.listed',
+        protocolVersion: '2',
+        messageId: randomUUID(),
+        deviceId: envelope.deviceId,
+        sentAt: new Date().toISOString(),
+        payload: {
+          sessions: page.map((session) => ({
+            id: session.id,
+            workspaceId: session.workspaceId,
+            toolKey: session.toolKey,
+            displayName: session.displayName,
+            runtimeMode: 'acp',
+            status: session.status,
+            startedAt: session.startedAt,
+            updatedAt: session.updatedAt,
+          })),
+          hasMore,
+          relatedMessageId: envelope.messageId,
+          ...(hasMore ? { nextCursor: encodeHistoryCursor(page[page.length - 1]!) } : {}),
+        },
+      });
+      return;
+    }
+
+    if (result.message.type === 'session.history.request') {
+      const { envelope } = result.message;
+      const sessionId = envelope.sessionId!;
+      const session = await this.sessions.findOwnedSession(envelope.deviceId, sessionId);
+      if (!session || session.toolKey !== 'copilot' || session.runtimeMode !== 'acp') {
+        this.sendProtocolError(
+          client, 'unknown_session', 'Session does not exist for this device.',
+          envelope.messageId, sessionId,
+        );
+        return;
+      }
+      const limit = envelope.payload.limit ?? HISTORY_EVENT_LIMIT;
+      const records = await this.sessions.listEventsBefore(
+        sessionId, envelope.payload.beforeSeq, limit + 1,
+      );
+      if (!records) {
+        this.sendProtocolError(
+          client, 'unknown_session', 'Session does not exist for this device.',
+          envelope.messageId, sessionId,
+        );
+        return;
+      }
+      let bytes = 0;
+      const events = [];
+      for (const event of records.slice(-limit).reverse()) {
+        const size = Buffer.byteLength(JSON.stringify(event), 'utf8');
+        if (bytes + size > HISTORY_EVENT_BYTES) break;
+        bytes += size;
+        events.push(event);
+      }
+      if (events.length === 0 && records.length > 0) {
+        this.sendProtocolError(
+          client, 'conflict', 'History event exceeds the maximum response size.',
+          envelope.messageId, sessionId,
+        );
+        return;
+      }
+      this.sendEnvelope<SessionHistoryPayload>(client, {
+        type: 'session.history',
+        protocolVersion: '2',
+        messageId: randomUUID(),
+        deviceId: envelope.deviceId,
+        sessionId,
+        sentAt: new Date().toISOString(),
+        payload: {
+          events: events.reverse(),
+          hasMore: records.length > events.length,
+          relatedMessageId: envelope.messageId,
+        },
+      });
+      return;
+    }
+
     return this.handleSessionEvent(client, result.message);
   }
 
@@ -171,7 +291,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' }
     >,
   ): Promise<void> {
     const { envelope } = message;
@@ -220,6 +340,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       } else if (message.type === 'session.started') {
         await this.sendSessionWatermark(client, envelope);
       }
+
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to handle ${message.type}: ${detail}`);

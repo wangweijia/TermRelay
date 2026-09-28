@@ -252,9 +252,92 @@ test('routes command acknowledgements from a registered Mac', async () => {
     sessionId: 'session-a',
     commandId,
   });
-
   assert.deepEqual(commands.acknowledged, [commandId]);
 });
+
+test('lists only owned Copilot history in bounded pages on a registered connection', async () => {
+    const { gateway, sessions } = makeGateway();
+    const socket = new FakeSocket();
+    const client = socket.asWebSocket();
+    gateway.handleConnection(client);
+    await gateway.handleMessage(client, envelope('device-a', 'session.history.list', {}));
+    assert.equal(socket.messages.at(-1)?.data.payload.code, 'unknown_device');
+    assert.equal(socket.closed.at(-1)?.code, 1008);
+
+    const registeredSocket = new FakeSocket();
+    const registeredClient = registeredSocket.asWebSocket();
+    gateway.handleConnection(registeredClient);
+    await gateway.handleMessage(registeredClient, envelope('device-a', 'device.register', {
+      name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['copilot'],
+    }));
+    sessions.historySessions = Array.from({ length: 101 }, (_, index) => ({
+      id: `session-${String(100 - index).padStart(3, '0')}`, deviceId: 'device-a', workspaceId: 'workspace-a',
+      toolKey: 'copilot', displayName: null, runtimeMode: 'acp', status: 'finished',
+      startedAt: null, updatedAt: new Date().toISOString(),
+    }));
+    const firstRequest = envelope('device-a', 'session.history.list', {});
+    await gateway.handleMessage(registeredClient, firstRequest);
+    assert.equal(registeredSocket.messages.at(-1)?.data.type, 'session.history.listed');
+    assert.equal((registeredSocket.messages.at(-1)?.data.payload.sessions as unknown[]).length, 100);
+    assert.equal(registeredSocket.messages.at(-1)?.data.payload.hasMore, true);
+    assert.equal(registeredSocket.messages.at(-1)?.data.payload.relatedMessageId, firstRequest.messageId);
+    const nextCursor = registeredSocket.messages.at(-1)?.data.payload.nextCursor;
+    assert.equal(typeof nextCursor, 'string');
+    assert.deepEqual(sessions.lastHistoryQuery, ['device-a', undefined, 101]);
+    await gateway.handleMessage(registeredClient, envelope('device-a', 'session.history.list', { cursor: nextCursor }));
+    assert.equal((registeredSocket.messages.at(-1)?.data.payload.sessions as unknown[]).length, 1);
+    assert.equal((registeredSocket.messages.at(-1)?.data.payload.sessions as Array<{ id: string }>)[0]?.id, 'session-000');
+    assert.equal(registeredSocket.messages.at(-1)?.data.payload.hasMore, false);
+    assert.equal(registeredSocket.messages.at(-1)?.data.payload.nextCursor, undefined);
+    assert.equal(sessions.lastHistoryQuery?.[1]?.id, 'session-001');
+    await gateway.handleMessage(registeredClient, envelope('device-a', 'session.history.list', {
+      cursor: 'YWJj.ZGVm',
+    }));
+    assert.equal(registeredSocket.messages.at(-1)?.data.payload.code, 'invalid_message');
+  });
+
+test('returns owned Copilot events oldest-first with a bounded reverse cursor', async () => {
+    const { gateway, sessions } = makeGateway();
+    const socket = new FakeSocket();
+    const client = socket.asWebSocket();
+    gateway.handleConnection(client);
+    await gateway.handleMessage(client, envelope('device-a', 'device.register', {
+      name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['copilot'],
+    }));
+    sessions.historyEvents = Array.from({ length: 4 }, (_, seq) => ({
+      seq, type: 'tool.event', payload: { value: seq }, createdAt: new Date().toISOString(),
+    }));
+    const request = {
+      ...envelope('device-a', 'session.history.request', { limit: 2 }),
+      sessionId: 'session-a',
+    };
+    await gateway.handleMessage(client, request);
+    assert.deepEqual((socket.messages.at(-1)?.data.payload.events as Array<{ seq: number }>).map((e) => e.seq), [2, 3]);
+    assert.equal(socket.messages.at(-1)?.data.payload.hasMore, true);
+    assert.equal(socket.messages.at(-1)?.data.sessionId, 'session-a');
+    assert.equal(socket.messages.at(-1)?.data.payload.relatedMessageId, request.messageId);
+    assert.deepEqual(sessions.lastEventsQuery, ['session-a', undefined, 3]);
+    await gateway.handleMessage(client, { ...request, payload: { beforeSeq: 2, limit: 2 } });
+    assert.deepEqual((socket.messages.at(-1)?.data.payload.events as Array<{ seq: number }>).map((e) => e.seq), [0, 1]);
+    assert.equal(socket.messages.at(-1)?.data.payload.hasMore, false);
+
+    await gateway.handleMessage(client, { ...request, sessionId: 'not-owned' });
+    assert.equal(socket.messages.at(-1)?.data.payload.code, 'unknown_session');
+    assert.equal(socket.messages.at(-1)?.data.payload.relatedMessageId, request.messageId);
+    sessions.historyEvents = [0, 1].map((seq) => ({
+      seq, type: 'tool.event', payload: { text: 'x'.repeat(1_100_000) },
+      createdAt: new Date().toISOString(),
+    }));
+    await gateway.handleMessage(client, request);
+    assert.deepEqual((socket.messages.at(-1)?.data.payload.events as Array<{ seq: number }>).map((e) => e.seq), [1]);
+    assert.equal(socket.messages.at(-1)?.data.payload.hasMore, true);
+    sessions.historyEvents = [{
+      seq: 0, type: 'tool.event', payload: { text: 'x'.repeat(2_000_000) },
+      createdAt: new Date().toISOString(),
+    }];
+    await gateway.handleMessage(client, request);
+    assert.equal(socket.messages.at(-1)?.data.payload.code, 'conflict');
+  });
 
 function makeGateway() {
   const registry = new DeviceConnectionRegistry();
@@ -315,6 +398,14 @@ function contextualEnvelope(
 
 class FakeSessionsService {
   readonly calls: string[] = [];
+  historySessions: Array<{
+    id: string; deviceId: string; workspaceId: string; toolKey: string;
+    displayName: string | null; runtimeMode: 'acp'; status: 'finished';
+    startedAt: string | null; updatedAt: string;
+  }> = [];
+  historyEvents: Array<{ seq: number; type: string; payload: Record<string, unknown>; createdAt: string }> = [];
+  lastHistoryQuery?: [string, { updatedAt: Date; id: string } | undefined, number];
+  lastEventsQuery?: [string, number | undefined, number];
   outputResult:
     | { status: 'accepted' }
     | { status: 'error'; code: 'conflict'; detail: string; expectedSeq: number } = {
@@ -365,7 +456,27 @@ class FakeSessionsService {
       deviceId,
       stateVersion: 0,
       autoApproveEnabled: this.autoApproveEnabled,
+      toolKey: 'copilot',
+      runtimeMode: 'acp',
     };
+  }
+
+  async listCopilotHistoryForDevice(
+    deviceId: string, cursor: { updatedAt: Date; id: string } | undefined, limit: number,
+  ) {
+    this.lastHistoryQuery = [deviceId, cursor, limit];
+    return this.historySessions
+      .filter((session) => !cursor
+        || session.updatedAt < cursor.updatedAt.toISOString()
+        || (session.updatedAt === cursor.updatedAt.toISOString() && session.id < cursor.id))
+      .slice(0, limit);
+  }
+
+  async listEventsBefore(sessionId: string, beforeSeq: number | undefined, limit: number) {
+    this.lastEventsQuery = [sessionId, beforeSeq, limit];
+    return this.historyEvents
+      .filter((event) => beforeSeq === undefined || event.seq < beforeSeq)
+      .slice(-limit);
   }
 
   async setAutoApprove(sessionId: string, enabled: boolean, deviceId?: string) {
