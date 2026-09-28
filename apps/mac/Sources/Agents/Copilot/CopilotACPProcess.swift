@@ -1,12 +1,37 @@
 import Darwin
 import Foundation
 
+enum CopilotReasoningEffort: String, CaseIterable, Sendable {
+    case automatic
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+
+    var displayName: String {
+        switch self {
+        case .automatic: "默认"
+        case .low: "低"
+        case .medium: "中"
+        case .high: "高"
+        case .xhigh: "超高"
+        case .max: "最高"
+        }
+    }
+
+    var launchArguments: [String] {
+        self == .automatic ? ["--acp", "--stdio"] : ["--acp", "--stdio", "--effort=\(rawValue)"]
+    }
+}
+
 final class CopilotACPProcess: @unchecked Sendable, CopilotACPTransport {
     let lines: AsyncThrowingStream<Data, Error>
 
     private let executableURL: URL
     private let directory: URL
     private let environment: [String: String]
+    private let reasoningEffort: CopilotReasoningEffort
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let stateLock = NSLock()
     private let lineBuffer: JSONLineBuffer
@@ -15,10 +40,16 @@ final class CopilotACPProcess: @unchecked Sendable, CopilotACPTransport {
     private var inputHandle: FileHandle?
     private var stderrTail = Data()
 
-    init(executableURL: URL, directory: URL, environment: [String: String]) {
+    init(
+        executableURL: URL,
+        directory: URL,
+        environment: [String: String],
+        reasoningEffort: CopilotReasoningEffort = .automatic
+    ) {
         self.executableURL = executableURL
         self.directory = directory
         self.environment = environment
+        self.reasoningEffort = reasoningEffort
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         lines = stream.stream
         continuation = stream.continuation
@@ -33,7 +64,7 @@ final class CopilotACPProcess: @unchecked Sendable, CopilotACPTransport {
             let output = Pipe()
             let error = Pipe()
             process.executableURL = executableURL
-            process.arguments = ["--acp", "--stdio"]
+            process.arguments = reasoningEffort.launchArguments
             process.currentDirectoryURL = directory
             process.environment = environment
             process.standardInput = input

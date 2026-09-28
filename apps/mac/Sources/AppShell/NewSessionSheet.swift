@@ -136,6 +136,14 @@ struct NewSessionSheet: View {
                     Text("通过 Copilot CLI 官方 ACP Server 连接。请先在终端运行 copilot login 完成登录。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Picker("推理强度", selection: $appModel.copilotReasoningEffort) {
+                        ForEach(CopilotReasoningEffort.allCases, id: \.self) { effort in
+                            Text(effort.displayName).tag(effort)
+                        }
+                    }
+                    Text("创建会话时设置；只有 CLI 通过 ACP 公布推理强度选项时，才能在会话内切换。可用等级取决于模型。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

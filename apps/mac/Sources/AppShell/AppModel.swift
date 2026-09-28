@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var dshAPIKeyConfigured = false
     @Published private(set) var clientAuthorizationState: ClientAuthorizationState = .notRequired
     @Published var selectedTool: BuiltInTool = .shell
+    @Published var copilotReasoningEffort: CopilotReasoningEffort = .automatic
     @Published var codexInteractionMode: CodexInteractionMode {
         didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
     }
@@ -390,7 +391,10 @@ final class AppModel: ObservableObject {
             environment["DEEPSEEK_API_KEY"] = key
             adapter = DSHStructuredAdapter(configuredExecutableURL: executableURL)
         } else if selectedTool == .copilot {
-            adapter = CopilotStructuredAdapter(configuredExecutableURL: executableURL)
+            adapter = CopilotStructuredAdapter(
+                configuredExecutableURL: executableURL,
+                reasoningEffort: copilotReasoningEffort
+            )
         } else {
             let host = CodexAppServerHost(
                 executableURL: executableURL,

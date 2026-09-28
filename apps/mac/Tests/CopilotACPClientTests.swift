@@ -3,6 +3,16 @@ import XCTest
 @testable import TermRelay
 
 final class CopilotACPClientTests: XCTestCase {
+    func testCopilotACPReasoningEffortLaunchArguments() {
+        XCTAssertEqual(CopilotReasoningEffort.automatic.launchArguments, ["--acp", "--stdio"])
+        for effort in CopilotReasoningEffort.allCases where effort != .automatic {
+            XCTAssertEqual(
+                effort.launchArguments,
+                ["--acp", "--stdio", "--effort=\(effort.rawValue)"]
+            )
+        }
+    }
+
     func testCopilotAdvertisedModelCommandWithoutConfigOptions() async throws {
         let transport = FakeCopilotACPTransport()
         let sessionID = UUID()
@@ -94,6 +104,53 @@ final class CopilotACPClientTests: XCTestCase {
         }
         let refreshed = try await runtime.configurationOptions()
         XCTAssertEqual(refreshed.first?.currentValue, "model-a")
+        await runtime.stop()
+    }
+
+    func testCopilotAdvertisedThoughtLevelOptionCanChange() async throws {
+        let transport = FakeCopilotACPTransport()
+        let sessionID = UUID()
+        let runtime = CopilotStructuredRuntime(
+            sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
+            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+        )
+        let starting = Task {
+            try await runtime.start()
+            _ = try await runtime.createSession(AgentSessionRequest(
+                sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
+            ))
+        }
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: ["protocolVersion": 1])
+        let original: [[String: Any]] = [
+            [
+                "id": "provider-model", "name": "Model", "category": "model", "type": "select",
+                "currentValue": "model-a", "options": [["value": "model-a", "name": "Model A"]],
+            ],
+            [
+                "id": "reasoning-level", "name": "Reasoning", "category": "thought_level", "type": "select",
+                "currentValue": "medium", "options": [
+                    ["value": "medium", "name": "Medium"], ["value": "high", "name": "High"],
+                ],
+            ],
+        ]
+        transport.respond(
+            to: try await transport.waitForSentMessage(at: 1),
+            result: ["sessionId": "copilot-thought-level", "configOptions": original]
+        )
+        try await starting.value
+        let initialOptions = try await runtime.configurationOptions()
+        XCTAssertEqual(initialOptions.map(\.id), ["model", "effort"])
+
+        let changing = Task { try await runtime.setConfiguration(id: "effort", value: "high") }
+        let request = try await transport.waitForSentMessage(at: 2)
+        XCTAssertEqual(request["method"] as? String, "session/set_config_option")
+        XCTAssertEqual((request["params"] as? [String: Any])?["configId"] as? String, "reasoning-level")
+        var updated = original
+        updated[1]["currentValue"] = "high"
+        transport.respond(to: request, result: ["configOptions": updated])
+        let options = try await changing.value
+        XCTAssertEqual(options.map(\.id), ["model", "effort"])
+        XCTAssertEqual(options.last?.currentValue, "high")
         await runtime.stop()
     }
 

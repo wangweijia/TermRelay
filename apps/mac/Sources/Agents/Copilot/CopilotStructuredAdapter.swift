@@ -4,13 +4,16 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.copilot
     let displayName = "GitHub Copilot"
     let configuredExecutableURL: URL?
+    let reasoningEffort: CopilotReasoningEffort
     let transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)?
 
     init(
         configuredExecutableURL: URL? = nil,
+        reasoningEffort: CopilotReasoningEffort = .automatic,
         transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)? = nil
     ) {
         self.configuredExecutableURL = configuredExecutableURL
+        self.reasoningEffort = reasoningEffort
         self.transportFactory = transportFactory
     }
 
@@ -40,7 +43,8 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
         ) ?? CopilotACPProcess(
             executableURL: installation.executableURL,
             directory: configuration.workspaceURL,
-            environment: configuration.environment
+            environment: configuration.environment,
+            reasoningEffort: reasoningEffort
         )
         return CopilotStructuredRuntime(
             sessionID: configuration.sessionID,
@@ -90,7 +94,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     private var promptTask: Task<Void, Never>?
     private var providerSessionID: String?
     private var configOptions: [AgentConfigOption] = []
-    private var modelConfigID: String?
+    private var providerConfigIDs: [String: String] = [:]
     private var modelCommandAvailable = false
     private var activeTurnID: String?
     private var pendingApprovals: [String: PendingApproval] = [:]
@@ -167,12 +171,12 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {
         guard let providerSessionID,
               let option = configOptions.first(where: { $0.id == id }),
-              let modelConfigID,
+              let providerConfigID = providerConfigIDs[id],
               option.choices.contains(where: { $0.value == value }) else {
-            throw AgentError.unsupportedCapability("Copilot ACP model configuration")
+            throw AgentError.unsupportedCapability("Copilot ACP session configuration")
         }
         let result = try await client.request(method: "session/set_config_option", params: .object([
-            "sessionId": .string(providerSessionID), "configId": .string(modelConfigID), "value": .string(value),
+            "sessionId": .string(providerSessionID), "configId": .string(providerConfigID), "value": .string(value),
         ]))
         guard result.object?["configOptions"]?.array != nil else {
             throw AgentError.protocolFailure("Copilot 未确认配置变更")
@@ -186,11 +190,11 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     }
 
     private func updateConfigOptions(_ value: JSONValue?) {
-        let models = (value?.array ?? []).compactMap { item -> AgentConfigOption? in
+        let supported = (value?.array ?? []).compactMap { item -> (String, AgentConfigOption)? in
             guard let option = item.object,
                   option["type"]?.string == "select",
                   let category = option["category"]?.string,
-                  category == "model",
+                  category == "model" || category == "thought_level",
                   let id = option["id"]?.string,
                   let name = option["name"]?.string,
                   let current = option["currentValue"]?.string else { return nil }
@@ -203,11 +207,16 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
                 return .init(value: value, name: name)
             }
             guard !choices.isEmpty else { return nil }
-            return AgentConfigOption(id: id, name: name, currentValue: current, choices: choices)
+            return (category == "model" ? "model" : "effort",
+                    AgentConfigOption(id: id, name: name, currentValue: current, choices: choices))
         }
-        modelConfigID = models.first?.id
-        configOptions = models.prefix(1).map {
-            AgentConfigOption(id: "model", name: $0.name, currentValue: $0.currentValue, choices: $0.choices)
+        providerConfigIDs = [:]
+        configOptions = []
+        for (key, option) in supported where providerConfigIDs[key] == nil {
+            providerConfigIDs[key] = option.id
+            configOptions.append(AgentConfigOption(
+                id: key, name: option.name, currentValue: option.currentValue, choices: option.choices
+            ))
         }
     }
 
