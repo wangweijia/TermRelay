@@ -85,6 +85,27 @@ test('marks a stopped session finished after the Mac confirms the command', asyn
   service.onModuleDestroy();
 });
 
+test('records ACP input before sending it and rejects a stale window', async () => {
+  const mac = new FakeSocket();
+  const browser = new FakeSocket();
+  const sessions = new FakeSessions('acp');
+  const service = new CommandRelayService(
+    new FakeRegistry(mac) as unknown as DeviceConnectionRegistry,
+    sessions as unknown as SessionsService,
+  );
+  const command = envelope('tool.turn.start', randomUUID(), { text: 'hello' });
+
+  assert.deepEqual(await service.route(browser.asWebSocket(), command), { ok: true });
+  assert.deepEqual(sessions.userInputs, ['session-a']);
+  assert.equal(mac.messages.length, 1);
+  sessions.canRecordInput = false;
+  const stale = await service.route(browser.asWebSocket(), envelope('tool.turn.start', randomUUID(), { text: 'again' }));
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.equal(stale.code, 'conflict');
+  assert.equal(mac.messages.length, 1);
+  service.onModuleDestroy();
+});
+
 function envelope(
   type: string,
   commandId: string,
@@ -104,11 +125,20 @@ function envelope(
 
 class FakeSessions {
   readonly finished: string[] = [];
+  readonly userInputs: string[] = [];
+  canRecordInput = true;
+
+  constructor(private readonly runtimeMode: 'pty' | 'acp' = 'pty') {}
 
   async findById(id: string) {
     return id === 'session-a'
-      ? { id, deviceId: 'device-a', status: 'running', runtimeMode: 'pty' }
+      ? { id, deviceId: 'device-a', status: 'running', runtimeMode: this.runtimeMode }
       : undefined;
+  }
+
+  async markUserMessageIntent(_deviceId: string, id: string): Promise<boolean> {
+    this.userInputs.push(id);
+    return this.canRecordInput;
   }
 
   async finishSession(id: string) {

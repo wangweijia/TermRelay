@@ -72,7 +72,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
 
   async finishSession(sessionId: string): Promise<void> {
     const session = await this.sessions.finishById(sessionId);
-    if (session) this.publishState(session);
+    if (session && session !== 'purged') this.publishState(session);
   }
 
   finishReportedSession(
@@ -91,7 +91,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         payload.status,
       );
       if (!updated) return error('unknown_session', 'Session no longer exists.');
-      this.publishState(updated);
+      if (updated !== 'purged') this.publishState(updated);
       return { status: 'accepted' };
     });
   }
@@ -211,6 +211,10 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     this.publishState(updated);
     this.pushSessionSync(updated);
     return updated;
+  }
+
+  markUserMessageIntent(deviceId: string, sessionId: string): Promise<boolean> {
+    return this.serialize(deviceId, () => this.sessions.markUserMessageIntent(deviceId, sessionId));
   }
 
   async deleteFinished(id: string, purge: boolean): Promise<SessionDeleteResult> {

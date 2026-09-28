@@ -214,7 +214,12 @@ export class SessionRepository {
       }
       await sessions.update(
         { id: sessionId },
-        { stateVersion: String(seq) },
+        {
+          stateVersion: String(seq),
+          ...(type === 'tool.event' && (payload as ToolEventPayload).kind === 'user.message'
+            ? { hasUserMessage: true }
+            : {}),
+        },
       );
       return {
         status: 'accepted',
@@ -256,6 +261,24 @@ export class SessionRepository {
     return this.findById(id);
   }
 
+  async markUserMessageIntent(deviceId: string, id: string): Promise<boolean> {
+    if (!this.dataSource) return false;
+    return this.dataSource.transaction(async (manager) => {
+      const sessions = manager.getRepository(SessionEntity);
+      const session = await sessions
+        .createQueryBuilder('session')
+        .setLock('pessimistic_write')
+        .where('session.id = :id', { id })
+        .getOne();
+      if (!session || session.deviceId !== deviceId || session.runtimeMode !== 'acp'
+        || session.deletedAt !== null || !['starting', 'running'].includes(session.status)) {
+        return false;
+      }
+      await sessions.update({ id }, { hasUserMessage: true });
+      return true;
+    });
+  }
+
   async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
     if (!this.dataSource) return [];
     const rows = await this.dataSource.query<Array<Record<string, unknown>>>(
@@ -293,60 +316,62 @@ export class SessionRepository {
         return 'deleted';
       }
 
-      for (const table of ['commands', 'approvals', 'events']) {
-        await manager
-          .createQueryBuilder()
-          .delete()
-          .from(table)
-          .where('session_id = :id', { id })
-          .execute();
-      }
-      await sessions.delete({ id });
+      await purgeSession(manager, id);
       return 'deleted';
     });
   }
 
   async finishActiveForDevice(deviceId: string, finishedAt = new Date()): Promise<void> {
     if (!this.dataSource) return;
-    await this.repository
-      .createQueryBuilder()
-      .update(SessionEntity)
-      .set({ status: 'finished', finishedAt })
-      .where('device_id = :deviceId', { deviceId })
-      .andWhere('status IN (:...statuses)', {
-        statuses: ['starting', 'running', 'stopping'],
-      })
-      .execute();
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(SessionEntity)
+        .createQueryBuilder()
+        .update(SessionEntity)
+        .set({ status: 'finished', finishedAt })
+        .where('device_id = :deviceId', { deviceId })
+        .andWhere('status IN (:...statuses)', {
+          statuses: ['starting', 'running', 'stopping'],
+        })
+        .execute();
+      await purgeUnusedFinishedAcp(manager, deviceId);
+    });
   }
 
   async finishAllActive(finishedAt = new Date()): Promise<void> {
     if (!this.dataSource) return;
-    await this.repository
-      .createQueryBuilder()
-      .update(SessionEntity)
-      .set({ status: 'finished', finishedAt })
-      .where('status IN (:...statuses)', {
-        statuses: ['starting', 'running', 'stopping'],
-      })
-      .execute();
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(SessionEntity)
+        .createQueryBuilder()
+        .update(SessionEntity)
+        .set({ status: 'finished', finishedAt })
+        .where('status IN (:...statuses)', {
+          statuses: ['starting', 'running', 'stopping'],
+        })
+        .execute();
+      await purgeUnusedFinishedAcp(manager);
+    });
   }
 
   async finishById(
     id: string,
     finishedAt = new Date(),
     status: Extract<SessionStatus, 'finished' | 'failed'> = 'finished',
-  ): Promise<SessionRecord | undefined> {
+  ): Promise<SessionRecord | 'purged' | undefined> {
     if (!this.dataSource) return undefined;
-    await this.repository
-      .createQueryBuilder()
-      .update(SessionEntity)
-      .set({ status, finishedAt })
-      .where('id = :id', { id })
-      .andWhere('status IN (:...statuses)', {
-        statuses: ['starting', 'running', 'stopping'],
-      })
-      .execute();
-    return this.findById(id);
+    const purged = await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(SessionEntity)
+        .createQueryBuilder()
+        .update(SessionEntity)
+        .set({ status, finishedAt })
+        .where('id = :id', { id })
+        .andWhere('status IN (:...statuses)', {
+          statuses: ['starting', 'running', 'stopping'],
+        })
+        .execute();
+      if (status === 'finished') return (await purgeUnusedFinishedAcp(manager, undefined, id)).includes(id);
+      return false;
+    });
+    return purged ? 'purged' : this.findById(id);
   }
 
   async listEvents(
@@ -392,6 +417,37 @@ export class SessionRepository {
     if (!this.dataSource) throw new Error('Database is disabled.');
     return this.dataSource.getRepository(SessionEntity);
   }
+}
+
+async function purgeSession(manager: EntityManager, id: string): Promise<void> {
+  for (const table of ['commands', 'approvals', 'events']) {
+    await manager
+      .createQueryBuilder()
+      .delete()
+      .from(table)
+      .where('session_id = :id', { id })
+      .execute();
+  }
+  await manager.getRepository(SessionEntity).delete({ id });
+}
+
+async function purgeUnusedFinishedAcp(
+  manager: EntityManager,
+  deviceId?: string,
+  sessionId?: string,
+): Promise<string[]> {
+  const query = manager.getRepository(SessionEntity)
+    .createQueryBuilder('session')
+    .setLock('pessimistic_write')
+    .where('session.runtimeMode = :mode', { mode: 'acp' })
+    .andWhere('session.status = :status', { status: 'finished' })
+    .andWhere('session.hasUserMessage = :hasUserMessage', { hasUserMessage: false })
+    .andWhere('session.deletedAt IS NULL');
+  if (deviceId) query.andWhere('session.deviceId = :deviceId', { deviceId });
+  if (sessionId) query.andWhere('session.id = :sessionId', { sessionId });
+  const unused = await query.getMany();
+  for (const session of unused) await purgeSession(manager, session.id);
+  return unused.map((session) => session.id);
 }
 
 export function canAppendSessionEvent(

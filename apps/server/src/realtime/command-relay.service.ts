@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import type { CommandAckPayload, Envelope } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
@@ -38,6 +38,7 @@ interface PendingCommand {
 
 @Injectable()
 export class CommandRelayService implements OnModuleDestroy {
+  private readonly logger = new Logger(CommandRelayService.name);
   private readonly pending = new Map<string, PendingCommand>();
   private readonly timeoutMs = readPositiveInteger('COMMAND_ACK_TIMEOUT_MS', 15_000);
 
@@ -98,6 +99,21 @@ export class CommandRelayService implements OnModuleDestroy {
         code: 'unknown_device',
         detail: 'The target Mac is offline.',
       };
+    }
+
+    if (envelope.type === 'tool.turn.start') {
+      try {
+        if (!(await this.sessions.markUserMessageIntent(envelope.deviceId, sessionId))) {
+          return {
+            ok: false,
+            code: 'conflict',
+            detail: 'The ACP session is no longer available for input.',
+          };
+        }
+      } catch (error: unknown) {
+        this.logger.error(`Failed to record ACP input for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return { ok: false, code: 'internal_error', detail: 'Failed to record ACP input.' };
+      }
     }
 
     const timer = setTimeout(() => this.timeout(commandId), this.timeoutMs);

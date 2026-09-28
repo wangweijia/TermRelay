@@ -81,6 +81,7 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 - MySQL 保存设备、会话状态、命令幂等键、审批、审计和有限事件元数据；本地使用 `termrelay_dev`，最终部署使用独立的 `termrelay_prod`。
 - 高频终端字节流只允许短期保留。S3 使用带 TTL 的 Base64 事件实现首个闭环；进入生产前仍需压缩分块、物理清理和每会话配额。
 - `command_id` 在 Server 和 Mac 两侧去重；`session_id + seq` 在 Server 唯一。
+- Server 持久记录 ACP 会话是否收到过用户消息；无用户消息的 ACP 会话在结束、设备断联或 Server 启动清理残留会话时，连同事件、命令和审批记录一并永久删除。PTY 和已有用户消息的 ACP 会话保留原有删除流程。
 - 重连顺序为：注册 → 汇报每会话最后 ACK → 补传缺口 → 获取状态快照 → 恢复实时流。
 - `session.state_version` 使用乐观锁，避免断线补传覆盖新状态。
 - Browser 只订阅目标 Session：先通过 HTTP 加载历史，再携带最后 seq 建立 `/ws/web` 订阅；Server 在快照期间缓冲实时事件，浏览器按 seq 去重。

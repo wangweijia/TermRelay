@@ -133,6 +133,7 @@ export const useRelayStore = defineStore('relay', {
           throw new Error(`设备列表请求失败 (${devicesResponse.status})`);
         }
         if (!approvalsResponse.ok) throw new Error(`审批列表请求失败 (${approvalsResponse.status})`);
+        const previousSessions = this.sessions;
         this.sessions = (await sessionsResponse.json()) as SessionRecord[];
         this.devices = (await devicesResponse.json()) as DeviceRecord[];
         this.pendingApprovals = (await approvalsResponse.json()) as PendingApprovalRecord[];
@@ -140,14 +141,32 @@ export const useRelayStore = defineStore('relay', {
         for (const approvalId of Object.keys(this.resolvingApprovals)) {
           if (!stillPending.has(approvalId)) delete this.resolvingApprovals[approvalId];
         }
-        if (
-          this.selectedSessionId &&
-          !this.sessions.some((item) => item.id === this.selectedSessionId)
-        ) {
-          void deleteSessionCache(this.selectedSessionId).catch(() => undefined);
+        const remaining = new Set(this.sessions.map((item) => item.id));
+        const removed = new Set([
+          ...previousSessions.map((item) => item.id),
+          ...Object.keys(this.eventsBySession),
+          ...(this.selectedSessionId ? [this.selectedSessionId] : []),
+        ].filter((id) => !remaining.has(id)));
+        if (this.selectedSessionId && removed.has(this.selectedSessionId)) {
+          const previous = previousSessions.find((item) => item.id === this.selectedSessionId);
+          if (previous) this.sendSubscription('session.unsubscribe', previous, {});
           this.selectedSessionId = undefined;
+          this.selectionVersion += 1;
+          this.loadingHistory = false;
         }
+        for (const id of removed) {
+          delete this.eventsBySession[id];
+          delete this.hasOlderBySession[id];
+          delete this.lastSeqBySession[id];
+          pendingRealtimeEvents.delete(id);
+          dirtyCacheSessions.delete(id);
+          void deleteSessionCache(id).catch(() => undefined);
+        }
+        this.historyAccessOrder = this.historyAccessOrder.filter((id) => remaining.has(id));
         this.error = undefined;
+        if (!this.selectedSessionId && this.sessions[0]) {
+          await this.selectSession(this.sessions[0].id);
+        }
       } catch (error: unknown) {
         this.error = describeError(error);
       } finally {

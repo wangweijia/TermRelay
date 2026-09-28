@@ -15,6 +15,7 @@ import { AcpRuntimeMode1789524000000 } from './migrations/1789524000000-acp-runt
 import { NotificationSettings1789610400000 } from './migrations/1789610400000-notification-settings';
 import { ClientAuth1789696800000 } from './migrations/1789696800000-client-auth';
 import { SessionAutoApprove1789783200000 } from './migrations/1789783200000-session-auto-approve';
+import { AcpUserMessage1790553600000 } from './migrations/1790553600000-acp-user-message';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -41,6 +42,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       NotificationSettings1789610400000,
       ClientAuth1789696800000,
       SessionAutoApprove1789783200000,
+      AcpUserMessage1790553600000,
     ],
     entities: [
       DeviceEntity,

@@ -115,6 +115,22 @@ test('accepts a local session end and publishes its new state', async () => {
   assert.deepEqual(statuses, ['finished']);
 });
 
+test('acknowledges an automatically purged empty ACP session without publishing a stale state', async () => {
+  const sessions = new FakeSessionRepository();
+  sessions.purgeOnFinish = true;
+  const service = makeService(new FakeWorkspaceRepository(), sessions);
+  const statuses: string[] = [];
+  service.subscribeState((session) => statuses.push(session.status));
+
+  const result = await service.finishReportedSession('device-a', 'session-a', {
+    status: 'finished',
+    finishedAt: new Date(2_000).toISOString(),
+  });
+
+  assert.deepEqual(result, { status: 'accepted' });
+  assert.deepEqual(statuses, []);
+});
+
 test('finishes stale sessions on startup and when a device disconnects', async () => {
   const workspaces = new FakeWorkspaceRepository();
   const sessions = new FakeSessionRepository();
@@ -204,6 +220,7 @@ class FakeSessionRepository {
   readonly finishedDevices: string[] = [];
   readonly deletions: Array<{ id: string; purge: boolean }> = [];
   finishedAll = 0;
+  purgeOnFinish = false;
   outputResult:
     | {
         status: 'accepted';
@@ -242,6 +259,7 @@ class FakeSessionRepository {
   }
 
   async finishById(id: string, finishedAt = new Date(), status = 'finished') {
+    if (this.purgeOnFinish && status === 'finished') return 'purged' as const;
     return this.record(id, status as 'finished' | 'failed', finishedAt);
   }
 

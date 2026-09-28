@@ -45,6 +45,9 @@ export class SessionEntity {
   @Column({ name: 'auto_approve_enabled', type: 'boolean', default: false })
   autoApproveEnabled!: boolean;
 
+  @Column({ name: 'has_user_message', type: 'boolean', default: false })
+  hasUserMessage!: boolean;
+
   @Column({ name: 'started_at', type: 'datetime', precision: 3, nullable: true })
   startedAt!: Date | null;
 
