@@ -12,6 +12,7 @@ run_tests=false
 allow_dirty=false
 local_signing_identity="TermRelay Local Code Signing"
 signing_identity="${TERMRELAY_SIGNING_IDENTITY:-}"
+swift_build_options=(--disable-sandbox)
 
 usage() {
   cat <<'EOF'
@@ -125,9 +126,23 @@ configure_xcode_toolchain() {
 
   if [[ -z "${DEVELOPER_DIR:-}" ]] || ! xcrun --find metal >/dev/null 2>&1; then
     echo "A full Xcode installation with the Metal compiler is required." >&2
-    echo "Install Xcode, then run:" >&2
+    echo "Select the installed Xcode toolchain, then retry:" >&2
     echo "  sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer" >&2
     exit 1
+  fi
+
+  if ! xcrun metal --version >/dev/null 2>&1; then
+    echo "Xcode is selected, but its Metal Toolchain is not available." >&2
+    echo "Install the Xcode component, then retry:" >&2
+    echo "  xcodebuild -downloadComponent MetalToolchain" >&2
+    exit 1
+  fi
+
+  # Some Xcode releases can invoke Metal through xcrun but leave the direct
+  # compiler shim used by Swift Build unable to locate the downloaded toolchain.
+  if ! "$(xcrun --find metal)" --version >/dev/null 2>&1; then
+    echo "Xcode's direct Metal compiler shim is unavailable; using SwiftPM's native build system." >&2
+    swift_build_options+=(--build-system native)
   fi
 
   echo "Using Xcode toolchain: $DEVELOPER_DIR"
@@ -164,12 +179,12 @@ fi
 
 if [ "$run_tests" = true ]; then
   echo "Running macOS tests ..."
-  swift test --package-path "$package_dir" --disable-sandbox
+  swift test --package-path "$package_dir" "${swift_build_options[@]}"
 fi
 
 echo "Building $product_name in Release mode ..."
-swift build --package-path "$package_dir" -c release --disable-sandbox
-bin_dir="$(swift build --package-path "$package_dir" -c release --show-bin-path --disable-sandbox)"
+swift build --package-path "$package_dir" -c release "${swift_build_options[@]}"
+bin_dir="$(swift build --package-path "$package_dir" -c release --show-bin-path "${swift_build_options[@]}")"
 executable="$bin_dir/$product_name"
 [ -x "$executable" ] || { echo "Release executable not found: $executable" >&2; exit 1; }
 

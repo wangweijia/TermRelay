@@ -135,7 +135,7 @@ flowchart LR
 ### 环境要求
 
 - macOS 14 或更高版本
-- Swift 6 / Xcode 16+（Mac 构建需要完整 Xcode 工具链，包含 `metal`；仅安装 Command Line Tools 不够）
+- Swift 6 / Xcode 16+（Mac 构建需要完整 Xcode 工具链，包含 `metal`；仅安装 Command Line Tools 不够。若新版 Xcode 提示缺少 Metal Toolchain，运行 `xcodebuild -downloadComponent MetalToolchain`）
 - Node.js 22+
 - pnpm（版本见根目录 `package.json`）
 - Docker Desktop（运行完整 Server + MySQL 环境）
