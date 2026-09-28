@@ -339,6 +339,46 @@ test('returns owned Copilot events oldest-first with a bounded reverse cursor', 
     assert.equal(socket.messages.at(-1)?.data.payload.code, 'conflict');
   });
 
+test('deletes only owned finished Copilot history with the requested purge mode', async () => {
+  const { gateway, sessions } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  await gateway.handleMessage(client, envelope('device-a', 'device.register', {
+    name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['copilot'],
+  }));
+
+  const request = { ...envelope('device-a', 'session.history.delete', { purge: false }), sessionId: 'session-a' };
+  await gateway.handleMessage(client, request);
+  assert.deepEqual(sessions.deletions, [{ id: 'session-a', purge: false }]);
+  assert.equal(socket.messages.at(-1)?.data.type, 'session.history.deleted');
+  assert.equal(socket.messages.at(-1)?.data.payload.relatedMessageId, request.messageId);
+  assert.equal(socket.messages.at(-1)?.data.payload.purged, false);
+
+  await gateway.handleMessage(client, { ...request, payload: { purge: true } });
+  assert.deepEqual(sessions.deletions.at(-1), { id: 'session-a', purge: true });
+  await gateway.handleMessage(client, { ...request, sessionId: 'not-owned' });
+  assert.equal(socket.messages.at(-1)?.data.payload.code, 'unknown_session');
+  assert.equal(sessions.deletions.length, 2);
+
+  sessions.deletionResult = 'not_finished';
+  await gateway.handleMessage(client, request);
+  assert.equal(socket.messages.at(-1)?.data.payload.code, 'conflict');
+  await gateway.handleMessage(client, { ...request, payload: { purge: 'true' } });
+  assert.equal(socket.messages.at(-1)?.data.payload.code, 'invalid_message');
+  assert.equal(sessions.deletions.length, 3);
+
+  const otherSocket = new FakeSocket();
+  const otherClient = otherSocket.asWebSocket();
+  gateway.handleConnection(otherClient);
+  await gateway.handleMessage(otherClient, envelope('device-b', 'device.register', {
+    name: 'Other Mac', appVersion: '1', platform: 'macOS', tools: ['copilot'],
+  }));
+  await gateway.handleMessage(otherClient, { ...request, deviceId: 'device-b' });
+  assert.equal(otherSocket.messages.at(-1)?.data.payload.code, 'unknown_session');
+  assert.equal(sessions.deletions.length, 3);
+});
+
 function makeGateway() {
   const registry = new DeviceConnectionRegistry();
   const sessions = new FakeSessionsService();
@@ -412,6 +452,13 @@ class FakeSessionsService {
       status: 'accepted',
     };
   autoApproveEnabled = false;
+  deletions: Array<{ id: string; purge: boolean }> = [];
+  deletionResult: 'deleted' | 'not_finished' | 'not_found' = 'deleted';
+
+  async deleteFinished(id: string, purge: boolean) {
+    this.deletions.push({ id, purge });
+    return this.deletionResult;
+  }
 
   async registerWorkspace(
     _deviceId: string,

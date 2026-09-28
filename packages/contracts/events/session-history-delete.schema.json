@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-delete.schema.json",
+  "title": "session.history.delete payload",
+  "type": "object",
+  "required": ["purge"],
+  "properties": {
+    "purge": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

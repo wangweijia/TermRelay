@@ -14,6 +14,7 @@ import type {
   ProtocolErrorPayload,
   SessionHistoryListedPayload,
   SessionHistoryPayload,
+  SessionHistoryDeletedPayload,
   SessionSyncedPayload,
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
@@ -280,6 +281,38 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'session.history.delete') {
+      const { envelope } = result.message;
+      const sessionId = envelope.sessionId!;
+      const session = await this.sessions.findOwnedSession(envelope.deviceId, sessionId);
+      if (!session || session.toolKey !== 'copilot' || session.runtimeMode !== 'acp') {
+        this.sendProtocolError(
+          client, 'unknown_session', 'Session does not exist for this device.',
+          envelope.messageId, sessionId,
+        );
+        return;
+      }
+      const outcome = await this.sessions.deleteFinished(sessionId, envelope.payload.purge);
+      if (outcome !== 'deleted') {
+        this.sendProtocolError(
+          client, outcome === 'not_finished' ? 'conflict' : 'unknown_session',
+          outcome === 'not_finished' ? 'Only finished sessions can be deleted.' : 'Session not found.',
+          envelope.messageId, sessionId,
+        );
+        return;
+      }
+      this.sendEnvelope<SessionHistoryDeletedPayload>(client, {
+        type: 'session.history.deleted',
+        protocolVersion: '2',
+        messageId: randomUUID(),
+        deviceId: envelope.deviceId,
+        sessionId,
+        sentAt: new Date().toISOString(),
+        payload: { purged: envelope.payload.purge, relatedMessageId: envelope.messageId },
+      });
+      return;
+    }
+
     return this.handleSessionEvent(client, result.message);
   }
 
@@ -291,7 +324,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' }
     >,
   ): Promise<void> {
     const { envelope } = message;

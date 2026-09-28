@@ -400,6 +400,7 @@ final class AppModel: ObservableObject {
                 return CopilotHistorySession(
                     id: id, workspaceId: record.workspaceId,
                     displayName: record.displayName ?? "GitHub Copilot",
+                    status: record.status,
                     directory: pathsByID[record.workspaceId].map { URL(fileURLWithPath: $0) },
                     updatedAt: record.updatedAt
                 )
@@ -416,6 +417,17 @@ final class AppModel: ObservableObject {
         let events = try await remoteClient.loadCopilotHistory(sessionID: archive.id)
         historyMessages[archive.id] = CopilotHistory.messages(from: events)
         return events
+    }
+
+    func deleteCopilotHistory(_ archive: CopilotHistorySession, purge: Bool) async throws {
+        guard archive.status == "finished",
+              copilotHistory.contains(where: { $0.id == archive.id }) else {
+            throw AgentError.providerUnavailable("只能删除已经结束的历史会话。")
+        }
+        guard let remoteClient else { throw AgentError.providerUnavailable("Server 未连接") }
+        try await remoteClient.deleteCopilotHistory(sessionID: archive.id, purge: purge)
+        copilotHistory.removeAll { $0.id == archive.id }
+        historyMessages[archive.id] = nil
     }
 
     func importCopilotHistory(_ archive: CopilotHistorySession) async -> UUID? {

@@ -7,6 +7,7 @@ import type {
   SessionEndedPayload,
   SessionHistoryListPayload,
   SessionHistoryRequestPayload,
+  SessionHistoryDeletePayload,
   SessionSyncPayload,
   SessionStartedPayload,
   TerminalOutputPayload,
@@ -21,6 +22,7 @@ import {
   sessionEndedSchema,
   sessionHistoryListSchema,
   sessionHistoryRequestSchema,
+  sessionHistoryDeleteSchema,
   sessionSyncSchema,
   sessionStartedSchema,
   terminalOutputSchema,
@@ -41,6 +43,7 @@ export type ValidClientMessage =
   | { type: 'session.sync'; envelope: Envelope<SessionSyncPayload> }
   | { type: 'session.history.list'; envelope: Envelope<SessionHistoryListPayload> }
   | { type: 'session.history.request'; envelope: Envelope<SessionHistoryRequestPayload> }
+  | { type: 'session.history.delete'; envelope: Envelope<SessionHistoryDeletePayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
   | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
@@ -79,6 +82,7 @@ export class ProtocolValidator {
       })],
       ['session.history.list', ajv.compile(sessionHistoryListSchema)],
       ['session.history.request', ajv.compile(sessionHistoryRequestSchema)],
+      ['session.history.delete', ajv.compile(sessionHistoryDeleteSchema)],
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
@@ -131,9 +135,9 @@ export class ProtocolValidator {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, 'session.history.list must not include sessionId, seq, or commandId.');
       }
-    } else if (envelope.type === 'session.history.request') {
+    } else if (envelope.type === 'session.history.request' || envelope.type === 'session.history.delete') {
       if (!envelope.sessionId || envelope.seq !== undefined || envelope.commandId !== undefined) {
-        return invalidContext(envelope, 'session.history.request requires sessionId and must not include seq or commandId.');
+        return invalidContext(envelope, `${envelope.type} requires sessionId and must not include seq or commandId.`);
       }
     } else if (envelope.type === 'session.started') {
       if (!envelope.sessionId || envelope.seq !== 0) {
@@ -250,6 +254,14 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
         message: {
           type: envelope.type,
           envelope: envelope as unknown as Envelope<SessionHistoryRequestPayload>,
+        },
+      };
+    case 'session.history.delete':
+      return {
+        ok: true,
+        message: {
+          type: envelope.type,
+          envelope: envelope as unknown as Envelope<SessionHistoryDeletePayload>,
         },
       };
     case 'terminal.output':

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-deleted.schema.json",
+  "title": "session.history.deleted payload",
+  "type": "object",
+  "required": ["purged", "relatedMessageId"],
+  "properties": {
+    "purged": { "type": "boolean" },
+    "relatedMessageId": { "type": "string", "format": "uuid" }
+  },
+  "additionalProperties": false
+}

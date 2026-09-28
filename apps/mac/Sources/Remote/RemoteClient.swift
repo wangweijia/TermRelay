@@ -159,6 +159,19 @@ actor RemoteClient {
         return result
     }
 
+    func deleteCopilotHistory(sessionID: UUID, purge: Bool) async throws {
+        let response = try await requestHistory(
+            type: "session.history.delete",
+            sessionId: sessionID.uuidString.lowercased(),
+            payload: ["purge": .bool(purge)]
+        )
+        guard response.type == "session.history.deleted",
+              response.sessionId?.caseInsensitiveCompare(sessionID.uuidString) == .orderedSame,
+              response.payload.object?["purged"]?.bool == purge else {
+            throw AgentError.protocolFailure("Server 返回的历史删除结果无效")
+        }
+    }
+
     private func decodeHistory<T: Decodable>(_ value: JSONValue, as type: T.Type) throws -> T {
         try JSONDecoder().decode(type, from: JSONEncoder().encode(value))
     }

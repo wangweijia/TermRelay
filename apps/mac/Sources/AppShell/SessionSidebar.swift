@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+enum SessionSidebarTab: String, CaseIterable {
+    case active = "当前"
+    case history = "历史"
+}
+
 struct SessionSidebar: View {
     @Environment(\.displayScale) private var displayScale
     let sessions: [ManagedSession]
@@ -8,8 +13,10 @@ struct SessionSidebar: View {
     let terminalSessions: [UUID: LocalTerminalSession]
     let structuredSessions: [UUID: LocalStructuredAgentSession]
     @Binding var selection: UUID?
+    @Binding var tab: SessionSidebarTab
     let addAction: () -> Void
     let closeAction: (UUID) -> Void
+    let deleteHistoryAction: (CopilotHistorySession) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,7 +37,25 @@ struct SessionSidebar: View {
             .padding(.vertical, 12)
             .overlay(alignment: .bottom) { horizontalSeparator }
 
-            if sessions.isEmpty && copilotHistory.isEmpty {
+            Picker("会话列表", selection: $tab) {
+                ForEach(SessionSidebarTab.allCases, id: \.self) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .onChange(of: tab) { _, value in
+                if value == .active {
+                    if !sessions.contains(where: { $0.id == selection }) {
+                        selection = sessions.last?.id
+                    }
+                } else if !copilotHistory.contains(where: { $0.id == selection }) {
+                    selection = copilotHistory.first?.id
+                }
+            }
+
+            if tab == .active && sessions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "rectangle.stack.badge.plus")
                         .font(.title2)
@@ -42,30 +67,48 @@ struct SessionSidebar: View {
                         .buttonStyle(.link)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if tab == .history && copilotHistory.isEmpty {
+                ContentUnavailableView(
+                    "暂无历史会话",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text("连接 Server 后可查看这台 Mac 的 Copilot 历史。")
+                )
             } else {
                 List(selection: $selection) {
-                    ForEach(sessions) { session in
-                        ClosableSessionSidebarRow(
-                            session: session,
-                            terminalSession: terminalSessions[session.id],
-                            structuredSession: structuredSessions[session.id],
-                            isSelected: selection == session.id,
-                            closeAction: { closeAction(session.id) }
-                        )
-                        .tag(session.id)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                closeAction(session.id)
-                            } label: {
-                                Label("关闭会话", systemImage: "xmark")
+                    if tab == .active {
+                        ForEach(sessions) { session in
+                            ClosableSessionSidebarRow(
+                                session: session,
+                                terminalSession: terminalSessions[session.id],
+                                structuredSession: structuredSessions[session.id],
+                                isSelected: selection == session.id,
+                                closeAction: { closeAction(session.id) }
+                            )
+                            .tag(session.id)
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    closeAction(session.id)
+                                } label: {
+                                    Label("关闭会话", systemImage: "xmark")
+                                }
                             }
                         }
-                    }
-                    if !copilotHistory.isEmpty {
-                        Section("历史 · Copilot") {
-                            ForEach(copilotHistory) { archive in
-                                Label(archive.displayName, systemImage: "clock.arrow.circlepath")
-                                    .tag(archive.id)
+                    } else {
+                        ForEach(copilotHistory) { archive in
+                            HistorySidebarRow(
+                                archive: archive,
+                                isSelected: selection == archive.id,
+                                deleteAction: { deleteHistoryAction(archive) }
+                            )
+                            .tag(archive.id)
+                            .contextMenu {
+                                if archive.status == "finished" {
+                                    Button(role: .destructive) {
+                                        deleteHistoryAction(archive)
+                                    } label: {
+                                        Label("删除历史", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                     }
@@ -78,6 +121,40 @@ struct SessionSidebar: View {
                 .overlay(alignment: .top) { horizontalSeparator }
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private struct HistorySidebarRow: View {
+        let archive: CopilotHistorySession
+        let isSelected: Bool
+        let deleteAction: () -> Void
+        @State private var isHovered = false
+
+        var body: some View {
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(archive.displayName).lineLimit(1)
+                    Text(archive.status == "failed" ? "失败 · Copilot" : "已结束 · Copilot")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if archive.status == "finished" {
+                    Button(action: deleteAction) {
+                        Image(systemName: "trash")
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.borderless)
+                    .opacity(isHovered || isSelected ? 1 : 0)
+                    .allowsHitTesting(isHovered || isSelected)
+                    .help("删除历史")
+                    .accessibilityLabel("删除历史")
+                }
+            }
+            .padding(.vertical, 3)
+            .onHover { isHovered = $0 }
+        }
     }
 
     private var horizontalSeparator: some View {

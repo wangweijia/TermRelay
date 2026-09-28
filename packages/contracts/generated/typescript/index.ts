@@ -994,6 +994,15 @@ export interface SessionHistoryPayload {
   relatedMessageId: string;
 }
 
+export interface SessionHistoryDeletePayload {
+  purge: boolean;
+}
+
+export interface SessionHistoryDeletedPayload {
+  purged: boolean;
+  relatedMessageId: string;
+}
+
 export const sessionHistoryListSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termrelay.local/contracts/events/session-history-list.schema.json",
@@ -1168,6 +1177,43 @@ export const sessionHistorySchema = {
       }
     },
     "hasMore": {
+      "type": "boolean"
+    },
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const sessionHistoryDeleteSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-delete.schema.json",
+  "title": "session.history.delete payload",
+  "type": "object",
+  "required": [
+    "purge"
+  ],
+  "properties": {
+    "purge": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const sessionHistoryDeletedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-history-deleted.schema.json",
+  "title": "session.history.deleted payload",
+  "type": "object",
+  "required": [
+    "purged",
+    "relatedMessageId"
+  ],
+  "properties": {
+    "purged": {
       "type": "boolean"
     },
     "relatedMessageId": {

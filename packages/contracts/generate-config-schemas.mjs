@@ -22,6 +22,8 @@ const historySchemas = [
   ['sessionHistoryListedSchema', 'session-history-listed'],
   ['sessionHistoryRequestSchema', 'session-history-request'],
   ['sessionHistorySchema', 'session-history'],
+  ['sessionHistoryDeleteSchema', 'session-history-delete'],
+  ['sessionHistoryDeletedSchema', 'session-history-deleted'],
 ];
 const historyTypes = `export interface SessionHistoryListPayload {
   cursor?: string;
@@ -60,6 +62,15 @@ export interface SessionHistoryEvent {
 export interface SessionHistoryPayload {
   events: SessionHistoryEvent[];
   hasMore: boolean;
+  relatedMessageId: string;
+}
+
+export interface SessionHistoryDeletePayload {
+  purge: boolean;
+}
+
+export interface SessionHistoryDeletedPayload {
+  purged: boolean;
   relatedMessageId: string;
 }
 

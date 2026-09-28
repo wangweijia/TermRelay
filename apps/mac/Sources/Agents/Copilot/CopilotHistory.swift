@@ -4,6 +4,7 @@ struct CopilotHistorySession: Identifiable, Sendable {
     let id: UUID
     let workspaceId: String
     let displayName: String
+    let status: String
     let directory: URL?
     let updatedAt: String
 }

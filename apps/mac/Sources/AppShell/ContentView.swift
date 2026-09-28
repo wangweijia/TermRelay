@@ -3,8 +3,13 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var selectedSessionID: UUID?
+    @State private var sidebarTab: SessionSidebarTab = .active
     @State private var isPresentingNewSession = false
     @State private var sessionPendingClose: ManagedSession?
+    @State private var historyPendingDelete: CopilotHistorySession?
+    @State private var purgeHistoryData = false
+    @State private var isDeletingHistory = false
+    @State private var historyDeleteError: String?
 
     var body: some View {
         HSplitView {
@@ -14,8 +19,14 @@ struct ContentView: View {
                 terminalSessions: appModel.terminalSessions,
                 structuredSessions: appModel.structuredSessions,
                 selection: $selectedSessionID,
+                tab: $sidebarTab,
                 addAction: { isPresentingNewSession = true },
-                closeAction: requestCloseSession
+                closeAction: requestCloseSession,
+                deleteHistoryAction: { archive in
+                    purgeHistoryData = false
+                    historyDeleteError = nil
+                    historyPendingDelete = archive
+                }
             )
             .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
 
@@ -44,6 +55,46 @@ struct ContentView: View {
             )
             .environmentObject(appModel)
         }
+        .sheet(item: $historyPendingDelete) { archive in
+            VStack(alignment: .leading, spacing: 16) {
+                Text("删除历史会话？").font(.headline)
+                Text(archive.displayName)
+                Text(archive.id.uuidString)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Toggle("同时永久删除数据库关联数据", isOn: $purgeHistoryData)
+                    .disabled(isDeletingHistory)
+                Text(purgeHistoryData
+                     ? "会话、终端事件、命令和审批记录将无法恢复。"
+                     : "仅从 Web 和 Mac 历史列表隐藏；数据库历史数据仍然保留。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let historyDeleteError {
+                    Text(historyDeleteError).foregroundStyle(.red)
+                }
+                HStack {
+                    Spacer()
+                    Button("取消") { historyPendingDelete = nil }
+                        .disabled(isDeletingHistory)
+                    Button(isDeletingHistory ? "删除中…" : "确认删除", role: .destructive) {
+                        isDeletingHistory = true
+                        Task {
+                            do {
+                                try await appModel.deleteCopilotHistory(archive, purge: purgeHistoryData)
+                                historyPendingDelete = nil
+                            } catch {
+                                historyDeleteError = error.localizedDescription
+                            }
+                            isDeletingHistory = false
+                        }
+                    }
+                    .disabled(isDeletingHistory)
+                }
+            }
+            .padding(24)
+            .frame(width: 420)
+            .interactiveDismissDisabled(isDeletingHistory)
+        }
         .alert(
             "关闭会话？",
             isPresented: Binding(
@@ -63,12 +114,21 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            selectedSessionID = appModel.sessions.last?.id
+            selectedSessionID = appModel.sessions.last?.id ?? appModel.copilotHistory.first?.id
         }
         .onChange(of: visibleSessions.map(\.id) + appModel.copilotHistory.map(\.id)) { _, sessionIDs in
             guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
-                self.selectedSessionID = visibleSessions.last?.id ?? appModel.copilotHistory.first?.id
+                self.selectedSessionID = sidebarTab == .history
+                    ? appModel.copilotHistory.first?.id
+                    : visibleSessions.last?.id
                 return
+            }
+        }
+        .onChange(of: selectedSessionID) { _, id in
+            if appModel.copilotHistory.contains(where: { $0.id == id }) {
+                sidebarTab = .history
+            } else if visibleSessions.contains(where: { $0.id == id }) {
+                sidebarTab = .active
             }
         }
     }
