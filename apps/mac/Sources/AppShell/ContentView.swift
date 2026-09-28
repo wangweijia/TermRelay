@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var sessionPendingClose: ManagedSession?
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             SessionSidebar(
                 sessions: visibleSessions,
                 terminalSessions: appModel.terminalSessions,
@@ -16,9 +16,11 @@ struct ContentView: View {
                 addAction: { isPresentingNewSession = true },
                 closeAction: requestCloseSession
             )
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
-        } detail: {
+            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+
             sessionDetail
+                .frame(minWidth: 580, maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 900, minHeight: 600)
         .sheet(isPresented: $isPresentingNewSession) {
@@ -139,7 +141,8 @@ private struct StructuredAgentSessionView: View {
                     .disabled([.finished, .failed].contains(session.state))
             }
             .padding()
-            .background(.bar)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .bottom) { Divider() }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -250,6 +253,8 @@ private struct StructuredAgentSessionView: View {
                 }
             }
             .padding()
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .top) { Divider() }
         }
     }
 
@@ -324,7 +329,8 @@ private struct AgentTimelineRow: View {
                 Text(text).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
             }
-            .padding(10).background(.quaternary).clipShape(RoundedRectangle(cornerRadius: 9))
+            .padding(10)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
         case .plan(_, let text):
             AgentCard(title: "计划", icon: "list.bullet.clipboard") {
                 Text(text).textSelection(.enabled)
@@ -641,7 +647,7 @@ private struct SessionToolbar: View {
         .buttonStyle(.bordered)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) { Divider() }
     }
 }
