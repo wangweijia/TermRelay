@@ -23,6 +23,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private let defaults: UserDefaults
     private let environment: [String: String]
     private let eventHandler: @Sendable (ToolEvent) -> Void
+    private let approvalHandler: @MainActor (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
     private let runtimeReadyHandler: @MainActor @Sendable () throws -> Void
     private var coordinator: StructuredSessionCoordinator?
@@ -39,6 +40,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         defaults: UserDefaults = .standard,
         environment: [String: String] = TerminalEnvironment.make(),
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
+        approvalHandler: @escaping @MainActor (ToolEvent) -> Void = { _ in },
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
         runtimeReadyHandler: @escaping @MainActor @Sendable () throws -> Void = {}
     ) {
@@ -49,6 +51,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.defaults = defaults
         self.environment = environment
         self.eventHandler = eventHandler
+        self.approvalHandler = approvalHandler
         self.stateHandler = stateHandler
         self.runtimeReadyHandler = runtimeReadyHandler
         startedAt = RelayDate.now()
@@ -73,6 +76,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                     if self.events.count > Self.eventTrimThreshold {
                         self.events.removeFirst(self.events.count - Self.maximumRetainedEvents)
                     }
+                    self.approvalHandler(event)
                     self.eventHandler(event)
                     if case .configurationUpdated(let options) = event.payload {
                         self.configurationOptions = options

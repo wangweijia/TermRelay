@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var sessions: [ManagedSession] = []
     @Published private(set) var terminalSessions: [UUID: LocalTerminalSession] = [:]
     @Published private(set) var structuredSessions: [UUID: LocalStructuredAgentSession] = [:]
+    @Published private(set) var pendingApprovals = PendingApprovalInbox()
     @Published private(set) var copilotHistory: [CopilotHistorySession] = []
     @Published private(set) var historyMessages: [UUID: [CopilotHistoryMessage]] = [:]
     @Published private(set) var historyLoadingID: UUID?
@@ -516,6 +517,9 @@ final class AppModel: ObservableObject {
             eventHandler: { event in
                 Task { await remoteClient.publishToolEvent(event) }
             },
+            approvalHandler: { [weak self] event in
+                self?.recordApprovalEvent(event)
+            },
             stateHandler: { [weak self] id, state in
                 self?.handleStructuredSessionState(id: id, state: state)
             }
@@ -565,6 +569,7 @@ final class AppModel: ObservableObject {
     }
 
     func stopLocalTerminal(id: UUID) {
+        pendingApprovals.clear(sessionID: id)
         terminalSessions[id]?.terminate()
         if let structured = structuredSessions[id] {
             Task { await structured.stop() }
@@ -573,6 +578,7 @@ final class AppModel: ObservableObject {
     }
 
     func closeLocalTerminal(id: UUID) {
+        pendingApprovals.clear(sessionID: id)
         terminalSessions[id]?.terminate()
         terminalSessions[id] = nil
         if let structured = structuredSessions.removeValue(forKey: id) {
@@ -583,6 +589,7 @@ final class AppModel: ObservableObject {
     }
 
     func terminateAllSessions() async {
+        pendingApprovals.clearAll()
         for session in terminalSessions.values { session.terminate() }
         for session in structuredSessions.values { await session.stop() }
         if let remoteClient { await remoteClient.disconnect() }
@@ -717,6 +724,7 @@ final class AppModel: ObservableObject {
     private func handleStructuredSessionState(id: UUID, state: StructuredSessionState) {
         updateActiveSessionCount()
         guard state == .finished || state == .failed, let remoteClient else { return }
+        pendingApprovals.clear(sessionID: id)
         if state == .failed {
             errorMessage = structuredSessions[id]?.failureMessage ?? "ACP 会话启动失败"
         }
@@ -727,6 +735,19 @@ final class AppModel: ObservableObject {
                 status: state == .failed ? .failed : .finished,
                 finishedAt: RelayDate.now()
             )
+        }
+    }
+
+    private func recordApprovalEvent(_ event: ToolEvent) {
+        switch event.payload {
+        case .approvalRequested:
+            pendingApprovals.apply(event)
+        case .approvalResolved, .turnCompleted, .failed:
+            if pendingApprovals.bySession[event.sessionID] != nil {
+                pendingApprovals.apply(event)
+            }
+        default:
+            break
         }
     }
 

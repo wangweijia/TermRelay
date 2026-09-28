@@ -24,6 +24,11 @@ struct ContentView: View {
                 .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 900, minHeight: 600)
+        .overlay(alignment: .topTrailing) {
+            ApprovalToastCenter(selectedSessionID: $selectedSessionID)
+                .padding(.top, 12)
+                .padding(.trailing, 16)
+        }
         .sheet(isPresented: $isPresentingNewSession) {
             NewSessionSheet(
                 didCreate: {
@@ -130,6 +135,82 @@ struct ContentView: View {
     }
 }
 
+private struct ApprovalToastEntry: Identifiable {
+    let session: LocalStructuredAgentSession
+    let sessionName: String
+    let request: ApprovalRequest
+
+    var id: String { "\(session.id.uuidString):\(request.approvalID)" }
+}
+
+private struct ApprovalToastCenter: View {
+    @EnvironmentObject private var appModel: AppModel
+    @Binding var selectedSessionID: UUID?
+    @State private var isExpanded = true
+
+    private var entries: [ApprovalToastEntry] {
+        appModel.pendingApprovals.bySession.flatMap { sessionID, requests -> [ApprovalToastEntry] in
+            guard let session = appModel.structuredSessions[sessionID] else { return [] }
+            let name = appModel.sessions.first(where: { $0.id == sessionID })?.displayName ?? "Agent"
+            return requests.values.map {
+                ApprovalToastEntry(session: session, sessionName: name, request: $0)
+            }
+        }
+        .sorted {
+            $0.request.expiresAt == $1.request.expiresAt
+                ? $0.id < $1.id
+                : $0.request.expiresAt < $1.request.expiresAt
+        }
+    }
+
+    var body: some View {
+        Group {
+            if !entries.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        isExpanded.toggle()
+                    } label: {
+                        HStack {
+                            Label("待审批 \(entries.count)", systemImage: "checkmark.shield")
+                                .font(.headline)
+                            Spacer()
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "收起待审批消息" : "展开待审批消息")
+
+                    if isExpanded {
+                        ScrollView {
+                            LazyVStack(spacing: 8) {
+                                ForEach(entries) { entry in
+                                    AgentApprovalToast(
+                                        request: entry.request,
+                                        session: entry.session,
+                                        sessionName: entry.sessionName,
+                                        showSession: { selectedSessionID = entry.session.id }
+                                    )
+                                    .id(entry.id)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 460)
+                    }
+                }
+                .padding(10)
+                .frame(width: 380)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .overlay { RoundedRectangle(cornerRadius: 12).stroke(.separator) }
+                .shadow(radius: 12, y: 5)
+            }
+        }
+        .onChange(of: entries.map(\.id)) { old, new in
+            if !Set(new).isSubset(of: Set(old)) { isExpanded = true }
+        }
+    }
+}
+
 private struct CopilotHistoryView: View {
     @EnvironmentObject private var appModel: AppModel
     let archive: CopilotHistorySession
@@ -223,7 +304,7 @@ private struct StructuredAgentSessionView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(session.timeline) { item in
+                        ForEach(visibleTimeline) { item in
                             AgentTimelineRow(item: item, session: session)
                                 .id(item.id)
                         }
@@ -249,7 +330,7 @@ private struct StructuredAgentSessionView: View {
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
                 }
-                .onChange(of: session.timeline.last?.id) { _, id in
+                .onChange(of: visibleTimeline.last?.id) { _, id in
                     guard id != nil else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
@@ -341,6 +422,13 @@ private struct StructuredAgentSessionView: View {
 
     private var canSend: Bool {
         !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && session.state == .ready
+    }
+
+    private var visibleTimeline: [AgentTimelineItem] {
+        session.timeline.filter {
+            if case .approval = $0 { return false }
+            return true
+        }
     }
 
     private var validManualModel: Bool {
@@ -442,8 +530,8 @@ private struct AgentTimelineRow: View {
             AgentCard(title: "文件变更", icon: "doc.badge.gearshape") {
                 Text(file.summary).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
-        case .approval(let approval):
-            AgentApprovalCard(value: approval, session: session)
+        case .approval:
+            EmptyView()
         case .userInput(let input):
             AgentUserInputCard(value: input, session: session)
         case .notice(_, let text, let isError):
@@ -518,43 +606,74 @@ private struct AgentCard<Content: View>: View {
     }
 }
 
-private struct AgentApprovalCard: View {
-    let value: AgentApprovalViewState
+private struct AgentApprovalToast: View {
+    let request: ApprovalRequest
     @ObservedObject var session: LocalStructuredAgentSession
+    let sessionName: String
+    let showSession: () -> Void
     @State private var submittingDecision: ApprovalDecision?
     @State private var submissionError: String?
+    @State private var isShowingFullDetail = false
 
     var body: some View {
-        AgentCard(title: value.request.title, icon: "checkmark.shield") {
-            if let detail = value.request.detail {
-                Text(detail).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        AgentCard(title: request.title, icon: "checkmark.shield") {
+            HStack {
+                Button(sessionName, action: showSession)
+                    .buttonStyle(.link)
+                    .lineLimit(1)
+                Spacer()
+                Text(riskLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(request.risk == .critical || request.risk == .high
+                        ? Color.red : Color.orange)
             }
-            if let decision = value.decision {
-                Text("已处理：\(decisionLabel(decision))").font(.caption).foregroundStyle(.secondary)
+            if let detail = request.detail {
+                Text(detail)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(isShowingFullDetail ? nil : 6)
+                    .textSelection(.enabled)
+                Button(isShowingFullDetail ? "收起详情" : "展开完整详情") {
+                    isShowingFullDetail.toggle()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+            if request.availableDecisions.isEmpty {
+                Text("Agent 未提供可用的审批操作")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             } else {
-                HStack {
-                    ForEach(value.request.availableDecisions, id: \.rawValue) { decision in
-                        if decision == .allowOnce {
-                            decisionButton(decision).buttonStyle(.borderedProminent)
-                        } else {
-                            decisionButton(decision).buttonStyle(.bordered)
+                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                    if request.expiresAt <= timeline.date {
+                        Text("审批已过期，等待 Agent 更新")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+                            ForEach(request.availableDecisions, id: \.rawValue) { decision in
+                                if decision == .allowOnce {
+                                    decisionButton(decision).buttonStyle(.borderedProminent)
+                                } else {
+                                    decisionButton(decision).buttonStyle(.bordered)
+                                }
+                            }
                         }
                     }
                 }
-                if let submittingDecision {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("正在提交：\(decisionLabel(submittingDecision))")
-                    }
+            }
+            if let submittingDecision {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在提交：\(decisionLabel(submittingDecision))")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if let submissionError {
+                Text(submissionError)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                if let submissionError {
-                    Text(submissionError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
             }
         }
     }
@@ -565,8 +684,8 @@ private struct AgentApprovalCard: View {
                 submissionError = nil
                 submittingDecision = decision
                 let result = await session.resolveApproval(
-                    approvalID: value.request.approvalID,
-                    turnID: value.request.turnID,
+                    approvalID: request.approvalID,
+                    turnID: request.turnID,
                     decision: decision
                 )
                 submittingDecision = nil
@@ -575,7 +694,10 @@ private struct AgentApprovalCard: View {
                 }
             }
         }
-        .disabled(submittingDecision != nil || session.state != .awaitingApproval)
+        .disabled(
+            submittingDecision != nil || session.state != .awaitingApproval
+                || request.expiresAt <= Date()
+        )
     }
 
     private func decisionLabel(_ decision: ApprovalDecision) -> String {
@@ -585,6 +707,15 @@ private struct AgentApprovalCard: View {
         case .allowPolicy: "允许并应用规则"
         case .deny: "拒绝"
         case .cancel: "取消"
+        }
+    }
+
+    private var riskLabel: String {
+        switch request.risk {
+        case .low: "低风险"
+        case .medium: "中风险"
+        case .high: "高风险"
+        case .critical: "严重风险"
         }
     }
 }

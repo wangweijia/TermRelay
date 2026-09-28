@@ -252,6 +252,32 @@ final class StructuredAgentCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testLocalSessionPublishesApprovalEventsToUnifiedInbox() async {
+        let sessionID = UUID()
+        let runtime = FakeAgentRuntime(sessionID: sessionID)
+        var inbox = PendingApprovalInbox()
+        let session = LocalStructuredAgentSession(
+            id: sessionID,
+            directory: URL(fileURLWithPath: "/tmp"),
+            adapter: FixedRuntimeAdapter(runtime: runtime),
+            eventHandler: { _ in },
+            approvalHandler: { inbox.apply($0) },
+            stateHandler: { _, _ in }
+        )
+        await session.start()
+        _ = await session.startTurn("test", idempotencyKey: UUID())
+        await runtime.emitTurnStarted("turn-a")
+        await runtime.emitApproval(turnID: "turn-a", approvalID: "approval-a")
+        try? await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(inbox.bySession[sessionID]?.count, 1)
+
+        await runtime.emitTurnCompleted("turn-a")
+        try? await Task.sleep(for: .milliseconds(60))
+        XCTAssertNil(inbox.bySession[sessionID])
+        await session.stop()
+    }
+
+    @MainActor
     func testLocalSessionRestoresLastModelAndEffortPerProvider() async throws {
         let suiteName = "AgentConfiguration-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
