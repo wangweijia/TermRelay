@@ -317,7 +317,11 @@ private struct AgentTimelineRow: View {
                     Text(message.role == .user ? "你" : "Agent")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(message.text).textSelection(.enabled)
+                    if message.role == .assistant {
+                        AgentMarkdownView(text: message.text)
+                    } else {
+                        Text(message.text).textSelection(.enabled)
+                    }
                 }
                 .padding(12)
                 .background(message.role == .user ? Color.accentColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor))
@@ -326,14 +330,14 @@ private struct AgentTimelineRow: View {
             }
         case .reasoning(_, let text):
             DisclosureGroup("思考过程") {
-                Text(text).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                AgentMarkdownView(text: text).font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
             }
             .padding(10)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
         case .plan(_, let text):
             AgentCard(title: "计划", icon: "list.bullet.clipboard") {
-                Text(text).textSelection(.enabled)
+                AgentMarkdownView(text: text)
             }
         case .command(let command):
             AgentCard(

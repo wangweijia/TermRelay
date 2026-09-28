@@ -49,6 +49,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 
 - **真实远程终端**：保留 ANSI、TrueColor、中文、Emoji、终端 resize、输入、Ctrl-C 和停止操作。
 - **多 Provider 原生 ACP 体验**：结构化呈现回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
+- **ACP Markdown 展示**：Mac 和 Web 自动识别并渲染 AI 回答、思考与计划中的 Markdown；普通文本保持原样，PTY 和命令输出仍按原方式展示。
 - **完整交互闭环**：支持审批的全部可用决策，以及 `requestUserInput` 式的用户问答。
 - **跨会话审批中心**：PC 与手机 Web 可统一查看多个 ACP 窗口的待审批任务，并直接处理。
 - **手机审批推送**：Server 可通过 Bark 将新审批推送到 iPhone；通知开关由 Web 控制并持久化。

@@ -2,9 +2,11 @@
 import { useVirtualizer } from '@tanstack/vue-virtual';
 import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
+import { isAgentMarkdown, renderAgentMarkdown } from '../agent-markdown';
+import { approvalPresentation } from '../approval-presentation';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
-type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean };
+type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean; decision?: unknown };
 type ConfigOption = { id: string; name: string; currentValue: string; choices: { value: string; name: string }[] };
 type SendShortcut = 'commandEnter' | 'controlEnter' | 'optionEnter' | 'shiftEnter';
 
@@ -134,7 +136,10 @@ function applyToolEvent(event: { seq: number; payload: ToolEventPayload }): void
       const prefix = kind === 'approval.resolved' ? 'approval' : 'input';
       const key = kind === 'approval.resolved' ? 'approvalId' : 'requestId';
       const prior = timelineById.get(`${prefix}:${text(data, key)}`);
-      if (prior) prior.resolved = true;
+      if (prior) {
+        prior.resolved = true;
+        if (kind === 'approval.resolved') prior.decision = data.decision;
+      }
       awaitingHuman.value = false;
       return;
     }
@@ -315,15 +320,21 @@ function submitAnswers(item: TimelineItem): void {
         <template v-for="item in [timeline[virtualRow.index]!]" :key="item.id">
         <div class="agent-event" :data-kind="item.kind">
         <small>{{ itemLabel(item.kind) }}</small>
-        <p v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">{{ item.text }}</p>
+        <template v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">
+          <div v-if="item.kind !== 'user.message' && item.text && isAgentMarkdown(item.text)" class="agent-markdown" v-html="renderAgentMarkdown(item.text)" />
+          <p v-else>{{ item.text }}</p>
+        </template>
         <div v-else-if="item.kind === 'command'">
           <pre v-if="text(item.data, 'command')">{{ text(item.data, 'command') }}</pre>
           <pre v-if="item.text">{{ item.text }}</pre>
           <p v-if="item.data.exitCode !== undefined">退出码：{{ item.data.exitCode ?? '—' }}</p>
         </div>
-        <div v-else-if="item.kind === 'approval.requested'" class="approval-card" :data-risk="text(item.data, 'risk')">
+        <div v-else-if="item.kind === 'approval.requested'" class="approval-card" :data-risk="text(item.data, 'risk')" :data-outcome="item.resolved ? approvalPresentation(item.decision).outcome : undefined">
           <strong>{{ text(item.data, 'title') }}</strong><pre v-if="text(item.data, 'detail')">{{ text(item.data, 'detail') }}</pre>
-          <p v-if="item.resolved">审批已处理</p>
+          <div v-if="item.resolved" class="approval-status">
+            <span class="approval-status-icon" aria-hidden="true">{{ approvalPresentation(item.decision).icon }}</span>
+            <span>{{ approvalPresentation(item.decision).label }}</span>
+          </div>
           <div v-else class="approval-actions">
             <button v-for="decision in strings(item.data, 'availableDecisions') as Decision[]" :key="decision" type="button" :class="{ approve: decision === 'allowOnce' }" :disabled="!interactive" @click="emit('resolveApproval', text(item.data, 'approvalId'), text(item.data, 'turnId'), decision)">{{ decisionLabel(decision) }}</button>
           </div>
