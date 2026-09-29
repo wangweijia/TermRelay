@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { inputAcknowledged, inputDeliveryUncertain, parsePendingShortcutInput } from '../shortcut-input';
 import type { PendingShortcutInput, ShortcutAnswer } from '../shortcut-input';
+import { createUuid } from '../uuid';
 
 interface Shortcut {
   id: string;
@@ -207,7 +208,14 @@ async function start(shortcut: Shortcut): Promise<void> {
     error.value = '无法安全保存运行 ID，请启用浏览器本地存储后重试。';
     return;
   }
-  const submission = { runId: window.crypto.randomUUID(), shortcutId: shortcut.id, name: shortcut.name };
+  let runId: string;
+  try {
+    runId = createUuid();
+  } catch (reason) {
+    error.value = message(reason);
+    return;
+  }
+  const submission = { runId, shortcutId: shortcut.id, name: shortcut.name };
   try {
     window.localStorage.setItem(pendingKey, JSON.stringify(submission));
   } catch {
@@ -352,7 +360,14 @@ function sendInput(answer: ShortcutAnswer): void {
     inputError.value = '已有待确认输入，不能生成新命令；请使用原命令 ID 重试。';
     return;
   }
-  const submission = { runId: run.value.id, commandId: window.crypto.randomUUID(), answer };
+  let commandId: string;
+  try {
+    commandId = createUuid();
+  } catch (reason) {
+    inputError.value = message(reason);
+    return;
+  }
+  const submission = { runId: run.value.id, commandId, answer };
   try {
     window.localStorage.setItem(pendingInputKey, JSON.stringify(submission));
   } catch {
