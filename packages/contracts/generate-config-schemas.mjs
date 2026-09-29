@@ -33,6 +33,24 @@ const shortcutSchemas = [
   ['shortcutRunInputSchema', 'shortcut-run-input'],
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
+const filePreviewSchemas = [
+  ['filePreviewRequestSchema', 'commands/file-preview-request'],
+  ['filePreviewResultSchema', 'events/file-preview-result'],
+];
+const filePreviewTypes = `export interface FilePreviewRequestPayload {
+  requestId: string;
+  workspaceId: string;
+  path: string;
+}
+
+export interface FilePreviewResultPayload {
+  requestId: string;
+  status: 'ok' | 'not_found' | 'forbidden' | 'too_large' | 'unsupported' | 'error';
+  name?: string;
+  content?: string;
+}
+
+`;
 const shortcutTypes = `export interface ShortcutCatalogEntry {
   id: string;
   revision: number;
@@ -139,4 +157,8 @@ const shortcutDeclarations = await Promise.all(shortcutSchemas.map(async ([name,
   const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, import.meta.url), 'utf8'));
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
-await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('').trimEnd() + '\n');
+const filePreviewDeclarations = await Promise.all(filePreviewSchemas.map(async ([name, file]) => {
+  const schema = JSON.parse(await readFile(new URL(`./${file}.schema.json`, import.meta.url), 'utf8'));
+  return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
+}));
+await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('') + filePreviewTypes + filePreviewDeclarations.join('').trimEnd() + '\n');

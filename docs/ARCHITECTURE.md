@@ -53,6 +53,10 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 4. Web 不直接连接 Mac，不持有工作区真实路径，也不单独部署。
 5. Server 只保存工作区不透明 ID；Mac 是本地路径授权的最终裁决者。
 
+ACP Web 的工作区 Markdown 文件预览使用独立的 HTTP → Server → Mac WebSocket 请求/响应链路，
+不经过 PTY 命令或持久化的会话事件。Server 用会话 ID 路由到设备，只临时转发文件内容；
+Mac 同时验证会话、工作区 ID、真实路径边界和文件大小，拒绝工作区外的文件。
+
 ## Codex 集成决策
 
 Codex 的结构化增强直接使用官方 App Server Protocol，不通过 `codex-acp`。Mac App 在本机

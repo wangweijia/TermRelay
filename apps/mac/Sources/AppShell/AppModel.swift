@@ -139,6 +139,9 @@ final class AppModel: ObservableObject {
             },
             quickActionInputHandler: { [weak self] request in
                 await self?.handleQuickActionInput(request) ?? .rejected("Mac App 不可用")
+            },
+            filePreviewWorkspaceHandler: { [weak self] sessionID, workspaceID in
+                await self?.filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID)
             }
         )
     }
@@ -929,6 +932,13 @@ final class AppModel: ObservableObject {
         identifiers[directory.path] = identifier
         defaults.set(identifiers, forKey: Keys.workspaceIDs)
         return identifier
+    }
+
+    private func filePreviewWorkspace(sessionID: UUID, workspaceID: String) -> URL? {
+        guard let session = sessions.first(where: { $0.id == sessionID }),
+              let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String],
+              identifiers[session.directory.path] == workspaceID else { return nil }
+        return session.directory
     }
 
     private enum Keys {

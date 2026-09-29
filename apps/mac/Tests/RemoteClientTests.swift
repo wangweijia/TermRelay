@@ -3,6 +3,33 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testDecodesFilePreviewWithoutCommandOrSequence() async {
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
+                                  commandHandler: { _ in .completed })
+        let sessionID = UUID()
+        let requestID = UUID()
+        func envelope(commandID: UUID? = nil, session: String? = nil) -> IncomingRelayEnvelope {
+            IncomingRelayEnvelope(
+                type: "file.preview.request", protocolVersion: "2", messageId: UUID(),
+                deviceId: "device", sessionId: session ?? sessionID.uuidString, commandId: commandID,
+                payload: .object([
+                    "requestId": .string(requestID.uuidString),
+                    "workspaceId": .string("workspace-1"),
+                    "path": .string("/project/readme.md"),
+                ])
+            )
+        }
+        let decoded = await client.decodeFilePreviewRequest(envelope())
+        XCTAssertEqual(decoded?.sessionID, sessionID)
+        XCTAssertEqual(decoded?.requestID, requestID)
+        XCTAssertEqual(decoded?.workspaceID, "workspace-1")
+        XCTAssertEqual(decoded?.path, "/project/readme.md")
+        let withCommand = await client.decodeFilePreviewRequest(envelope(commandID: UUID()))
+        let withoutSession = await client.decodeFilePreviewRequest(envelope(session: "invalid"))
+        XCTAssertNil(withCommand)
+        XCTAssertNil(withoutSession)
+    }
+
     func testDecodesOnlyValidShortcutCommands() async {
         let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
                                   commandHandler: { _ in .completed })

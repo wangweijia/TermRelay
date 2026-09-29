@@ -4,11 +4,13 @@ import { SessionRepository } from './session.repository';
 import { SessionsController } from './sessions.controller';
 import { SessionsService } from './sessions.service';
 import { WorkspaceRepository } from './workspace.repository';
+import { FilePreviewController } from './file-preview.controller';
+import { FilePreviewService } from './file-preview.service';
 
 @Module({
   imports: [DevicesModule],
-  controllers: [SessionsController],
-  providers: [WorkspaceRepository, SessionRepository, SessionsService],
-  exports: [SessionsService],
+  controllers: [SessionsController, FilePreviewController],
+  providers: [WorkspaceRepository, SessionRepository, SessionsService, FilePreviewService],
+  exports: [SessionsService, FilePreviewService],
 })
 export class SessionsModule {}

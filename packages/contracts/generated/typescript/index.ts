@@ -1476,3 +1476,112 @@ export const shortcutRunInputAckSchema = {
   },
   "additionalProperties": false
 } as const;
+
+export interface FilePreviewRequestPayload {
+  requestId: string;
+  workspaceId: string;
+  path: string;
+}
+
+export interface FilePreviewResultPayload {
+  requestId: string;
+  status: 'ok' | 'not_found' | 'forbidden' | 'too_large' | 'unsupported' | 'error';
+  name?: string;
+  content?: string;
+}
+
+export const filePreviewRequestSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/file-preview-request.schema.json",
+  "title": "file.preview.request payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "workspaceId",
+    "path"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const filePreviewResultSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/file-preview-result.schema.json",
+  "title": "file.preview.result payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "status"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "not_found",
+        "forbidden",
+        "too_large",
+        "unsupported",
+        "error"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "content": {
+      "type": "string",
+      "maxLength": 524288
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "ok"
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255
+      },
+      "content": {
+        "type": "string",
+        "maxLength": 524288
+      }
+    },
+    "required": [
+      "name",
+      "content"
+    ]
+  },
+  "else": {
+    "properties": {
+      "name": false,
+      "content": false
+    }
+  },
+  "additionalProperties": false
+} as const;

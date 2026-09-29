@@ -5,6 +5,21 @@ import { ProtocolValidator } from './protocol-validator';
 
 const validator = new ProtocolValidator();
 
+test('validates file preview replies without treating them as session events', () => {
+  const payload = { requestId: randomUUID(), status: 'ok', name: 'readme.md', content: '# Hello' };
+  assert.equal(validator.validate({ ...envelope('file.preview.result', payload), sessionId: 'session-a' }).ok, true);
+  assert.equal(validator.validate(envelope('file.preview.result', payload)).ok, false);
+  assert.equal(validator.validate({ ...envelope('file.preview.result', payload), sessionId: 'session-a', seq: 1 }).ok, false);
+  assert.equal(validator.validate({
+    ...envelope('file.preview.result', { requestId: randomUUID(), status: 'ok' }),
+    sessionId: 'session-a',
+  }).ok, false);
+  assert.equal(validator.validate({
+    ...envelope('file.preview.result', { requestId: randomUUID(), status: 'forbidden', content: 'secret' }),
+    sessionId: 'session-a',
+  }).ok, false);
+});
+
 test('accepts a valid device.register envelope and payload', () => {
   const result = validator.validate(
     envelope('device.register', {

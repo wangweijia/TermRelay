@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/file-preview-request.schema.json",
+  "title": "file.preview.request payload",
+  "type": "object",
+  "required": ["requestId", "workspaceId", "path"],
+  "properties": {
+    "requestId": { "type": "string", "format": "uuid" },
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "path": { "type": "string", "minLength": 1, "maxLength": 4096 }
+  },
+  "additionalProperties": false
+}

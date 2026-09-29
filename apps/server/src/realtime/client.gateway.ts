@@ -22,6 +22,7 @@ import type WebSocket from 'ws';
 import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
 import { SessionsService } from '../sessions/sessions.service';
 import { ShortcutsService } from '../shortcuts/shortcuts.service';
+import { FilePreviewService } from '../sessions/file-preview.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
 import {
@@ -63,6 +64,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly commands?: CommandRelayService,
     @Optional() private readonly authorizations?: ClientConnectionAuthorizations,
     @Optional() private readonly shortcuts?: ShortcutsService,
+    @Optional() private readonly previews?: FilePreviewService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -166,6 +168,17 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
           client,
           'conflict',
           'Command acknowledgement is unknown, expired, or belongs to another connection.',
+          result.message.envelope.messageId,
+        );
+      }
+
+      return;
+    }
+
+    if (result.message.type === 'file.preview.result') {
+      if (!this.previews?.accept(client, result.message.envelope)) {
+        this.sendProtocolError(
+          client, 'conflict', 'File preview request is unknown or belongs to another connection.',
           result.message.envelope.messageId,
         );
       }
@@ -365,7 +378,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
     >,
   ): Promise<void> {
     const { envelope } = message;

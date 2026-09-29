@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { useVirtualizer } from '@tanstack/vue-virtual';
-import { computed, nextTick, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
-import { isAgentMarkdown, renderAgentMarkdown } from '../agent-markdown';
+import { isAgentMarkdown, localPreviewPath, renderAgentMarkdown } from '../agent-markdown';
 import { approvalPresentation } from '../approval-presentation';
+import FilePreview from './FilePreview.vue';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
 type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean; decision?: unknown; sourceId?: string; turnId?: string; isStreaming?: boolean };
@@ -23,6 +24,7 @@ const shortcutOptions: { value: SendShortcut; label: string }[] = [
 ];
 
 const props = withDefaults(defineProps<{
+  sessionId: string;
   events: SessionEventRecord[];
   interactive: boolean;
   shortcutEnabled?: boolean;
@@ -48,6 +50,17 @@ const emit = defineEmits<{
   setConfiguration: [id: string, value: string];
 }>();
 const prompt = ref('');
+const previewPath = ref<string>();
+onDeactivated(() => { previewPath.value = undefined; });
+function openFileLink(event: MouseEvent): void {
+  if (!(event.target instanceof Element)) return;
+  const link = event.target.closest<HTMLAnchorElement>('a[data-termrelay-file-link]');
+  if (!link) return;
+  const path = localPreviewPath(link.href, window.location.origin);
+  if (!path) return;
+  event.preventDefault();
+  previewPath.value = path;
+}
 const manualModel = ref('');
 const configOptions = computed<ConfigOption[]>(() => {
   const event = [...props.events].reverse().find((item) => item.type === 'tool.event' && item.payload.kind === 'config.updated');
@@ -353,7 +366,7 @@ function submitAnswers(item: TimelineItem): void {
 
 <template>
   <section class="agent-view">
-    <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll">
+    <div ref="timelineElement" class="agent-timeline" @scroll.passive="handleTimelineScroll" @click="openFileLink">
       <div v-if="hasOlder || loadingOlder" class="timeline-history-status" :data-loading="loadingOlder">
         <span v-if="loadingOlder" class="timeline-history-spinner" aria-hidden="true" />
         <span v-if="loadingOlder">正在载入更早记录</span>
@@ -459,4 +472,5 @@ function submitAnswers(item: TimelineItem): void {
       </div>
     </form>
   </section>
+  <FilePreview v-if="previewPath" :session-id="sessionId" :path="previewPath" @close="previewPath = undefined" />
 </template>

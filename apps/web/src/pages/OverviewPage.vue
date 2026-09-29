@@ -238,6 +238,7 @@ onBeforeUnmount(() => {
           <StructuredAgentView
             v-if="!relay.loadingHistory && relay.selectedSession?.runtimeMode === 'acp'"
             :key="relay.selectedSession.id"
+            :session-id="relay.selectedSession.id"
             :events="relay.selectedEvents"
             :interactive="relay.selectedSessionInteractive"
             :scroll-revision="relay.scrollToLatestRevision"

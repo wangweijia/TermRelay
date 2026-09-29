@@ -7,6 +7,7 @@ actor RemoteClient {
     typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
     typealias QuickActionHandler = @Sendable (QuickActionCommand) async -> Void
     typealias QuickActionInputHandler = @Sendable (QuickActionInputRequest) async -> QuickActionInputResult
+    typealias FilePreviewWorkspaceHandler = @Sendable (UUID, String) async -> URL?
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
@@ -15,6 +16,7 @@ actor RemoteClient {
     private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
     private let quickActionHandler: QuickActionHandler
     private let quickActionInputHandler: QuickActionInputHandler
+    private let filePreviewWorkspaceHandler: FilePreviewWorkspaceHandler
     private var serverURL: URL?
     private var credential: String?
     private var socket: URLSessionWebSocketTask?
@@ -51,6 +53,7 @@ actor RemoteClient {
         authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
         quickActionHandler: @escaping QuickActionHandler = { _ in },
         quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
+        filePreviewWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
@@ -60,6 +63,7 @@ actor RemoteClient {
         self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
         self.quickActionHandler = quickActionHandler
         self.quickActionInputHandler = quickActionInputHandler
+        self.filePreviewWorkspaceHandler = filePreviewWorkspaceHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -443,6 +447,15 @@ actor RemoteClient {
             await reconcileSession(sessionID, lastAcceptedSequence: UInt64(accepted))
             return
         }
+        if registered, envelope.type == "file.preview.request" {
+            if let request = decodeFilePreviewRequest(envelope) {
+                let currentGeneration = generation
+                Task { [weak self] in
+                    await self?.handleFilePreview(request, generation: currentGeneration)
+                }
+            }
+            return
+        }
         if registered, envelope.type.hasPrefix("shortcut.run.") {
             if envelope.type == "shortcut.run.input" {
                 if let request = decodeQuickActionInput(envelope) {
@@ -481,6 +494,35 @@ actor RemoteClient {
             if completedCommands.count > 512 { completedCommands.removeFirst(128) }
         }
         await acknowledge(command, result: result)
+    }
+
+    func decodeFilePreviewRequest(_ envelope: IncomingRelayEnvelope)
+        -> (sessionID: UUID, requestID: UUID, workspaceID: String, path: String)?
+    {
+        guard envelope.type == "file.preview.request", envelope.commandId == nil,
+              let sessionID = envelope.sessionId.flatMap(UUID.init(uuidString:)),
+              let payload = envelope.payload.object,
+              let requestID = payload["requestId"]?.string.flatMap(UUID.init(uuidString:)),
+              let workspaceID = payload["workspaceId"]?.string, !workspaceID.isEmpty,
+              let path = payload["path"]?.string else { return nil }
+        return (sessionID, requestID, workspaceID, path)
+    }
+
+    private func handleFilePreview(
+        _ request: (sessionID: UUID, requestID: UUID, workspaceID: String, path: String),
+        generation expectedGeneration: Int
+    ) async {
+        let result: FilePreviewResult
+        if let workspace = await filePreviewWorkspaceHandler(request.sessionID, request.workspaceID) {
+            result = await Task.detached(priority: .utility) {
+                FilePreviewReader.read(requestId: request.requestID, path: request.path, workspace: workspace)
+            }.value
+        } else {
+            result = FilePreviewResult(requestId: request.requestID, status: .forbidden)
+        }
+        guard generation == expectedGeneration else { return }
+        _ = await send(type: "file.preview.result",
+                       sessionId: request.sessionID.uuidString.lowercased(), payload: result)
     }
 
     func decodeQuickActionCommand(_ envelope: IncomingRelayEnvelope) -> QuickActionCommand? {
