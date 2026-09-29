@@ -25,6 +25,44 @@ const historySchemas = [
   ['sessionHistoryDeleteSchema', 'session-history-delete'],
   ['sessionHistoryDeletedSchema', 'session-history-deleted'],
 ];
+const shortcutSchemas = [
+  ['shortcutCatalogSchema', 'shortcut-catalog'],
+  ['shortcutRunUpdateSchema', 'shortcut-run-update'],
+  ['shortcutRunStartSchema', 'shortcut-run-start'],
+  ['shortcutRunCancelSchema', 'shortcut-run-cancel'],
+];
+const shortcutTypes = `export interface ShortcutCatalogEntry {
+  id: string;
+  revision: number;
+  name: string;
+  description: string;
+  workspaceId: string;
+  proxyMode: 'inherit' | 'disabled' | 'custom';
+  requiresConfirmation: boolean;
+}
+
+export interface ShortcutCatalogPayload {
+  shortcuts: ShortcutCatalogEntry[];
+}
+
+export interface ShortcutRunUpdatePayload {
+  runId: string;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  exitCode?: number;
+  output?: string;
+}
+
+export interface ShortcutRunStartPayload {
+  runId: string;
+  shortcutId: string;
+  revision: number;
+}
+
+export interface ShortcutRunCancelPayload {
+  runId: string;
+}
+
+`;
 const historyTypes = `export interface SessionHistoryListPayload {
   cursor?: string;
 }
@@ -82,4 +120,8 @@ const historyDeclarations = await Promise.all(historySchemas.map(async ([name, f
 const marker = 'export interface SessionHistoryListPayload';
 const start = source.indexOf(marker);
 if (start >= 0) source = source.slice(0, start);
-await writeFile(indexURL, source + historyTypes + historyDeclarations.join('').trimEnd() + '\n');
+const shortcutDeclarations = await Promise.all(shortcutSchemas.map(async ([name, file]) => {
+  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, import.meta.url), 'utf8'));
+  return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
+}));
+await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('').trimEnd() + '\n');

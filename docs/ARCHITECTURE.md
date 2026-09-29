@@ -88,6 +88,12 @@ Server 和 Web 不解析或透传 Codex 原始 JSON-RPC。所有 CLI（包括 Co
 - Web 的 input、resize、interrupt 和 stop 必须携带 `command_id`；Server 验证 Session/Device 归属与在线连接后定向转发，Mac 执行 PTY 操作并以 `command.ack` 返回结果。
 - Mac 网络层使用系统 `URLSessionWebSocketTask`，注册成功后才同步工作区/Session；尚未发送的终端批次最多在内存保留 16 MiB，重连并重新声明 Session 后按 seq 发送。
 
+## Mac-owned shortcuts (server slice)
+
+- A registered Mac publishes a full `shortcut.catalog` snapshot (up to 100 entries). The server persists only names, descriptions, opaque workspace IDs, revision and display/confirmation metadata; it never stores shortcut commands, local paths or proxy endpoints.
+- Web polls `GET /api/shortcuts` and `GET /api/shortcuts/runs/:runId`. Starting a run uses `POST /api/shortcuts/:id/runs` with a caller-generated UUID `runId`; cancelling uses `POST /api/shortcuts/runs/:runId/cancel`. The server sends `shortcut.run.start` (`runId`, `shortcutId`, `revision`) or `shortcut.run.cancel` (`runId`) only to the registered device.
+- A cancel request does not mark a run cancelled: only the Mac's `shortcut.run.update` does. Only server-requested runs have IDs in this API; Mac-local trial runs are not reported to the server. Output is a replacement snapshot bounded to 32768 characters; burst running snapshots coalesce to at most one write per 250 ms per run, while terminal updates flush the latest snapshot immediately. A short run may go directly from `queued` to `succeeded` or `failed`. Terminal runs reject all later updates, including delayed `running` messages. One queued/running run per shortcut is permitted. On disconnect or server restart, active runs transition to `failed` with `连接中断，执行结果未知；请核实后再运行`: this is **not** evidence that the Mac subprocess stopped. They are never automatically retried. Completed runs remain pollable for 30 days after their last update, then are pruned at startup and daily; active runs are not pruned.
+
 ## M0 与阶段 0 的分界
 
 阶段 0 已于 2026-09-10 完成核心实机探针，结果见 `docs/MAC_STAGE0_PROBE.md`。以下能力仍需在阶段 1 持续回归：

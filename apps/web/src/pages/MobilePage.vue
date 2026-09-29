@@ -3,10 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import ApprovalInbox from '../components/ApprovalInbox.vue';
 import StructuredAgentView from '../components/StructuredAgentView.vue';
 import TerminalView from '../components/TerminalView.vue';
+import ShortcutPanel from '../components/ShortcutPanel.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
-type MobileTab = 'sessions' | 'workspace' | 'approvals';
+type MobileTab = 'sessions' | 'workspace' | 'approvals' | 'shortcuts';
 const relay = useRelayStore();
 const activeTab = ref<MobileTab>('sessions');
 const toast = ref<string>();
@@ -55,7 +56,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
 <template>
   <main class="mobile-shell">
     <header class="mobile-topbar">
-      <div><strong>TermRelay</strong><small>{{ activeTab === 'sessions' ? '会话' : activeTab === 'workspace' ? '工作区' : '审批中心' }}</small></div>
+      <div><strong>TermRelay</strong><small>{{ activeTab === 'sessions' ? '会话' : activeTab === 'workspace' ? '工作区' : activeTab === 'approvals' ? '审批中心' : '快捷任务' }}</small></div>
       <span class="mobile-connection" :data-state="relay.connectionState">{{ connectionText }}</span>
     </header>
 
@@ -94,10 +95,15 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
       <ApprovalInbox :approvals="relay.pendingApprovals" :settings="relay.notificationSettings" :is-interactive="interactive" :resolving="relay.resolvingApprovals" @resolve="relay.resolveApprovalFromInbox" @toggle-notifications="relay.setApprovalNotifications" />
     </section>
 
+    <section v-show="activeTab === 'shortcuts'" class="mobile-screen mobile-shortcuts">
+      <ShortcutPanel :active="activeTab === 'shortcuts'" />
+    </section>
+
     <nav class="mobile-tabs" aria-label="主要功能">
       <button :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'"><span>▤</span>会话</button>
       <button :class="{ active: activeTab === 'workspace' }" @click="activeTab = 'workspace'"><span>⌘</span>工作区</button>
       <button :class="{ active: activeTab === 'approvals' }" @click="activeTab = 'approvals'"><span>✓</span>审批<i v-if="relay.pendingApprovals.length">{{ relay.pendingApprovals.length }}</i></button>
+      <button :class="{ active: activeTab === 'shortcuts' }" @click="activeTab = 'shortcuts'"><span>▶</span>快捷</button>
     </nav>
   </main>
 </template>

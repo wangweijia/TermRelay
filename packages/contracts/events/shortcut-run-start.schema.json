@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-start.schema.json",
+  "title": "shortcut.run.start payload (server to Mac)",
+  "type": "object",
+  "required": ["runId", "shortcutId", "revision"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid" },
+    "shortcutId": { "type": "string", "format": "uuid" },
+    "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+  },
+  "additionalProperties": false
+}

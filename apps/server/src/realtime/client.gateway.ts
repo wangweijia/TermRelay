@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
 import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
 import { SessionsService } from '../sessions/sessions.service';
+import { ShortcutsService } from '../shortcuts/shortcuts.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
 import {
@@ -61,6 +62,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly sessions: SessionsService,
     @Optional() private readonly commands?: CommandRelayService,
     @Optional() private readonly authorizations?: ClientConnectionAuthorizations,
+    @Optional() private readonly shortcuts?: ShortcutsService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -73,6 +75,10 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: WebSocket): void {
+    const deviceId = this.registry.getDeviceId(client);
+    if (deviceId && this.registry.getClient(deviceId) === client) {
+      void this.shortcuts?.disconnected(deviceId);
+    }
     this.registry.disconnect(client);
     this.authorizations?.detach(client);
   }
@@ -102,6 +108,9 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (authorizedDeviceId && authorizedDeviceId !== envelope.deviceId) {
         this.rejectUnregistered(client, envelope.messageId);
         return;
+      }
+      if (this.registry.getClient(envelope.deviceId) && this.registry.getClient(envelope.deviceId) !== client) {
+        await this.shortcuts?.disconnected(envelope.deviceId);
       }
       const device = this.registry.register(
         client,
@@ -159,6 +168,26 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
           'Command acknowledgement is unknown, expired, or belongs to another connection.',
           result.message.envelope.messageId,
         );
+      }
+      return;
+    }
+
+    if (result.message.type === 'shortcut.catalog' || result.message.type === 'shortcut.run.update') {
+      const { envelope } = result.message;
+      try {
+        const accepted = result.message.type === 'shortcut.catalog'
+          ? await this.shortcuts?.catalog(envelope.deviceId, result.message.envelope.payload)
+          : await this.shortcuts?.update(envelope.deviceId, result.message.envelope.payload);
+        if (!accepted) this.sendProtocolError(
+          client, 'conflict',
+          result.message.type === 'shortcut.catalog'
+            ? 'Shortcut IDs must belong to this device.'
+            : 'Run is unknown, terminal, or belongs to another device.',
+          envelope.messageId,
+        );
+      } catch (error) {
+        this.logger.error(`Failed to persist ${result.message.type}: ${String(error)}`);
+        this.sendProtocolError(client, 'internal_error', 'Failed to persist shortcut event.', envelope.messageId);
       }
       return;
     }
@@ -324,7 +353,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' }
     >,
   ): Promise<void> {
     const { envelope } = message;

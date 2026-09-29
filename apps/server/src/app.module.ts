@@ -11,6 +11,7 @@ import { ProtocolValidator } from './realtime/protocol-validator';
 import { PublicClientGateway } from './realtime/public-client.gateway';
 import { SessionsModule } from './sessions/sessions.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ShortcutsModule } from './shortcuts/shortcuts.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     SessionsModule,
     NotificationsModule,
     ClientAuthModule,
+    ShortcutsModule,
   ],
   controllers: [HealthController],
   providers: [

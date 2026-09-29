@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-cancel.schema.json",
+  "title": "shortcut.run.cancel payload (server to Mac)",
+  "type": "object",
+  "required": ["runId"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid" }
+  },
+  "additionalProperties": false
+}

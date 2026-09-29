@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var selectedSessionID: UUID?
     @State private var sidebarTab: SessionSidebarTab = .active
     @State private var isPresentingNewSession = false
+    @State private var isPresentingQuickActions = false
     @State private var sessionPendingClose: ManagedSession?
     @State private var historyPendingDelete: CopilotHistorySession?
     @State private var purgeHistoryData = false
@@ -21,6 +22,7 @@ struct ContentView: View {
                 selection: $selectedSessionID,
                 tab: $sidebarTab,
                 addAction: { isPresentingNewSession = true },
+                shortcutAction: { isPresentingQuickActions = true },
                 closeAction: requestCloseSession,
                 deleteHistoryAction: { archive in
                     purgeHistoryData = false
@@ -54,6 +56,10 @@ struct ContentView: View {
                 }
             )
             .environmentObject(appModel)
+        }
+        .sheet(isPresented: $isPresentingQuickActions) {
+            QuickActionManageView()
+                .environmentObject(appModel)
         }
         .sheet(item: $historyPendingDelete) { archive in
             VStack(alignment: .leading, spacing: 16) {

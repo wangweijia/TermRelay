@@ -5,12 +5,14 @@ actor RemoteClient {
     typealias CommandHandler = @Sendable (RemoteTerminalCommand) async -> RemoteCommandResult
     typealias AutoApproveStateHandler = @Sendable (UUID, Bool) -> Void
     typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
+    typealias QuickActionHandler = @Sendable (QuickActionCommand) async -> Void
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
     private let commandHandler: CommandHandler
     private let autoApproveStateHandler: AutoApproveStateHandler
     private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
+    private let quickActionHandler: QuickActionHandler
     private var serverURL: URL?
     private var credential: String?
     private var socket: URLSessionWebSocketTask?
@@ -45,6 +47,7 @@ actor RemoteClient {
         commandHandler: @escaping CommandHandler,
         autoApproveStateHandler: @escaping AutoApproveStateHandler = { _, _ in },
         authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
+        quickActionHandler: @escaping QuickActionHandler = { _ in },
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
@@ -52,6 +55,7 @@ actor RemoteClient {
         self.commandHandler = commandHandler
         self.autoApproveStateHandler = autoApproveStateHandler
         self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
+        self.quickActionHandler = quickActionHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -101,6 +105,31 @@ actor RemoteClient {
 
     func setActiveSessionCount(_ count: Int) {
         activeSessionCount = max(0, count)
+    }
+
+    func publishQuickActions(_ actions: [QuickActionCatalogEntry]) async {
+        let payload: [String: JSONValue] = [
+            "shortcuts": .array(actions.map { action in
+                .object([
+                    "id": .string(action.id), "revision": .number(Double(action.revision)),
+                    "name": .string(action.name), "description": .string(action.description),
+                    "workspaceId": .string(action.workspaceId),
+                    "proxyMode": .string(action.proxyMode),
+                    "requiresConfirmation": .bool(action.requiresConfirmation),
+                ])
+            }),
+        ]
+        _ = await send(type: "shortcut.catalog", payload: payload)
+    }
+
+    func publishQuickActionRun(_ run: QuickActionRun) async {
+        var payload: [String: JSONValue] = [
+            "runId": .string(run.id.uuidString.lowercased()),
+            "status": .string(run.status),
+            "output": .string(run.output),
+        ]
+        if let exitCode = run.exitCode { payload["exitCode"] = .number(Double(exitCode)) }
+        _ = await send(type: "shortcut.run.update", payload: payload)
     }
 
     func listCopilotHistory() async throws -> [RelayHistorySession] {
@@ -410,6 +439,12 @@ actor RemoteClient {
             await reconcileSession(sessionID, lastAcceptedSequence: UInt64(accepted))
             return
         }
+        if registered, envelope.type.hasPrefix("shortcut.run.") {
+            if let command = decodeQuickActionCommand(envelope) {
+                await quickActionHandler(command)
+            }
+            return
+        }
         if envelope.type == "protocol.error" {
             let message = envelope.payload.object?["message"]?.string ?? "Server 拒绝了消息"
             if
@@ -437,6 +472,24 @@ actor RemoteClient {
             if completedCommands.count > 512 { completedCommands.removeFirst(128) }
         }
         await acknowledge(command, result: result)
+    }
+
+    func decodeQuickActionCommand(_ envelope: IncomingRelayEnvelope) -> QuickActionCommand? {
+        guard envelope.sessionId == nil, envelope.commandId == nil,
+              let payload = envelope.payload.object,
+              let runID = payload["runId"]?.string.flatMap(UUID.init(uuidString:)) else {
+            return nil
+        }
+        switch envelope.type {
+        case "shortcut.run.start":
+            guard let shortcutID = payload["shortcutId"]?.string.flatMap(UUID.init(uuidString:)),
+                  let revision = payload["revision"]?.integer, revision > 0 else { return nil }
+            return .start(runID: runID, shortcutID: shortcutID, revision: revision)
+        case "shortcut.run.cancel":
+            return .cancel(runID: runID)
+        default:
+            return nil
+        }
     }
 
     private func invalidateAuthorization() {

@@ -20,6 +20,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var copilotHistory: [CopilotHistorySession] = []
     @Published private(set) var historyMessages: [UUID: [CopilotHistoryMessage]] = [:]
     @Published private(set) var historyLoadingID: UUID?
+    @Published private(set) var quickActions: [QuickAction] = []
+    @Published private(set) var quickRuns: [UUID: QuickActionRun] = [:]
     @Published private(set) var workingDirectory: URL
     @Published private(set) var errorMessage: String?
     @Published private(set) var dshAPIKeyConfigured = false
@@ -54,15 +56,31 @@ final class AppModel: ObservableObject {
     private var remoteClient: RemoteClient?
     private var connectionStarted = false
     private var pairingTask: Task<Void, Never>?
+    private let quickActionStore: QuickActionStore
+    private var quickActionLoadError: String?
+    private var quickRunPublishTasks: [UUID: Task<Void, Never>] = [:]
+    private var remoteQuickRunIDs = Set<UUID>()
+    private lazy var quickActionRunner = QuickActionRunner { [weak self] run in
+        self?.quickRuns[run.id] = run
+        self?.publishQuickActionRun(run)
+    }
 
     init(
         defaults: UserDefaults = .standard,
         credentialStore: any CredentialStoring = KeychainCredentialStore(),
-        pairingClient: ClientPairingClient = ClientPairingClient()
+        pairingClient: ClientPairingClient = ClientPairingClient(),
+        quickActionStore: QuickActionStore = QuickActionStore()
     ) {
         self.defaults = defaults
         self.credentialStore = credentialStore
         self.pairingClient = pairingClient
+        self.quickActionStore = quickActionStore
+        do {
+            quickActions = try quickActionStore.load()
+        } catch {
+            quickActionLoadError = "无法读取快捷任务：\(error.localizedDescription)"
+            errorMessage = quickActionLoadError
+        }
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
         codexInteractionMode = .acp
@@ -97,6 +115,7 @@ final class AppModel: ObservableObject {
                     else if state == .connected { self.errorMessage = nil }
                     if state == .connected {
                         self.syncRemoteState()
+                        self.publishQuickActions()
                         Task { await self.refreshCopilotHistory() }
                     }
                 }
@@ -112,6 +131,9 @@ final class AppModel: ObservableObject {
             },
             authorizationInvalidatedHandler: { [weak self] in
                 Task { @MainActor [weak self] in self?.removeInvalidCredential() }
+            },
+            quickActionHandler: { [weak self] command in
+                await self?.handleQuickActionCommand(command)
             }
         )
     }
@@ -569,6 +591,113 @@ final class AppModel: ObservableObject {
         terminalSessions[id]
     }
 
+    func saveQuickAction(_ action: QuickAction) throws {
+        if let quickActionLoadError { throw QuickActionError.invalid(quickActionLoadError) }
+        try action.validate()
+        var actions = quickActions
+        if let index = actions.firstIndex(where: { $0.id == action.id }) {
+            guard !quickActionRunner.isRunning(actionID: action.id) else {
+                throw QuickActionError.invalid("任务执行中，不能修改。")
+            }
+            var updated = action
+            updated.revision = actions[index].revision + 1
+            actions[index] = updated
+        } else {
+            guard actions.count < 100 else {
+                throw QuickActionError.invalid("最多保存 100 个快捷任务。")
+            }
+            var created = action
+            created.revision = 1
+            actions.append(created)
+        }
+        try quickActionStore.save(actions)
+        quickActions = actions
+        publishQuickActions()
+    }
+
+    func deleteQuickAction(id: UUID) throws {
+        if let quickActionLoadError { throw QuickActionError.invalid(quickActionLoadError) }
+        guard !quickActionRunner.isRunning(actionID: id) else {
+            throw QuickActionError.invalid("请先等待任务完成或停止任务。")
+        }
+        let actions = quickActions.filter { $0.id != id }
+        try quickActionStore.save(actions)
+        quickActions = actions
+        publishQuickActions()
+    }
+
+    func runQuickAction(id: UUID) throws -> UUID {
+        guard let action = quickActions.first(where: { $0.id == id }) else {
+            throw QuickActionError.invalid("快捷任务不存在。")
+        }
+        let runID = UUID()
+        try quickActionRunner.start(action, runID: runID)
+        return runID
+    }
+
+    func cancelQuickAction(runID: UUID) {
+        quickActionRunner.cancel(runID)
+    }
+
+    private func handleQuickActionCommand(_ command: QuickActionCommand) async {
+        switch command {
+        case .start(let runID, let shortcutID, let revision):
+            if let existing = quickRuns[runID] {
+                remoteQuickRunIDs.insert(runID)
+                publishQuickActionRun(existing)
+                return
+            }
+            remoteQuickRunIDs.insert(runID)
+            guard let action = quickActions.first(where: { $0.id == shortcutID }),
+                  action.revision == revision else {
+                quickActionRunner.fail(runID: runID, shortcutID: shortcutID,
+                                       message: "快捷任务已删除或版本已更新，请刷新列表。")
+                return
+            }
+            do {
+                try quickActionRunner.start(action, runID: runID)
+            } catch {
+                quickActionRunner.fail(runID: runID, shortcutID: shortcutID,
+                                       message: error.localizedDescription)
+            }
+        case .cancel(let runID):
+            quickActionRunner.cancel(runID)
+        }
+    }
+
+    private func publishQuickActions() {
+        guard let remoteClient else { return }
+        let entries = quickActions.map { action in
+            QuickActionCatalogEntry(
+                id: action.id.uuidString.lowercased(), revision: action.revision,
+                name: action.name, description: action.description,
+                workspaceId: workspaceID(for: action.directory),
+                proxyMode: action.proxy.mode.rawValue,
+                requiresConfirmation: action.requiresConfirmation
+            )
+        }
+        Task { await remoteClient.publishQuickActions(entries) }
+    }
+
+    private func publishQuickActionRun(_ run: QuickActionRun) {
+        guard remoteQuickRunIDs.contains(run.id) else { return }
+        guard let remoteClient else { return }
+        if run.status == "running" {
+            guard quickRunPublishTasks[run.id] == nil else { return }
+            quickRunPublishTasks[run.id] = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self,
+                      let latest = self.quickRuns[run.id], latest.status == "running" else { return }
+                await remoteClient.publishQuickActionRun(latest)
+                self.quickRunPublishTasks[run.id] = nil
+            }
+        } else {
+            quickRunPublishTasks.removeValue(forKey: run.id)?.cancel()
+            remoteQuickRunIDs.remove(run.id)
+            Task { await remoteClient.publishQuickActionRun(run) }
+        }
+    }
+
     func structuredSession(id: UUID) -> LocalStructuredAgentSession? {
         structuredSessions[id]
     }
@@ -601,6 +730,12 @@ final class AppModel: ObservableObject {
     }
 
     func terminateAllSessions() async {
+        let hadQuickRuns = quickActionRunner.hasRunningProcesses
+        quickActionRunner.terminateAll()
+        for _ in 0..<20 where quickActionRunner.hasRunningProcesses {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if hadQuickRuns { quickActionRunner.forceTerminateAll() }
         pendingApprovals.clearAll()
         for session in terminalSessions.values { session.terminate() }
         for session in structuredSessions.values { await session.stop() }

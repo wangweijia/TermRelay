@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-update.schema.json",
+  "title": "shortcut.run.update payload",
+  "type": "object",
+  "required": ["runId", "status"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["running", "succeeded", "failed", "cancelled"] },
+    "exitCode": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+    "output": { "type": "string", "maxLength": 32768 }
+  },
+  "additionalProperties": false
+}

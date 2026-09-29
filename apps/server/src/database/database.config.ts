@@ -16,6 +16,9 @@ import { NotificationSettings1789610400000 } from './migrations/1789610400000-no
 import { ClientAuth1789696800000 } from './migrations/1789696800000-client-auth';
 import { SessionAutoApprove1789783200000 } from './migrations/1789783200000-session-auto-approve';
 import { AcpUserMessage1790553600000 } from './migrations/1790553600000-acp-user-message';
+import { Shortcuts1790640000000 } from './migrations/1790640000000-shortcuts';
+import { ShortcutEntity } from '../shortcuts/shortcut.entity';
+import { ShortcutRunEntity } from '../shortcuts/shortcut-run.entity';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -43,6 +46,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       ClientAuth1789696800000,
       SessionAutoApprove1789783200000,
       AcpUserMessage1790553600000,
+      Shortcuts1790640000000,
     ],
     entities: [
       DeviceEntity,
@@ -51,6 +55,8 @@ export function databaseOptions(): MysqlConnectionOptions {
       SessionEventEntity,
       ClientPairingEntity,
       DeviceCredentialEntity,
+      ShortcutEntity,
+      ShortcutRunEntity,
     ],
   };
 }

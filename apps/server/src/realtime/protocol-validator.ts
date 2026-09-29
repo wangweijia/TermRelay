@@ -13,6 +13,8 @@ import type {
   TerminalOutputPayload,
   ToolEventPayload,
   WorkspaceRegisteredPayload,
+  ShortcutCatalogPayload,
+  ShortcutRunUpdatePayload,
 } from '@termrelay/contracts';
 import {
   commandAckSchema,
@@ -28,6 +30,8 @@ import {
   terminalOutputSchema,
   toolEventSchema,
   workspaceRegisteredSchema,
+  shortcutCatalogSchema,
+  shortcutRunUpdateSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
@@ -46,7 +50,9 @@ export type ValidClientMessage =
   | { type: 'session.history.delete'; envelope: Envelope<SessionHistoryDeletePayload> }
   | { type: 'terminal.output'; envelope: Envelope<TerminalOutputPayload> }
   | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
-  | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> };
+  | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> }
+  | { type: 'shortcut.catalog'; envelope: Envelope<ShortcutCatalogPayload> }
+  | { type: 'shortcut.run.update'; envelope: Envelope<ShortcutRunUpdatePayload> };
 
 export type ProtocolValidationResult =
   | { ok: true; message: ValidClientMessage }
@@ -86,6 +92,8 @@ export class ProtocolValidator {
       ['terminal.output', ajv.compile(terminalOutputSchema)],
       ['tool.event', ajv.compile(toolEventSchema)],
       ['command.ack', ajv.compile(commandAckSchema)],
+      ['shortcut.catalog', ajv.compile(shortcutCatalogSchema)],
+      ['shortcut.run.update', ajv.compile(shortcutRunUpdateSchema)],
     ]);
   }
 
@@ -131,7 +139,17 @@ export class ProtocolValidator {
       };
     }
 
-    if (envelope.type === 'session.history.list') {
+    if (envelope.type === 'shortcut.catalog' || envelope.type === 'shortcut.run.update') {
+      if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
+        return invalidContext(envelope, `${envelope.type} must not include sessionId, seq, or commandId.`);
+      }
+      if (envelope.type === 'shortcut.catalog') {
+        const shortcuts = (envelope.payload as unknown as ShortcutCatalogPayload).shortcuts;
+        if (new Set(shortcuts.map((shortcut) => shortcut.id.toLowerCase())).size !== shortcuts.length) {
+          return invalidContext(envelope, 'shortcut.catalog contains duplicate IDs.');
+        }
+      }
+    } else if (envelope.type === 'session.history.list') {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, 'session.history.list must not include sessionId, seq, or commandId.');
       }
@@ -288,6 +306,10 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
           envelope: envelope as unknown as Envelope<CommandAckPayload>,
         },
       };
+    case 'shortcut.catalog':
+      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutCatalogPayload> } };
+    case 'shortcut.run.update':
+      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunUpdatePayload> } };
     default:
       throw new Error(`Payload validator missing for ${envelope.type}.`);
   }

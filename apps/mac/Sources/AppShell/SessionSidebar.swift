@@ -15,6 +15,7 @@ struct SessionSidebar: View {
     @Binding var selection: UUID?
     @Binding var tab: SessionSidebarTab
     let addAction: () -> Void
+    let shortcutAction: () -> Void
     let closeAction: (UUID) -> Void
     let deleteHistoryAction: (CopilotHistorySession) -> Void
 
@@ -24,6 +25,13 @@ struct SessionSidebar: View {
                 Text("终端")
                     .font(.headline)
                 Spacer()
+                Button(action: shortcutAction) {
+                    Image(systemName: "bolt.square")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .help("管理快捷任务")
+                .accessibilityLabel("管理快捷任务")
                 Button(action: addAction) {
                     Image(systemName: "plus")
                         .frame(width: 20, height: 20)

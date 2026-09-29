@@ -1223,3 +1223,179 @@ export const sessionHistoryDeletedSchema = {
   },
   "additionalProperties": false
 } as const;
+
+export interface ShortcutCatalogEntry {
+  id: string;
+  revision: number;
+  name: string;
+  description: string;
+  workspaceId: string;
+  proxyMode: 'inherit' | 'disabled' | 'custom';
+  requiresConfirmation: boolean;
+}
+
+export interface ShortcutCatalogPayload {
+  shortcuts: ShortcutCatalogEntry[];
+}
+
+export interface ShortcutRunUpdatePayload {
+  runId: string;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  exitCode?: number;
+  output?: string;
+}
+
+export interface ShortcutRunStartPayload {
+  runId: string;
+  shortcutId: string;
+  revision: number;
+}
+
+export interface ShortcutRunCancelPayload {
+  runId: string;
+}
+
+export const shortcutCatalogSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-catalog.schema.json",
+  "title": "shortcut.catalog payload",
+  "type": "object",
+  "required": [
+    "shortcuts"
+  ],
+  "properties": {
+    "shortcuts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "name",
+          "description",
+          "workspaceId",
+          "proxyMode",
+          "requiresConfirmation"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "proxyMode": {
+            "enum": [
+              "inherit",
+              "disabled",
+              "custom"
+            ]
+          },
+          "requiresConfirmation": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutRunUpdateSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-update.schema.json",
+  "title": "shortcut.run.update payload",
+  "type": "object",
+  "required": [
+    "runId",
+    "status"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "exitCode": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    },
+    "output": {
+      "type": "string",
+      "maxLength": 32768
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutRunStartSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-start.schema.json",
+  "title": "shortcut.run.start payload (server to Mac)",
+  "type": "object",
+  "required": [
+    "runId",
+    "shortcutId",
+    "revision"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "shortcutId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutRunCancelSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-cancel.schema.json",
+  "title": "shortcut.run.cancel payload (server to Mac)",
+  "type": "object",
+  "required": [
+    "runId"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+} as const;

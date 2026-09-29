@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-catalog.schema.json",
+  "title": "shortcut.catalog payload",
+  "type": "object",
+  "required": ["shortcuts"],
+  "properties": {
+    "shortcuts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["id", "revision", "name", "description", "workspaceId", "proxyMode", "requiresConfirmation"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "description": { "type": "string", "maxLength": 2048 },
+          "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "proxyMode": { "enum": ["inherit", "disabled", "custom"] },
+          "requiresConfirmation": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

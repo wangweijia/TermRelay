@@ -3,6 +3,35 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testDecodesOnlyValidShortcutCommands() async {
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
+                                  commandHandler: { _ in .completed })
+        let runID = UUID()
+        let shortcutID = UUID()
+        let start = IncomingRelayEnvelope(
+            type: "shortcut.run.start", protocolVersion: "2", messageId: UUID(),
+            deviceId: "device", sessionId: nil, commandId: nil, payload: .object([
+                "runId": .string(runID.uuidString), "shortcutId": .string(shortcutID.uuidString),
+                "revision": .number(2),
+            ])
+        )
+        guard case .start(let run, let shortcut, let revision) = await client.decodeQuickActionCommand(start) else {
+            return XCTFail("Expected shortcut start")
+        }
+        XCTAssertEqual(run, runID)
+        XCTAssertEqual(shortcut, shortcutID)
+        XCTAssertEqual(revision, 2)
+        let invalid = IncomingRelayEnvelope(
+            type: "shortcut.run.start", protocolVersion: "2", messageId: UUID(),
+            deviceId: "device", sessionId: nil, commandId: nil, payload: .object([
+                "runId": .string(runID.uuidString), "shortcutId": .string(shortcutID.uuidString),
+                "revision": .number(0),
+            ])
+        )
+        let rejected = await client.decodeQuickActionCommand(invalid)
+        XCTAssertNil(rejected)
+    }
+
     func testPairingAPIURLUsesTheWebSocketOrigin() throws {
         let websocketURL = try XCTUnwrap(URL(string: "wss://relay.example.com/ws/client-public?ignored=1"))
         let apiURL = try ClientPairingClient.apiURL(

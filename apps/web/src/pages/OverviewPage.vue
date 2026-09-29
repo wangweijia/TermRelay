@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TerminalView from '../components/TerminalView.vue';
 import StructuredAgentView from '../components/StructuredAgentView.vue';
 import ApprovalInbox from '../components/ApprovalInbox.vue';
+import ShortcutPanel from '../components/ShortcutPanel.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -12,6 +13,7 @@ const sessionPendingDelete = ref<SessionRecord>();
 const purgeAssociatedData = ref(false);
 const deletingSession = ref(false);
 const credentialsOpen = ref(false);
+const shortcutsOpen = ref(false);
 const loadingCredentials = ref(false);
 const revokingCredentialID = ref<string>();
 const credentials = ref<ClientCredentialSummary[]>([]);
@@ -126,6 +128,7 @@ onBeforeUnmount(() => {
         <span>终端 · ACP · 审批</span>
       </div>
       <div class="workspace-actions">
+        <button type="button" @click="shortcutsOpen = true">快捷任务</button>
         <button type="button" @click="openCredentials">Mac 授权</button>
         <div class="connection-pill" :data-state="relay.connectionState">
           <span />{{ connectionLabel }}
@@ -263,6 +266,13 @@ onBeforeUnmount(() => {
         @toggle-notifications="relay.setApprovalNotifications"
       />
     </section>
+
+    <div v-if="shortcutsOpen" class="modal-backdrop" role="presentation" @click.self="shortcutsOpen = false">
+      <div class="shortcut-dialog" role="dialog" aria-modal="true" aria-label="快捷任务">
+        <button type="button" class="shortcut-close" aria-label="关闭快捷任务" @click="shortcutsOpen = false">×</button>
+        <ShortcutPanel :active="shortcutsOpen" />
+      </div>
+    </div>
 
     <div
       v-if="sessionPendingDelete"
