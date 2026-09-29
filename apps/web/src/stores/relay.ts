@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
+import { visiblePendingApprovals } from '../approval-inbox';
 import {
   deleteSessionCache,
   loadSelectedSessionCache,
@@ -63,6 +64,9 @@ export const useRelayStore = defineStore('relay', {
   }),
 
   getters: {
+    visiblePendingApprovals(state): PendingApprovalRecord[] {
+      return visiblePendingApprovals(state.pendingApprovals, state.sessions);
+    },
     selectedSession(state): SessionRecord | undefined {
       return state.sessions.find((item) => item.id === state.selectedSessionId);
     },
@@ -136,7 +140,9 @@ export const useRelayStore = defineStore('relay', {
         const previousSessions = this.sessions;
         this.sessions = (await sessionsResponse.json()) as SessionRecord[];
         this.devices = (await devicesResponse.json()) as DeviceRecord[];
-        this.pendingApprovals = (await approvalsResponse.json()) as PendingApprovalRecord[];
+        this.pendingApprovals = visiblePendingApprovals(
+          (await approvalsResponse.json()) as PendingApprovalRecord[], this.sessions,
+        );
         const stillPending = new Set(this.pendingApprovals.map((item) => item.approvalId));
         for (const approvalId of Object.keys(this.resolvingApprovals)) {
           if (!stillPending.has(approvalId)) delete this.resolvingApprovals[approvalId];
@@ -636,6 +642,9 @@ export const useRelayStore = defineStore('relay', {
       const index = this.sessions.findIndex((item) => item.id === session.id);
       if (index === -1) this.sessions.unshift(session);
       else this.sessions[index] = session;
+      if (session.autoApproveEnabled) {
+        this.pendingApprovals = this.pendingApprovals.filter((item) => item.sessionId !== session.id);
+      }
     },
 
     touchHistory(sessionId: string): void {

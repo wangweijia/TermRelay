@@ -92,7 +92,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     </section>
 
     <section v-show="activeTab === 'approvals'" class="mobile-screen mobile-approvals">
-      <ApprovalInbox :approvals="relay.pendingApprovals" :settings="relay.notificationSettings" :is-interactive="interactive" :resolving="relay.resolvingApprovals" @resolve="relay.resolveApprovalFromInbox" @toggle-notifications="relay.setApprovalNotifications" />
+      <ApprovalInbox :approvals="relay.visiblePendingApprovals" :settings="relay.notificationSettings" :is-interactive="interactive" :resolving="relay.resolvingApprovals" @resolve="relay.resolveApprovalFromInbox" @toggle-notifications="relay.setApprovalNotifications" />
     </section>
 
     <section v-show="activeTab === 'shortcuts'" class="mobile-screen mobile-shortcuts">
@@ -102,7 +102,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <nav class="mobile-tabs" aria-label="主要功能">
       <button :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'"><span>▤</span>会话</button>
       <button :class="{ active: activeTab === 'workspace' }" @click="activeTab = 'workspace'"><span>⌘</span>工作区</button>
-      <button :class="{ active: activeTab === 'approvals' }" @click="activeTab = 'approvals'"><span>✓</span>审批<i v-if="relay.pendingApprovals.length">{{ relay.pendingApprovals.length }}</i></button>
+      <button :class="{ active: activeTab === 'approvals' }" @click="activeTab = 'approvals'"><span>✓</span>审批<i v-if="relay.visiblePendingApprovals.length">{{ relay.visiblePendingApprovals.length }}</i></button>
       <button :class="{ active: activeTab === 'shortcuts' }" @click="activeTab = 'shortcuts'"><span>▶</span>快捷</button>
     </nav>
   </main>

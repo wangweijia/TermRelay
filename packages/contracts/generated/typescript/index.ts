@@ -1255,6 +1255,19 @@ export interface ShortcutRunCancelPayload {
   runId: string;
 }
 
+export interface ShortcutRunInputPayload {
+  runId: string;
+  commandId: string;
+  answer: 'y' | 'n' | 'yes' | 'no';
+}
+
+export interface ShortcutRunInputAckPayload {
+  runId: string;
+  commandId: string;
+  status: 'accepted' | 'rejected';
+  message?: string;
+}
+
 export const shortcutCatalogSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termrelay.local/contracts/events/shortcut-catalog.schema.json",
@@ -1395,6 +1408,70 @@ export const shortcutRunCancelSchema = {
     "runId": {
       "type": "string",
       "format": "uuid"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutRunInputSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-input.schema.json",
+  "title": "shortcut.run.input payload",
+  "type": "object",
+  "required": [
+    "runId",
+    "commandId",
+    "answer"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "commandId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "answer": {
+      "enum": [
+        "y",
+        "n",
+        "yes",
+        "no"
+      ]
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutRunInputAckSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-input-ack.schema.json",
+  "title": "shortcut.run.input.ack payload",
+  "type": "object",
+  "required": [
+    "runId",
+    "commandId",
+    "status"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "commandId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 2048
     }
   },
   "additionalProperties": false

@@ -109,3 +109,18 @@ enum QuickActionCommand: Sendable {
     case start(runID: UUID, shortcutID: UUID, revision: Int)
     case cancel(runID: UUID)
 }
+
+enum QuickActionAnswer: String, Sendable {
+    case y, n, yes, no
+}
+
+struct QuickActionInputRequest: Sendable {
+    let runID: UUID
+    let commandID: UUID
+    let answer: QuickActionAnswer
+}
+
+enum QuickActionInputResult: Sendable {
+    case accepted
+    case rejected(String)
+}

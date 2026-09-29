@@ -115,6 +115,23 @@ struct QuickActionManageView: View {
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        if latestRun.status == "running" {
+                            Text("如果命令提示确认，请核对上方输出后手动回复；不要用于密码或验证码。")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                ForEach(["y", "n", "yes", "no"], id: \.self) { value in
+                                    Button("发送 \(value)") {
+                                        guard let answer = QuickActionAnswer(rawValue: value) else { return }
+                                        do {
+                                            try appModel.sendQuickActionInput(runID: latestRun.id, answer: answer)
+                                            error = nil
+                                        } catch {
+                                            self.error = error.localizedDescription
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(20)

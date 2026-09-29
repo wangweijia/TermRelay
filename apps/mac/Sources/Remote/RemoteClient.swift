@@ -6,6 +6,7 @@ actor RemoteClient {
     typealias AutoApproveStateHandler = @Sendable (UUID, Bool) -> Void
     typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
     typealias QuickActionHandler = @Sendable (QuickActionCommand) async -> Void
+    typealias QuickActionInputHandler = @Sendable (QuickActionInputRequest) async -> QuickActionInputResult
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
@@ -13,6 +14,7 @@ actor RemoteClient {
     private let autoApproveStateHandler: AutoApproveStateHandler
     private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
     private let quickActionHandler: QuickActionHandler
+    private let quickActionInputHandler: QuickActionInputHandler
     private var serverURL: URL?
     private var credential: String?
     private var socket: URLSessionWebSocketTask?
@@ -48,6 +50,7 @@ actor RemoteClient {
         autoApproveStateHandler: @escaping AutoApproveStateHandler = { _, _ in },
         authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
         quickActionHandler: @escaping QuickActionHandler = { _ in },
+        quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
@@ -56,6 +59,7 @@ actor RemoteClient {
         self.autoApproveStateHandler = autoApproveStateHandler
         self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
         self.quickActionHandler = quickActionHandler
+        self.quickActionInputHandler = quickActionInputHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -440,7 +444,12 @@ actor RemoteClient {
             return
         }
         if registered, envelope.type.hasPrefix("shortcut.run.") {
-            if let command = decodeQuickActionCommand(envelope) {
+            if envelope.type == "shortcut.run.input" {
+                if let request = decodeQuickActionInput(envelope) {
+                    let result = await quickActionInputHandler(request)
+                    await acknowledgeQuickActionInput(request, result: result)
+                }
+            } else if let command = decodeQuickActionCommand(envelope) {
                 await quickActionHandler(command)
             }
             return
@@ -480,6 +489,7 @@ actor RemoteClient {
               let runID = payload["runId"]?.string.flatMap(UUID.init(uuidString:)) else {
             return nil
         }
+
         switch envelope.type {
         case "shortcut.run.start":
             guard let shortcutID = payload["shortcutId"]?.string.flatMap(UUID.init(uuidString:)),
@@ -490,6 +500,34 @@ actor RemoteClient {
         default:
             return nil
         }
+    }
+
+    func decodeQuickActionInput(_ envelope: IncomingRelayEnvelope) -> QuickActionInputRequest? {
+        guard envelope.type == "shortcut.run.input",
+              envelope.sessionId == nil, envelope.commandId == nil,
+              let payload = envelope.payload.object,
+              let runID = payload["runId"]?.string.flatMap(UUID.init(uuidString:)),
+              let commandID = payload["commandId"]?.string.flatMap(UUID.init(uuidString:)),
+              let answer = payload["answer"]?.string.flatMap(QuickActionAnswer.init(rawValue:))
+        else { return nil }
+        return QuickActionInputRequest(runID: runID, commandID: commandID, answer: answer)
+    }
+
+    private func acknowledgeQuickActionInput(
+        _ request: QuickActionInputRequest, result: QuickActionInputResult
+    ) async {
+        var payload: [String: JSONValue] = [
+            "runId": .string(request.runID.uuidString.lowercased()),
+            "commandId": .string(request.commandID.uuidString.lowercased()),
+        ]
+        switch result {
+        case .accepted:
+            payload["status"] = .string("accepted")
+        case .rejected(let message):
+            payload["status"] = .string("rejected")
+            payload["message"] = .string(String(message.prefix(256)))
+        }
+        _ = await send(type: "shortcut.run.input.ack", payload: payload)
     }
 
     private func invalidateAuthorization() {

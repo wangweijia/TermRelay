@@ -6,8 +6,9 @@ final class QuickActionRunner {
     private final class Running {
         let actionID: UUID
         let pid: pid_t
-        let pipe: Pipe
+        let terminal: FileHandle
         var bytes = Data()
+        var acceptedInputs = Set<UUID>()
         var exitCode: Int?
         var reachedEOF = false
         var wasCancelled = false
@@ -15,10 +16,10 @@ final class QuickActionRunner {
         var escalation: Task<Void, Never>?
         var deadline: Task<Void, Never>?
 
-        init(actionID: UUID, pid: pid_t, pipe: Pipe) {
+        init(actionID: UUID, pid: pid_t, terminal: FileHandle) {
             self.actionID = actionID
             self.pid = pid
-            self.pipe = pipe
+            self.terminal = terminal
         }
     }
 
@@ -43,15 +44,13 @@ final class QuickActionRunner {
             throw QuickActionError.invalid("该快捷任务正在执行，请等待结束。")
         }
         try action.validate()
-        let pipe = Pipe()
-        let pid = try spawn(
+        let (pid, terminal) = try spawn(
             command: action.command,
             directory: action.directory,
-            environment: TerminalEnvironment.make(proxy: action.proxy),
-            pipe: pipe
+            environment: TerminalEnvironment.make(proxy: action.proxy)
         )
-        let running = Running(actionID: action.id, pid: pid, pipe: pipe)
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let running = Running(actionID: action.id, pid: pid, terminal: terminal)
+        terminal.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             if data.isEmpty { handle.readabilityHandler = nil }
             Task { @MainActor [weak self] in
@@ -66,7 +65,6 @@ final class QuickActionRunner {
                 self?.terminated(runID: runID, exitCode: exitCode)
             }
         }
-        pipe.fileHandleForWriting.closeFile()
         processes[runID] = running
         update(QuickActionRun(id: runID, shortcutID: action.id,
                               status: "running", exitCode: nil, output: ""))
@@ -97,6 +95,22 @@ final class QuickActionRunner {
         }
     }
 
+    func sendInput(_ request: QuickActionInputRequest) throws {
+        guard let running = processes[request.runID], !running.wasCancelled,
+              running.exitCode == nil else {
+            throw QuickActionError.invalid("任务没有运行，无法发送确认。")
+        }
+        if running.acceptedInputs.contains(request.commandID) { return }
+        let bytes = Array("\(request.answer.rawValue)\n".utf8)
+        let written = bytes.withUnsafeBytes {
+            Darwin.write(running.terminal.fileDescriptor, $0.baseAddress, bytes.count)
+        }
+        guard written == bytes.count else {
+            throw QuickActionError.invalid("无法将确认发送到任务终端，请检查运行状态。")
+        }
+        running.acceptedInputs.insert(request.commandID)
+    }
+
     func terminateAll() {
         for id in Array(processes.keys) { cancel(id) }
     }
@@ -117,7 +131,7 @@ final class QuickActionRunner {
                 running.bytes.removeFirst(running.bytes.count - 16_384)
             }
             var run = runs[runID]!
-            run.output = String(decoding: running.bytes, as: UTF8.self)
+            run.output = Self.plainText(running.bytes)
             update(run)
         }
         finishIfReady(runID)
@@ -151,7 +165,8 @@ final class QuickActionRunner {
         }
         running.deadline?.cancel()
         if !running.wasCancelled { running.escalation?.cancel() }
-        running.pipe.fileHandleForReading.readabilityHandler = nil
+        running.terminal.readabilityHandler = nil
+        running.terminal.closeFile()
         processes[runID] = nil
         update(run)
     }
@@ -161,12 +176,41 @@ final class QuickActionRunner {
         didUpdate(run)
     }
 
+    private static func plainText(_ bytes: Data) -> String {
+        String(decoding: bytes, as: UTF8.self)
+            .replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]",
+                                  with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\u{001B}\\][^\u{0007}]*(\u{0007}|\u{001B}\\\\)",
+                                  with: "", options: .regularExpression)
+            .unicodeScalars.filter { $0.value >= 32 || $0 == "\n" || $0 == "\t" }
+            .map(String.init).joined()
+    }
+
     private func spawn(
         command: String,
         directory: URL,
-        environment: [String: String],
-        pipe: Pipe
-    ) throws -> pid_t {
+        environment: [String: String]
+    ) throws -> (pid_t, FileHandle) {
+        var master: Int32 = -1
+        var slave: Int32 = -1
+        guard openpty(&master, &slave, nil, nil, nil) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(slave) }
+        var spawned = false
+        defer { if !spawned { close(master) } }
+        guard let name = ttyname(slave) else {
+            throw QuickActionError.invalid("无法获取任务终端。")
+        }
+        let terminalPath = String(cString: name)
+        var settings = termios()
+        guard tcgetattr(slave, &settings) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        settings.c_lflag &= ~tcflag_t(ECHO)
+        guard tcsetattr(slave, TCSANOW, &settings) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
         var actions: posix_spawn_file_actions_t? = nil
         var attributes: posix_spawnattr_t? = nil
         var errorCode = posix_spawn_file_actions_init(&actions)
@@ -175,35 +219,24 @@ final class QuickActionRunner {
         errorCode = posix_spawnattr_init(&attributes)
         guard errorCode == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errorCode) ?? .EIO) }
         defer { posix_spawnattr_destroy(&attributes) }
-        errorCode = posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP))
-        if errorCode == 0 { errorCode = posix_spawnattr_setpgroup(&attributes, 0) }
-        let inputFD = open("/dev/null", O_RDONLY)
-        guard inputFD >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        defer { close(inputFD) }
+        errorCode = posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
         if errorCode == 0 {
-            errorCode = posix_spawn_file_actions_adddup2(
-                &actions, pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO
-            )
+            errorCode = terminalPath.withCString {
+                posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, $0, O_RDWR, 0)
+            }
         }
         if errorCode == 0 {
             errorCode = posix_spawn_file_actions_adddup2(
-                &actions, pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO
+                &actions, STDIN_FILENO, STDOUT_FILENO
             )
         }
         if errorCode == 0 {
             errorCode = posix_spawn_file_actions_adddup2(
-                &actions, inputFD, STDIN_FILENO
+                &actions, STDIN_FILENO, STDERR_FILENO
             )
         }
         if errorCode == 0 {
-            errorCode = posix_spawn_file_actions_addclose(
-                &actions, pipe.fileHandleForReading.fileDescriptor
-            )
-        }
-        if errorCode == 0 {
-            errorCode = posix_spawn_file_actions_addclose(
-                &actions, pipe.fileHandleForWriting.fileDescriptor
-            )
+            errorCode = posix_spawn_file_actions_addclose(&actions, master)
         }
         if errorCode == 0 {
             errorCode = directory.path.withCString {
@@ -212,8 +245,11 @@ final class QuickActionRunner {
         }
         guard errorCode == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errorCode) ?? .EIO) }
 
-        var arguments: [UnsafeMutablePointer<CChar>?] = ["/bin/zsh", "-f", "-c", command]
-            .map { strdup($0) } + [nil]
+        let commandArguments: [String] = [
+            "/usr/bin/script", "-q", "/dev/null", "/bin/zsh", "-f", "-c",
+            "stty -echo </dev/tty || exit 1; \(command)",
+        ]
+        var arguments: [UnsafeMutablePointer<CChar>?] = commandArguments.map { strdup($0) } + [nil]
         var variables: [UnsafeMutablePointer<CChar>?] = environment
             .map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
@@ -222,8 +258,9 @@ final class QuickActionRunner {
             }
         }
         var pid: pid_t = 0
-        errorCode = posix_spawn(&pid, "/bin/zsh", &actions, &attributes, &arguments, &variables)
+        errorCode = posix_spawn(&pid, "/usr/bin/script", &actions, &attributes, &arguments, &variables)
         guard errorCode == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errorCode) ?? .EIO) }
-        return pid
+        spawned = true
+        return (pid, FileHandle(fileDescriptor: master, closeOnDealloc: true))
     }
 }

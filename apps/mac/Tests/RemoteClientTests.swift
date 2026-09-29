@@ -32,6 +32,32 @@ final class RemoteClientTests: XCTestCase {
         XCTAssertNil(rejected)
     }
 
+    func testDecodesOnlyLimitedShortcutConfirmationInput() async {
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
+                                  commandHandler: { _ in .completed })
+        let runID = UUID()
+        let commandID = UUID()
+        func envelope(_ answer: String, commandId: UUID? = nil) -> IncomingRelayEnvelope {
+            IncomingRelayEnvelope(
+                type: "shortcut.run.input", protocolVersion: "2", messageId: UUID(),
+                deviceId: "device", sessionId: nil, commandId: commandId,
+                payload: .object([
+                    "runId": .string(runID.uuidString),
+                    "commandId": .string(commandID.uuidString),
+                    "answer": .string(answer),
+                ])
+            )
+        }
+        let accepted = await client.decodeQuickActionInput(envelope("yes"))
+        XCTAssertEqual(accepted?.runID, runID)
+        XCTAssertEqual(accepted?.commandID, commandID)
+        XCTAssertEqual(accepted?.answer, .yes)
+        let rejected = await client.decodeQuickActionInput(envelope("password"))
+        XCTAssertNil(rejected)
+        let wrongChannel = await client.decodeQuickActionInput(envelope("y", commandId: commandID))
+        XCTAssertNil(wrongChannel)
+    }
+
     func testPairingAPIURLUsesTheWebSocketOrigin() throws {
         let websocketURL = try XCTUnwrap(URL(string: "wss://relay.example.com/ws/client-public?ignored=1"))
         let apiURL = try ClientPairingClient.apiURL(

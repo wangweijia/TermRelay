@@ -15,6 +15,7 @@ import type {
   WorkspaceRegisteredPayload,
   ShortcutCatalogPayload,
   ShortcutRunUpdatePayload,
+  ShortcutRunInputAckPayload,
 } from '@termrelay/contracts';
 import {
   commandAckSchema,
@@ -32,6 +33,7 @@ import {
   workspaceRegisteredSchema,
   shortcutCatalogSchema,
   shortcutRunUpdateSchema,
+  shortcutRunInputAckSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
@@ -52,7 +54,8 @@ export type ValidClientMessage =
   | { type: 'tool.event'; envelope: Envelope<ToolEventPayload> }
   | { type: 'command.ack'; envelope: Envelope<CommandAckPayload> }
   | { type: 'shortcut.catalog'; envelope: Envelope<ShortcutCatalogPayload> }
-  | { type: 'shortcut.run.update'; envelope: Envelope<ShortcutRunUpdatePayload> };
+  | { type: 'shortcut.run.update'; envelope: Envelope<ShortcutRunUpdatePayload> }
+  | { type: 'shortcut.run.input.ack'; envelope: Envelope<ShortcutRunInputAckPayload> };
 
 export type ProtocolValidationResult =
   | { ok: true; message: ValidClientMessage }
@@ -94,6 +97,7 @@ export class ProtocolValidator {
       ['command.ack', ajv.compile(commandAckSchema)],
       ['shortcut.catalog', ajv.compile(shortcutCatalogSchema)],
       ['shortcut.run.update', ajv.compile(shortcutRunUpdateSchema)],
+      ['shortcut.run.input.ack', ajv.compile(shortcutRunInputAckSchema)],
     ]);
   }
 
@@ -139,7 +143,8 @@ export class ProtocolValidator {
       };
     }
 
-    if (envelope.type === 'shortcut.catalog' || envelope.type === 'shortcut.run.update') {
+    if (envelope.type === 'shortcut.catalog' || envelope.type === 'shortcut.run.update'
+      || envelope.type === 'shortcut.run.input.ack') {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, `${envelope.type} must not include sessionId, seq, or commandId.`);
       }
@@ -310,6 +315,8 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
       return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutCatalogPayload> } };
     case 'shortcut.run.update':
       return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunUpdatePayload> } };
+    case 'shortcut.run.input.ack':
+      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunInputAckPayload> } };
     default:
       throw new Error(`Payload validator missing for ${envelope.type}.`);
   }

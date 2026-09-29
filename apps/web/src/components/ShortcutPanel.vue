@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { inputAcknowledged, inputDeliveryUncertain, parsePendingShortcutInput } from '../shortcut-input';
+import type { PendingShortcutInput, ShortcutAnswer } from '../shortcut-input';
 
 interface Shortcut {
   id: string;
@@ -31,6 +33,7 @@ interface PendingSubmission {
 }
 
 const pendingKey = 'termrelay.shortcut.pending-run.v1';
+const pendingInputKey = 'termrelay.shortcut.pending-input.v1';
 let storageAvailable = true;
 function readPending(): PendingSubmission | undefined {
   try {
@@ -59,6 +62,20 @@ const refreshError = ref<string>();
 const run = ref<ShortcutRun>();
 const runName = ref<string>();
 const pending = ref<PendingSubmission | undefined>(readPending());
+let inputStorageAvailable = true;
+function readPendingInput(): PendingShortcutInput | undefined {
+  try {
+    return parsePendingShortcutInput(window.localStorage.getItem(pendingInputKey));
+  } catch {
+    inputStorageAvailable = false;
+    return undefined;
+  }
+}
+const pendingInput = ref<PendingShortcutInput | undefined>(readPendingInput());
+const inputBusy = ref(false);
+const inputError = ref<string>();
+const inputNotice = ref<string>();
+const blockedInputCommandId = ref<string>();
 const selected = computed(() => shortcuts.value.find((item) => item.id === selectedId.value));
 const running = computed(() => run.value?.status === 'queued' || run.value?.status === 'running');
 function activeFor(shortcutId: string): boolean {
@@ -264,7 +281,7 @@ function abandonPending(): void {
 }
 
 async function cancel(): Promise<void> {
-  if (!run.value || !running.value || busy.value) return;
+  if (!run.value || !running.value || busy.value || inputBusy.value) return;
   const id = run.value.id;
   pollVersion++;
   stopPolling();
@@ -283,6 +300,95 @@ async function cancel(): Promise<void> {
       busy.value = false;
       schedulePoll();
     }
+  }
+}
+
+function clearPendingInput(submission: PendingShortcutInput): boolean {
+  try {
+    const saved = readPendingInput();
+    if (!inputStorageAvailable || saved?.commandId !== submission.commandId ||
+      saved.runId !== submission.runId || saved.answer !== submission.answer) return false;
+    window.localStorage.removeItem(pendingInputKey);
+    pendingInput.value = undefined;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function submitInput(): Promise<void> {
+  const submission = pendingInput.value;
+  if (!submission || inputBusy.value || busy.value || run.value?.id !== submission.runId ||
+    run.value.status !== 'running' || blockedInputCommandId.value === submission.commandId) return;
+  inputBusy.value = true;
+  inputError.value = undefined;
+  inputNotice.value = undefined;
+  try {
+    const response = await fetch(`/api/shortcuts/runs/${encodeURIComponent(submission.runId)}/input`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandId: submission.commandId, answer: submission.answer }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (disposed) return;
+    const body: unknown = await response.json().catch(() => undefined);
+    if (disposed) return;
+    const detail = typeof body === 'object' && body !== null && 'message' in body ? body.message : undefined;
+    const reason = typeof detail === 'string' ? detail : `请求被拒绝 (${response.status})`;
+    if (response.ok && inputAcknowledged(body)) {
+      if (clearPendingInput(submission)) inputNotice.value = 'Mac 已确认接收输入；这不代表 CLI 已批准或任务已完成。';
+      else {
+        blockedInputCommandId.value = submission.commandId;
+        inputError.value = 'Mac 已确认接收，但无法清除待确认输入；请勿重试。请恢复浏览器存储后刷新。';
+      }
+    } else if (!response.ok && !inputDeliveryUncertain(response.status, reason)) {
+      inputError.value = `输入被拒绝：${reason}。Mac 未确认接收。`;
+      if (!clearPendingInput(submission)) {
+        blockedInputCommandId.value = submission.commandId;
+        inputError.value += ' 无法清除待确认输入，请勿重试。';
+      }
+    } else {
+      inputError.value = `输入结果未知${response.status === 503 ? '（目标可能离线）' : ''}：${response.ok ? '未收到 Mac 确认' : reason}。请用相同命令 ID 重试，勿发送新输入。`;
+    }
+  } catch {
+    if (!disposed) inputError.value = navigator.onLine
+      ? '输入结果未知（请求超时或连接中断）。请用相同命令 ID 重试，勿发送新输入。'
+      : '浏览器离线，输入结果未知。联网后请用相同命令 ID 重试，勿发送新输入。';
+  } finally {
+    if (!disposed) inputBusy.value = false;
+  }
+}
+
+function sendInput(answer: ShortcutAnswer): void {
+  if (inputBusy.value || busy.value || !run.value || run.value.status !== 'running' ||
+    pendingInput.value || !inputStorageAvailable) return;
+  const existing = readPendingInput();
+  if (existing || !inputStorageAvailable) {
+    pendingInput.value = existing;
+    inputError.value = '已有待确认输入，不能生成新命令；请使用原命令 ID 重试。';
+    return;
+  }
+  const submission = { runId: run.value.id, commandId: window.crypto.randomUUID(), answer };
+  try {
+    window.localStorage.setItem(pendingInputKey, JSON.stringify(submission));
+  } catch {
+    inputStorageAvailable = false;
+    inputError.value = '无法保存命令 ID，输入未发送。请恢复浏览器存储后重试。';
+    return;
+  }
+  pendingInput.value = submission;
+  void submitInput();
+}
+
+function abandonInput(): void {
+  const submission = pendingInput.value;
+  if (!submission || inputBusy.value || !window.confirm('输入可能已经到达 CLI。放弃追踪后不可安全重试此命令，继续吗？')) return;
+  if (clearPendingInput(submission)) {
+    inputError.value = undefined;
+    inputNotice.value = '已放弃追踪输入；它可能已到达 CLI，请检查输出再决定是否发送新输入。';
+  } else {
+    inputError.value = '无法清除待确认输入，请勿发送新输入。';
   }
 }
 
@@ -312,8 +418,20 @@ onBeforeUnmount(() => {
     </div>
     <div class="shortcut-scroll">
       <p v-if="error" class="shortcut-error" role="alert">{{ error }}</p>
+      <p v-if="inputError" class="shortcut-error" role="alert">{{ inputError }}</p>
+      <p v-if="inputNotice" class="shortcut-input-notice" role="status">{{ inputNotice }}</p>
       <p v-if="refreshError" class="shortcut-error" role="alert">{{ refreshError }}</p>
       <p v-if="!storageAvailable" class="shortcut-error" role="alert">无法读取待确认的运行 ID；为避免重复执行，已禁用新任务。请恢复浏览器本地存储。</p>
+      <p v-if="!inputStorageAvailable" class="shortcut-error" role="alert">无法读取待确认的输入命令；为避免重复输入，已禁用 CLI 输入。请恢复浏览器本地存储。</p>
+      <div v-if="pendingInput" class="shortcut-pending" role="status">
+        <strong>待确认 CLI 输入 · 运行 ID：{{ pendingInput.runId }}</strong>
+        <span>命令 ID：{{ pendingInput.commandId }}。结果未知时仅可用此 ID 重试；输入可能已经送达。</span>
+        <div>
+          <button type="button" :disabled="inputBusy || busy || blockedInputCommandId === pendingInput.commandId || run?.id !== pendingInput.runId || run?.status !== 'running'" @click="submitInput">{{ inputBusy ? '发送中…' : '用相同命令 ID 重试' }}</button>
+          <button type="button" :disabled="inputBusy" @click="abandonInput">放弃追踪输入</button>
+        </div>
+        <span v-if="run?.id !== pendingInput.runId || run?.status !== 'running'">请选择对应的运行中记录再重试；运行已结束时不可继续发送。</span>
+      </div>
       <div v-if="pending" class="shortcut-pending" role="status">
         <strong>待确认提交：{{ pending.name }}</strong>
         <span>运行 ID：{{ pending.runId }}。请求可能已执行，重试将使用同一 ID。</span>
@@ -377,12 +495,25 @@ onBeforeUnmount(() => {
         <div class="shortcut-result-heading">
           <strong>{{ runName }} · {{ statusLabels[run.status] }}</strong>
           <div>
-            <button v-if="running" type="button" :disabled="busy" @click="cancel">取消运行</button>
+            <button v-if="running" type="button" :disabled="busy || inputBusy" @click="cancel">取消运行</button>
             <button v-else-if="selected?.id === run.shortcutId" type="button" :disabled="!storageAvailable || !selected.online || busy || !!pending" @click="start(selected)">再次运行</button>
           </div>
         </div>
         <small>Mac：{{ run.deviceId }} · 退出码：{{ run.exitCode ?? '—' }}</small>
         <pre>{{ run.output || '暂无输出' }}</pre>
+        <div v-if="run.status === 'running'" class="shortcut-input">
+          <p>仅向 Mac 上此任务的 CLI 发送 y/n/yes/no 回答，不是 TermRelay 的运行确认，也不会自动批准任何操作。请先查看上方最近输出。不可用于密码或其他敏感信息；CLI 仍可能自行打印所发送的回答。</p>
+          <template v-if="run.output">
+            <small>最近输出（末尾 1200 字符）</small>
+            <pre>{{ run.output.slice(-1200) }}</pre>
+          </template>
+          <p v-if="!shortcuts.find((item) => item.id === run?.shortcutId)?.online" class="shortcut-offline">目标 Mac 离线，暂不可发送输入。</p>
+          <div>
+            <button v-for="answer in (['y', 'n', 'yes', 'no'] as const)" :key="answer" type="button"
+              :disabled="busy || inputBusy || !!pendingInput || !inputStorageAvailable || !shortcuts.find((item) => item.id === run?.shortcutId)?.online"
+              @click="sendInput(answer)">发送 {{ answer }}</button>
+          </div>
+        </div>
       </article>
     </div>
   </section>

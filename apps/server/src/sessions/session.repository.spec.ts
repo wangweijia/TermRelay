@@ -5,6 +5,19 @@ import { SessionEventEntity } from './session-event.entity';
 import { SessionEntity } from './session.entity';
 import { SessionRepository } from './session.repository';
 
+test('pending approval query excludes auto-approved sessions', async () => {
+  let query = '';
+  const repository = new SessionRepository({
+    query: async (sql: string) => {
+      query = sql;
+      return [];
+    },
+  } as unknown as DataSource);
+
+  assert.deepEqual(await repository.listPendingApprovals(), []);
+  assert.match(query, /s\.auto_approve_enabled = 0/u);
+});
+
 test('disconnect permanently removes only unused ACP sessions for that device', async () => {
   const store = new MemorySessions([
     session('empty-acp', 'acp'),

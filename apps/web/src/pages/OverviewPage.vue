@@ -258,7 +258,7 @@ onBeforeUnmount(() => {
         <small v-if="relay.commandStatus" class="command-status">{{ relay.commandStatus }}</small>
       </section>
       <ApprovalInbox
-        :approvals="relay.pendingApprovals"
+        :approvals="relay.visiblePendingApprovals"
         :settings="relay.notificationSettings"
         :is-interactive="isSessionInteractive"
         :resolving="relay.resolvingApprovals"

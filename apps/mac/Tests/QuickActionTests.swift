@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import TermRelay
 
@@ -101,14 +102,24 @@ final class QuickActionTests: XCTestCase {
         let runner = QuickActionRunner { _ in }
         var action = QuickAction.draft(directory: FileManager.default.temporaryDirectory)
         action.name = "等待"
-        action.command = "sleep 8"
+        action.command = "printf 'CHILD=%s\\n' $$; sleep 8"
         let runID = UUID()
         try runner.start(action, runID: runID)
+        for _ in 0..<100 where runner.runs[runID]?.output.contains("CHILD=") != true {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let output = try XCTUnwrap(runner.runs[runID]?.output)
+        let child = try XCTUnwrap(
+            output.split(separator: "\n").first(where: { $0.contains("CHILD=") })?
+                .split(separator: "=").last.flatMap { Int32($0) }
+        )
         runner.cancel(runID)
         for _ in 0..<100 where runner.runs[runID]?.status == "running" {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(runner.runs[runID]?.status, "cancelled")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(kill(child, 0), -1, "Shortcut child must not survive cancellation")
     }
 
     @MainActor
@@ -123,5 +134,41 @@ final class QuickActionTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(runner.runs[runID]?.status, "succeeded")
+    }
+
+    @MainActor
+    func testRunnerAcceptsManualConfirmationOnControllingTerminalOnce() async throws {
+        let runner = QuickActionRunner { _ in }
+        var action = QuickAction.draft(directory: FileManager.default.temporaryDirectory)
+        action.name = "交互确认"
+        action.command = """
+            printf '\\033[31mPROMPT>\\033[0m'
+            read answer </dev/tty
+            printf 'first=%s\\n' "$answer"
+            read -t 1 other </dev/tty
+            printf 'second=%s\\n' "$other"
+            """
+        let runID = UUID()
+        let request = QuickActionInputRequest(runID: runID, commandID: UUID(), answer: .y)
+        XCTAssertThrowsError(try runner.sendInput(request))
+        try runner.start(action, runID: runID)
+        for _ in 0..<100 where runner.runs[runID]?.output.contains("PROMPT>") != true {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(runner.runs[runID]?.output.contains("PROMPT>") == true,
+                      "\(String(describing: runner.runs[runID]))")
+        XCTAssertEqual(runner.runs[runID]?.status, "running",
+                       "\(String(describing: runner.runs[runID]))")
+        try runner.sendInput(request)
+        try runner.sendInput(request)
+        for _ in 0..<150 where runner.runs[runID]?.status == "running" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(runner.runs[runID]?.status, "succeeded")
+        XCTAssertTrue(runner.runs[runID]?.output.contains("first=y") == true)
+        XCTAssertTrue(runner.runs[runID]?.output.contains("second=") == true)
+        XCTAssertFalse(runner.runs[runID]?.output.contains("second=y") == true)
+        XCTAssertFalse(runner.runs[runID]?.output.contains("\u{001B}") == true)
+        XCTAssertThrowsError(try runner.sendInput(request))
     }
 }

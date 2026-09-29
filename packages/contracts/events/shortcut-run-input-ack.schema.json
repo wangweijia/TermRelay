@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-input-ack.schema.json",
+  "title": "shortcut.run.input.ack payload",
+  "type": "object",
+  "required": ["runId", "commandId", "status"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid" },
+    "commandId": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["accepted", "rejected"] },
+    "message": { "type": "string", "maxLength": 2048 }
+  },
+  "additionalProperties": false
+}

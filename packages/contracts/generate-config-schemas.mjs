@@ -30,6 +30,8 @@ const shortcutSchemas = [
   ['shortcutRunUpdateSchema', 'shortcut-run-update'],
   ['shortcutRunStartSchema', 'shortcut-run-start'],
   ['shortcutRunCancelSchema', 'shortcut-run-cancel'],
+  ['shortcutRunInputSchema', 'shortcut-run-input'],
+  ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
 const shortcutTypes = `export interface ShortcutCatalogEntry {
   id: string;
@@ -60,6 +62,19 @@ export interface ShortcutRunStartPayload {
 
 export interface ShortcutRunCancelPayload {
   runId: string;
+}
+
+export interface ShortcutRunInputPayload {
+  runId: string;
+  commandId: string;
+  answer: 'y' | 'n' | 'yes' | 'no';
+}
+
+export interface ShortcutRunInputAckPayload {
+  runId: string;
+  commandId: string;
+  status: 'accepted' | 'rejected';
+  message?: string;
 }
 
 `;

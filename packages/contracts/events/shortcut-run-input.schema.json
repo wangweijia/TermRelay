@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-run-input.schema.json",
+  "title": "shortcut.run.input payload",
+  "type": "object",
+  "required": ["runId", "commandId", "answer"],
+  "properties": {
+    "runId": { "type": "string", "format": "uuid" },
+    "commandId": { "type": "string", "format": "uuid" },
+    "answer": { "enum": ["y", "n", "yes", "no"] }
+  },
+  "additionalProperties": false
+}

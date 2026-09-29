@@ -80,7 +80,12 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                     if self.events.count > Self.eventTrimThreshold {
                         self.events.removeFirst(self.events.count - Self.maximumRetainedEvents)
                     }
-                    self.approvalHandler(event)
+                    switch event.payload {
+                    case .approvalRequested where self.autoApproveEnabled:
+                        break
+                    default:
+                        self.approvalHandler(event)
+                    }
                     self.eventHandler(event)
                     if case .configurationUpdated(let options) = event.payload {
                         self.configurationOptions = options

@@ -48,4 +48,16 @@ export class ShortcutsController {
     if (!UUID.test(runId)) throw new BadRequestException('runId must be a UUID');
     return this.shortcuts.cancel(runId);
   }
+
+  @Post('runs/:runId/input')
+  input(@Param('runId') runId: string, @Body() body: unknown): Promise<{ accepted: true }> {
+    const record = typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? body as Record<string, unknown> : undefined;
+    if (!UUID.test(runId) || !record || Object.keys(record).length !== 2
+      || typeof record.commandId !== 'string' || !UUID.test(record.commandId)
+      || typeof record.answer !== 'string' || !['y', 'n', 'yes', 'no'].includes(record.answer)) {
+      throw new BadRequestException('runId and commandId must be UUIDs; answer must be y, n, yes, or no');
+    }
+    return this.shortcuts.input(runId, record.commandId as string, record.answer as 'y' | 'n' | 'yes' | 'no');
+  }
 }

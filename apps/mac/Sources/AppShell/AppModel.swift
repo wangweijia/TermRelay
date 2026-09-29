@@ -126,7 +126,9 @@ final class AppModel: ObservableObject {
             },
             autoApproveStateHandler: { [weak self] sessionID, enabled in
                 Task { @MainActor [weak self] in
-                    self?.structuredSessions[sessionID]?.setAutoApproveEnabled(enabled)
+                    guard let self, let session = self.structuredSessions[sessionID] else { return }
+                    session.setAutoApproveEnabled(enabled)
+                    if enabled { self.pendingApprovals.clear(sessionID: sessionID) }
                 }
             },
             authorizationInvalidatedHandler: { [weak self] in
@@ -134,6 +136,9 @@ final class AppModel: ObservableObject {
             },
             quickActionHandler: { [weak self] command in
                 await self?.handleQuickActionCommand(command)
+            },
+            quickActionInputHandler: { [weak self] request in
+                await self?.handleQuickActionInput(request) ?? .rejected("Mac App 不可用")
             }
         )
     }
@@ -637,6 +642,25 @@ final class AppModel: ObservableObject {
 
     func cancelQuickAction(runID: UUID) {
         quickActionRunner.cancel(runID)
+    }
+
+    func sendQuickActionInput(runID: UUID, answer: QuickActionAnswer) throws {
+        try quickActionRunner.sendInput(
+            QuickActionInputRequest(runID: runID, commandID: UUID(), answer: answer)
+        )
+    }
+
+    private func handleQuickActionInput(_ request: QuickActionInputRequest) -> QuickActionInputResult {
+        guard remoteQuickRunIDs.contains(request.runID),
+              quickRuns[request.runID]?.status == "running" else {
+            return .rejected("此运行不属于远程快捷任务，或已结束。")
+        }
+        do {
+            try quickActionRunner.sendInput(request)
+            return .accepted
+        } catch {
+            return .rejected(error.localizedDescription)
+        }
     }
 
     private func handleQuickActionCommand(_ command: QuickActionCommand) async {
