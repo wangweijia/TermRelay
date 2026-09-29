@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { inputAcknowledged, inputDeliveryUncertain, parsePendingShortcutInput } from '../shortcut-input';
 import type { PendingShortcutInput, ShortcutAnswer } from '../shortcut-input';
 
@@ -54,12 +54,12 @@ function readPending(): PendingSubmission | undefined {
 const props = defineProps<{ active: boolean }>();
 const shortcuts = ref<Shortcut[]>([]);
 const recentRuns = ref<ShortcutRun[]>([]);
-const selectedId = ref<string>();
 const loading = ref(false);
 const busy = ref(false);
 const error = ref<string>();
 const refreshError = ref<string>();
 const run = ref<ShortcutRun>();
+const outputElement = ref<HTMLElement>();
 const runName = ref<string>();
 const pending = ref<PendingSubmission | undefined>(readPending());
 let inputStorageAvailable = true;
@@ -76,8 +76,10 @@ const inputBusy = ref(false);
 const inputError = ref<string>();
 const inputNotice = ref<string>();
 const blockedInputCommandId = ref<string>();
-const selected = computed(() => shortcuts.value.find((item) => item.id === selectedId.value));
 const running = computed(() => run.value?.status === 'queued' || run.value?.status === 'running');
+const activeRuns = computed(() => recentRuns.value.filter((item) => item.status === 'queued' || item.status === 'running'));
+const availableShortcuts = computed(() => shortcuts.value.filter((item) => item.online));
+const unavailableShortcuts = computed(() => shortcuts.value.filter((item) => !item.online));
 function activeFor(shortcutId: string): boolean {
   return recentRuns.value.some((item) =>
     item.shortcutId === shortcutId && (item.status === 'queued' || item.status === 'running'));
@@ -96,7 +98,6 @@ const statusLabels: Record<ShortcutRun['status'], string> = {
 };
 let pollTimer: number | undefined;
 let generation = 0;
-let pollVersion = 0;
 let disposed = false;
 let refreshVersion = 0;
 
@@ -128,13 +129,12 @@ async function refresh(): Promise<void> {
   refreshError.value = undefined;
   const [catalog, history] = await Promise.allSettled([
     request<Shortcut[]>('/api/shortcuts'),
-    request<ShortcutRun[]>('/api/shortcuts/runs?limit=20'),
+    request<ShortcutRun[]>('/api/shortcuts/runs?limit=100'),
   ]);
   if (current !== generation || version !== refreshVersion) return;
   const failures: string[] = [];
   if (catalog.status === 'fulfilled') {
     shortcuts.value = catalog.value;
-    if (!catalog.value.some((item) => item.id === selectedId.value)) selectedId.value = catalog.value[0]?.id;
   } else {
     failures.push(`读取快捷任务失败：${message(catalog.reason)}`);
   }
@@ -155,58 +155,42 @@ async function refresh(): Promise<void> {
         error.value = '运行记录已找到，但无法清除待确认记录；请勿启动新任务。';
       }
     }
+    recentRuns.value = history.value;
     const currentRun = run.value;
-    const fresher = currentRun && history.value.find((item) =>
-      item.id === currentRun.id && item.updatedAt > currentRun.updatedAt);
-    if (fresher) selectRun(fresher);
-    const selectedRun = run.value;
-    recentRuns.value = (selectedRun && !history.value.some((item) => item.id === selectedRun.id)
-      ? [selectedRun, ...history.value] : history.value.map((item) =>
-        item.id === selectedRun?.id ? selectedRun : item)).slice(0, 20);
-    if (!selectedRun && recentRuns.value.length) selectRun(recentRuns.value[0]!);
+    const fresher = currentRun && history.value.find((item) => item.id === currentRun.id);
+    const newestActive = history.value.find((item) => item.status === 'queued' || item.status === 'running');
+    if (newestActive && (!currentRun || !running.value)) {
+      selectRun(newestActive);
+    } else if (history.value[0] && (!currentRun ||
+      (!running.value && history.value[0].createdAt > currentRun.createdAt))) {
+      selectRun(history.value[0]);
+    } else if (fresher) {
+      selectRun(fresher);
+    }
   } else {
-    failures.push(`读取最近运行失败：${message(history.reason)}`);
+    failures.push(`读取运行状态失败：${message(history.reason)}`);
   }
   refreshError.value = failures.join('；') || undefined;
   loading.value = false;
+  schedulePoll();
 }
 
 function rememberRun(updated: ShortcutRun): void {
   recentRuns.value = [updated, ...recentRuns.value.filter((item) => item.id !== updated.id)]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20);
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100);
 }
 
 function selectRun(selectedRun: ShortcutRun): void {
-  pollVersion++;
-  stopPolling();
   run.value = selectedRun;
   runName.value = shortcuts.value.find((item) => item.id === selectedRun.shortcutId)?.name
     ?? (pending.value?.shortcutId === selectedRun.shortcutId ? pending.value.name : selectedRun.shortcutId);
-  schedulePoll();
 }
 
 function schedulePoll(): void {
   stopPolling();
-  if (props.active && running.value) {
-    pollTimer = window.setTimeout(() => void poll(), 2000);
+  if (props.active) {
+    pollTimer = window.setTimeout(() => void refresh(), activeRuns.value.length ? 2000 : 8000);
   }
-}
-
-async function poll(): Promise<void> {
-  const current = generation;
-  const version = pollVersion;
-  const id = run.value?.id;
-  if (!props.active || !id || !running.value || busy.value) return;
-  try {
-    const updated = await request<ShortcutRun>(`/api/shortcuts/runs/${encodeURIComponent(id)}`);
-    if (current !== generation || version !== pollVersion || run.value?.id !== id) return;
-    run.value = updated;
-    rememberRun(updated);
-    error.value = undefined;
-  } catch (reason) {
-    if (current === generation && version === pollVersion) error.value = `更新运行状态失败：${message(reason)}`;
-  }
-  if (current === generation && version === pollVersion) schedulePoll();
 }
 
 async function start(shortcut: Shortcut): Promise<void> {
@@ -283,7 +267,6 @@ function abandonPending(): void {
 async function cancel(): Promise<void> {
   if (!run.value || !running.value || busy.value || inputBusy.value) return;
   const id = run.value.id;
-  pollVersion++;
   stopPolling();
   busy.value = true;
   error.value = undefined;
@@ -392,9 +375,17 @@ function abandonInput(): void {
   }
 }
 
+watch(() => [run.value?.id, run.value?.output], async ([id], previous) => {
+  const output = outputElement.value;
+  const followOutput = id !== previous?.[0] || !output ||
+    output.scrollHeight - output.scrollTop - output.clientHeight < 48;
+  if (!followOutput) return;
+  await nextTick();
+  if (outputElement.value) outputElement.value.scrollTop = outputElement.value.scrollHeight;
+});
+
 watch(() => props.active, (active) => {
   generation++;
-  pollVersion++;
   stopPolling();
   loading.value = false;
   if (active) {
@@ -440,81 +431,50 @@ onBeforeUnmount(() => {
           <button type="button" :disabled="busy" @click="abandonPending">放弃追踪</button>
         </div>
       </div>
-      <p v-if="loading && !shortcuts.length" class="shortcut-empty">正在读取快捷任务…</p>
-      <p v-else-if="!shortcuts.length" class="shortcut-empty">暂无快捷任务。可在 Mac 上配置任务。</p>
-      <div v-else class="shortcut-list">
-        <button
-          v-for="shortcut in shortcuts"
-          :key="shortcut.id"
-          type="button"
-          class="shortcut-item"
-          :class="{ selected: shortcut.id === selectedId }"
-          :aria-pressed="shortcut.id === selectedId"
-          @click="selectedId = shortcut.id"
-        >
-          <strong>{{ shortcut.name }}</strong><span :class="{ offline: !shortcut.online }">{{ shortcut.online ? '在线' : '离线' }}</span>
-        </button>
-      </div>
-      <article v-if="selected" class="shortcut-detail">
-        <h3>{{ selected.name }}</h3>
-        <p>{{ selected.description || '无描述' }}</p>
-        <dl>
-          <dt>工作区</dt><dd>{{ selected.workspaceId }}</dd>
-          <dt>目标 Mac</dt><dd>{{ selected.deviceId }}</dd>
-          <dt>代理模式</dt><dd>{{ proxyLabels[selected.proxyMode] }}</dd>
-          <dt>运行确认</dt><dd>{{ selected.requiresConfirmation ? '每次运行前必须确认' : '运行前确认' }}</dd>
-        </dl>
-        <p v-if="!selected.online" class="shortcut-offline">目标 Mac 离线，暂不可运行。</p>
-        <button type="button" :disabled="!storageAvailable || !selected.online || busy || activeFor(selected.id) || !!pending" @click="start(selected)">
-          {{ busy && !run ? '提交中…' : '运行任务' }}
-        </button>
-      </article>
-      <section class="shortcut-history" aria-label="最近运行">
-        <h3>最近运行</h3>
-        <p v-if="loading && !recentRuns.length">正在读取运行记录…</p>
-        <p v-else-if="!recentRuns.length">暂无运行记录。</p>
-        <div v-else class="shortcut-list">
-          <button
-            v-for="item in recentRuns"
-            :key="item.id"
-            type="button"
-            class="shortcut-item"
-            :class="{ selected: item.id === run?.id }"
-            :aria-pressed="item.id === run?.id"
-            @click="selectRun(item)"
-          >
-            <span class="shortcut-history-info">
-              <strong>{{ shortcuts.find((shortcut) => shortcut.id === item.shortcutId)?.name ?? (pending?.shortcutId === item.shortcutId ? pending.name : item.shortcutId) }}</strong>
-              <small>{{ new Date(item.createdAt).toLocaleString() }} · {{ item.deviceId }}</small>
-            </span>
-            <span :data-status="item.status">{{ statusLabels[item.status] }}</span>
+      <section v-if="activeRuns.length" class="shortcut-active" aria-label="当前运行的任务">
+        <h3>当前运行</h3>
+        <div class="shortcut-list">
+          <button v-for="item in activeRuns" :key="item.id" type="button" class="shortcut-item"
+            :class="{ selected: item.id === run?.id }" :aria-pressed="item.id === run?.id" @click="selectRun(item)">
+            <strong>{{ shortcuts.find((shortcut) => shortcut.id === item.shortcutId)?.name ?? item.shortcutId }}</strong>
+            <span>{{ statusLabels[item.status] }} · 查看输出</span>
           </button>
         </div>
       </section>
       <article v-if="run" class="shortcut-result">
         <div class="shortcut-result-heading">
-          <strong>{{ runName }} · {{ statusLabels[run.status] }}</strong>
+          <strong>{{ running ? '当前运行' : '运行结果' }} · {{ runName }}</strong>
           <div>
             <button v-if="running" type="button" :disabled="busy || inputBusy" @click="cancel">取消运行</button>
-            <button v-else-if="selected?.id === run.shortcutId" type="button" :disabled="!storageAvailable || !selected.online || busy || !!pending" @click="start(selected)">再次运行</button>
           </div>
         </div>
-        <small>Mac：{{ run.deviceId }} · 退出码：{{ run.exitCode ?? '—' }}</small>
-        <pre>{{ run.output || '暂无输出' }}</pre>
+        <p class="shortcut-run-status" :data-status="run.status" role="status">{{ statusLabels[run.status] }}{{ run.exitCode !== null ? ` · 退出码 ${run.exitCode}` : '' }}</p>
+        <pre ref="outputElement" class="shortcut-output" aria-label="任务输出" aria-live="polite">{{ run.output || (running ? '等待 Mac 输出…' : '任务没有输出') }}</pre>
         <div v-if="run.status === 'running'" class="shortcut-input">
-          <p>仅向 Mac 上此任务的 CLI 发送 y/n/yes/no 回答，不是 TermRelay 的运行确认，也不会自动批准任何操作。请先查看上方最近输出。不可用于密码或其他敏感信息；CLI 仍可能自行打印所发送的回答。</p>
-          <template v-if="run.output">
-            <small>最近输出（末尾 1200 字符）</small>
-            <pre>{{ run.output.slice(-1200) }}</pre>
-          </template>
+          <strong>命令正在等待确认？</strong>
+          <p>查看上方输出后，向 CLI 发送一次回答。此处只能发送 y / n / yes / no。</p>
           <p v-if="!shortcuts.find((item) => item.id === run?.shortcutId)?.online" class="shortcut-offline">目标 Mac 离线，暂不可发送输入。</p>
-          <div>
+          <div class="shortcut-answer-actions">
             <button v-for="answer in (['y', 'n', 'yes', 'no'] as const)" :key="answer" type="button"
               :disabled="busy || inputBusy || !!pendingInput || !inputStorageAvailable || !shortcuts.find((item) => item.id === run?.shortcutId)?.online"
-              @click="sendInput(answer)">发送 {{ answer }}</button>
+              @click="sendInput(answer)">{{ answer === 'y' ? '确认 (y)' : answer === 'n' ? '拒绝 (n)' : `发送 ${answer}` }}</button>
           </div>
         </div>
       </article>
+      <section class="shortcut-available" aria-label="可用快捷任务">
+        <h3>可用任务</h3>
+        <p v-if="loading && !shortcuts.length" class="shortcut-empty">正在读取快捷任务…</p>
+        <p v-else-if="!shortcuts.length" class="shortcut-empty">暂无快捷任务。可在 Mac 上配置任务。</p>
+        <p v-else-if="!availableShortcuts.length" class="shortcut-empty">Mac 当前离线，暂无可运行任务。</p>
+        <div v-else class="shortcut-list">
+          <article v-for="shortcut in availableShortcuts" :key="shortcut.id" class="shortcut-task">
+            <div><strong>{{ shortcut.name }}</strong><p v-if="shortcut.description">{{ shortcut.description }}</p></div>
+            <button type="button" :disabled="!storageAvailable || busy || activeFor(shortcut.id) || !!pending"
+              @click="start(shortcut)">{{ busy && pending?.shortcutId === shortcut.id ? '提交中…' : activeFor(shortcut.id) ? '运行中' : '运行' }}</button>
+          </article>
+        </div>
+        <p v-if="unavailableShortcuts.length" class="shortcut-unavailable">{{ unavailableShortcuts.length }} 个任务所在的 Mac 已离线</p>
+      </section>
     </div>
   </section>
 </template>
