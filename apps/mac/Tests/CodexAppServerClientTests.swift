@@ -197,6 +197,30 @@ final class CodexAppServerClientTests: XCTestCase {
         try await turnStarting.value
 
         transport.receive([
+            "method": "error",
+            "params": [
+                "threadId": "thread-a",
+                "turnId": "turn-a",
+                "error": ["message": "上游连接暂时中断"],
+            ],
+        ])
+        try await Task.sleep(for: .milliseconds(20))
+        let stateAfterError = await coordinator.state
+        XCTAssertEqual(stateAfterError, .running,
+                       "App Server 错误通知不能提前结束仍在执行的 turn")
+        var eventIterator = coordinator.events.makeAsyncIterator()
+        var reportedError: ToolEvent?
+        for _ in 0..<4 {
+            if let event = await eventIterator.next(), case .warning = event.payload {
+                reportedError = event
+                break
+            }
+        }
+        XCTAssertEqual(reportedError?.payload,
+                       .warning(code: "codex_turn_error", message: "上游连接暂时中断"))
+        XCTAssertEqual(reportedError?.correlation.turnID, "turn-a")
+
+        transport.receive([
             "id": 900,
             "method": "item/commandExecution/requestApproval",
             "params": [

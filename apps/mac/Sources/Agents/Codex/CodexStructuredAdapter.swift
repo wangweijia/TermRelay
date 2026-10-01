@@ -425,8 +425,11 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
             emit(.turnCompleted(turnID: completedID, status: status), turnID: completedID)
             if activeTurnID == completedID { activeTurnID = nil }
         case "error":
-            let message = object["message"]?.string ?? "Codex App Server reported an error"
-            emit(.failed(code: "codex_error", message: message), turnID: turnID)
+            let message = object["error"]?.object?["message"]?.string
+                ?? object["message"]?.string
+                ?? "Codex App Server 报告错误，等待当前任务的最终状态"
+            emit(.warning(code: "codex_turn_error", message: message),
+                 turnID: turnID ?? activeTurnID)
         default:
             break
         }
