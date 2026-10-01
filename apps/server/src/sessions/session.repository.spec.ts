@@ -55,6 +55,24 @@ test('startup removes previously disconnected unused ACP sessions, not failed or
   assert.deepEqual(store.purgedIDs.sort(), ['new-empty', 'old-empty']);
 });
 
+test('failed sessions can be hidden or purged, while active sessions cannot be deleted', async () => {
+  const store = new MemorySessions([
+    session('failed-hidden', 'pty', { status: 'failed' }),
+    session('failed-purged', 'acp', { status: 'failed' }),
+    session('active', 'pty'),
+  ]);
+
+  assert.equal(await store.repository.deleteFinished('failed-hidden', false), 'deleted');
+  assert.ok(store.rows.get('failed-hidden')?.deletedAt);
+  assert.equal(await store.repository.deleteFinished('failed-purged', true), 'deleted');
+  assert.equal(store.rows.has('failed-purged'), false);
+  assert.deepEqual(store.deletedChildren.sort(), [
+    'approvals:failed-purged', 'commands:failed-purged', 'events:failed-purged',
+  ]);
+  assert.equal(await store.repository.deleteFinished('active', false), 'not_finished');
+  assert.equal(store.rows.get('active')?.deletedAt, null);
+});
+
 test('a persisted user message protects its ACP session even after event history expires', async () => {
   const store = new MemorySessions([session('used', 'acp'), session('empty', 'acp')]);
   const result = await store.repository.appendToolEvent('device-a', 'used', 1, {

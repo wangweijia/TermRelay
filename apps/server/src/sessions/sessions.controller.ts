@@ -91,7 +91,7 @@ export class SessionsController {
     const result = await this.sessions.deleteFinished(id, purge);
     if (result === 'not_found') throw new NotFoundException('session not found');
     if (result === 'not_finished') {
-      throw new ConflictException('only finished sessions can be deleted');
+      throw new ConflictException('only ended sessions can be deleted');
     }
     return { deleted: true, purged: purge };
   }

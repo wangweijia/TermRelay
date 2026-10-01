@@ -70,7 +70,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
             <span><strong>{{ relay.sessionDisplayName(session) }}</strong><small :data-status="relay.sessionDisplayStatus(session)">{{ relay.sessionDisplayStatus(session) }}</small></span>
             <span>{{ session.runtimeMode.toUpperCase() }} · {{ session.workspaceId }}</span>
           </button>
-          <div v-if="session.status === 'finished'" class="mobile-session-actions"><button @click="removeSession(session, false)">隐藏</button><button class="danger" @click="removeSession(session, true)">永久删除</button></div>
+          <div v-if="session.status === 'finished' || session.status === 'failed'" class="mobile-session-actions"><button @click="removeSession(session, false)">隐藏</button><button class="danger" @click="removeSession(session, true)">永久删除</button></div>
         </article>
         <div v-if="!relay.sessions.length" class="mobile-empty">暂无会话</div>
       </div>

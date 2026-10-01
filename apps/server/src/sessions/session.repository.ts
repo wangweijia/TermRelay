@@ -338,7 +338,7 @@ export class SessionRepository {
         .where('session.id = :id', { id })
         .getOne();
       if (!session || (!purge && session.deletedAt !== null)) return 'not_found';
-      if (session.status !== 'finished') return 'not_finished';
+      if (session.status !== 'finished' && session.status !== 'failed') return 'not_finished';
 
       if (!purge) {
         await sessions.update({ id }, { deletedAt: new Date() });

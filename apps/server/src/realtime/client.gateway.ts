@@ -350,7 +350,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (outcome !== 'deleted') {
         this.sendProtocolError(
           client, outcome === 'not_finished' ? 'conflict' : 'unknown_session',
-          outcome === 'not_finished' ? 'Only finished sessions can be deleted.' : 'Session not found.',
+          outcome === 'not_finished' ? 'Only ended sessions can be deleted.' : 'Session not found.',
           envelope.messageId, sessionId,
         );
         return;

@@ -450,7 +450,7 @@ final class AppModel: ObservableObject {
     }
 
     func deleteCopilotHistory(_ archive: CopilotHistorySession, purge: Bool) async throws {
-        guard archive.status == "finished",
+        guard archive.status == "finished" || archive.status == "failed",
               copilotHistory.contains(where: { $0.id == archive.id }) else {
             throw AgentError.providerUnavailable("只能删除已经结束的历史会话。")
         }

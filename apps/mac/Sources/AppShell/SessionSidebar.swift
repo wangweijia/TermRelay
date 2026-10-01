@@ -111,7 +111,7 @@ struct SessionSidebar: View {
                             )
                             .tag(archive.id)
                             .contextMenu {
-                                if archive.status == "finished" {
+                                if archive.status == "finished" || archive.status == "failed" {
                                     Button(role: .destructive) {
                                         deleteHistoryAction(archive)
                                     } label: {
@@ -150,7 +150,7 @@ struct SessionSidebar: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
-                if archive.status == "finished" {
+                if archive.status == "finished" || archive.status == "failed" {
                     Button(action: deleteAction) {
                         Image(systemName: "trash")
                             .frame(width: 18, height: 18)

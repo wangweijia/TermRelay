@@ -272,7 +272,7 @@ export const useRelayStore = defineStore('relay', {
 
     async deleteSession(sessionId: string, purge: boolean): Promise<boolean> {
       const session = this.sessions.find((item) => item.id === sessionId);
-      if (!session || session.status !== 'finished') {
+      if (!session || !['finished', 'failed'].includes(session.status)) {
         this.error = '只能删除已经结束的会话。';
         return false;
       }

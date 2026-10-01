@@ -177,7 +177,7 @@ onBeforeUnmount(() => {
               <code>{{ session.id }}</code>
             </button>
             <button
-              v-if="session.status === 'finished'"
+              v-if="session.status === 'finished' || session.status === 'failed'"
               type="button"
               class="session-delete"
               :aria-label="`删除会话 ${session.id}`"
