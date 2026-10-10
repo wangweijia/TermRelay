@@ -197,6 +197,17 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'shortcut.create.ack') {
+      const { envelope } = result.message;
+      if (!this.shortcuts?.acknowledgeCreate(client, envelope.deviceId, envelope.payload)) {
+        this.sendProtocolError(
+          client, 'conflict', 'Shortcut creation acknowledgement is unknown or belongs to another connection.',
+          envelope.messageId,
+        );
+      }
+      return;
+    }
+
     if (result.message.type === 'shortcut.catalog' || result.message.type === 'shortcut.run.update') {
       const { envelope } = result.message;
       try {
@@ -378,7 +389,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
+      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' | 'shortcut.create.ack' }
     >,
   ): Promise<void> {
     const { envelope } = message;

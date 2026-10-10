@@ -1268,6 +1268,28 @@ export interface ShortcutRunInputAckPayload {
   message?: string;
 }
 
+export interface ShortcutCreatePayload {
+  requestId: string;
+  id: string;
+  name: string;
+  description: string;
+  directory: string;
+  command: string;
+  proxyMode: 'inherit' | 'disabled' | 'custom';
+  httpProxy?: string;
+  httpsProxy?: string;
+  allProxy?: string;
+  noProxy?: string;
+  requiresConfirmation: boolean;
+}
+
+export interface ShortcutCreateAckPayload {
+  requestId: string;
+  id: string;
+  status: 'accepted' | 'rejected';
+  message?: string;
+}
+
 export const shortcutCatalogSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termrelay.local/contracts/events/shortcut-catalog.schema.json",
@@ -1460,6 +1482,112 @@ export const shortcutRunInputAckSchema = {
       "format": "uuid"
     },
     "commandId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 2048
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutCreateSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-create.schema.json",
+  "title": "shortcut.create payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "id",
+    "name",
+    "description",
+    "directory",
+    "command",
+    "proxyMode",
+    "requiresConfirmation"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "directory": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "proxyMode": {
+      "enum": [
+        "inherit",
+        "disabled",
+        "custom"
+      ]
+    },
+    "httpProxy": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "httpsProxy": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "allProxy": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "noProxy": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "requiresConfirmation": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const shortcutCreateAckSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-create-ack.schema.json",
+  "title": "shortcut.create.ack payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "id",
+    "status"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "id": {
       "type": "string",
       "format": "uuid"
     },

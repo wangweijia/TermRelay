@@ -140,6 +140,9 @@ final class AppModel: ObservableObject {
             quickActionInputHandler: { [weak self] request in
                 await self?.handleQuickActionInput(request) ?? .rejected("Mac App 不可用")
             },
+            quickActionCreateHandler: { [weak self] request in
+                await self?.handleQuickActionCreate(request) ?? .rejected("Mac App 不可用")
+            },
             filePreviewWorkspaceHandler: { [weak self] sessionID, workspaceID in
                 await self?.filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID)
             }
@@ -621,6 +624,20 @@ final class AppModel: ObservableObject {
         try quickActionStore.save(actions)
         quickActions = actions
         publishQuickActions()
+    }
+
+    func handleQuickActionCreate(_ request: QuickActionCreateRequest) -> QuickActionInputResult {
+        if let existing = quickActions.first(where: { $0.id == request.action.id }) {
+            var original = request.action
+            original.revision = existing.revision
+            return original == existing ? .accepted : .rejected("任务 ID 已被另一条任务使用。")
+        }
+        do {
+            try saveQuickAction(request.action)
+            return .accepted
+        } catch {
+            return .rejected(error.localizedDescription)
+        }
     }
 
     func deleteQuickAction(id: UUID) throws {

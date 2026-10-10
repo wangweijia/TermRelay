@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { inputAcknowledged, inputDeliveryUncertain, parsePendingShortcutInput } from '../shortcut-input';
 import type { PendingShortcutInput, ShortcutAnswer } from '../shortcut-input';
 import { createUuid } from '../uuid';
+import type { DeviceRecord } from '../types';
 
 interface Shortcut {
   id: string;
@@ -35,6 +36,7 @@ interface PendingSubmission {
 
 const pendingKey = 'termrelay.shortcut.pending-run.v1';
 const pendingInputKey = 'termrelay.shortcut.pending-input.v1';
+const pendingCreateKey = 'termrelay.shortcut.pending-create.v1';
 let storageAvailable = true;
 function readPending(): PendingSubmission | undefined {
   try {
@@ -53,6 +55,39 @@ function readPending(): PendingSubmission | undefined {
 }
 
 const props = defineProps<{ active: boolean }>();
+interface PendingCreate {
+  requestId: string;
+  id: string;
+  deviceId: string;
+}
+let createStorageAvailable = true;
+function readPendingCreate(): PendingCreate | undefined {
+  try {
+    const saved = window.localStorage.getItem(pendingCreateKey);
+    if (!saved) return undefined;
+    const value: unknown = JSON.parse(saved);
+    if (typeof value === 'object' && value !== null &&
+      'requestId' in value && typeof value.requestId === 'string' &&
+      'id' in value && typeof value.id === 'string' &&
+      'deviceId' in value && typeof value.deviceId === 'string') return value as PendingCreate;
+  } catch {
+    // Preserve an unreadable request ID rather than generating another task.
+  }
+  createStorageAvailable = false;
+  return undefined;
+}
+const pendingCreate = ref<PendingCreate | undefined>(readPendingCreate());
+const devices = ref<DeviceRecord[]>([]);
+const creating = ref(false);
+const createOpen = ref(false);
+const createError = ref<string>();
+const createNotice = ref<string>();
+const createDraft = reactive({
+  deviceId: pendingCreate.value?.deviceId ?? '', directory: '', name: '', description: '', command: '',
+  proxyMode: 'inherit' as Shortcut['proxyMode'], httpProxy: '', httpsProxy: '', allProxy: '', noProxy: '',
+  requiresConfirmation: true,
+});
+const onlineDevices = computed(() => devices.value.filter((item) => item.status === 'connected'));
 const shortcuts = ref<Shortcut[]>([]);
 const recentRuns = ref<ShortcutRun[]>([]);
 const loading = ref(false);
@@ -128,16 +163,29 @@ async function refresh(): Promise<void> {
   const version = ++refreshVersion;
   loading.value = true;
   refreshError.value = undefined;
-  const [catalog, history] = await Promise.allSettled([
+  const [catalog, history, machines] = await Promise.allSettled([
     request<Shortcut[]>('/api/shortcuts'),
     request<ShortcutRun[]>('/api/shortcuts/runs?limit=100'),
+    request<DeviceRecord[]>('/api/devices'),
   ]);
   if (current !== generation || version !== refreshVersion) return;
   const failures: string[] = [];
   if (catalog.status === 'fulfilled') {
     shortcuts.value = catalog.value;
+    if (pendingCreate.value && catalog.value.some((item) =>
+      item.id === pendingCreate.value?.id && item.deviceId === pendingCreate.value.deviceId)) {
+      clearPendingCreate();
+      createError.value = undefined;
+      createNotice.value = '任务已在目标 Mac 创建。';
+    }
   } else {
     failures.push(`读取快捷任务失败：${message(catalog.reason)}`);
+  }
+  if (machines.status === 'fulfilled') {
+    devices.value = machines.value;
+    if (!createDraft.deviceId && onlineDevices.value[0]) createDraft.deviceId = onlineDevices.value[0].id;
+  } else {
+    failures.push(`读取设备列表失败：${message(machines.reason)}`);
   }
   if (history.status === 'fulfilled') {
     const confirmed = pending.value && history.value.find((item) =>
@@ -192,6 +240,72 @@ function schedulePoll(): void {
   if (props.active) {
     pollTimer = window.setTimeout(() => void refresh(), activeRuns.value.length ? 2000 : 8000);
   }
+}
+
+function clearPendingCreate(): void {
+  try {
+    window.localStorage.removeItem(pendingCreateKey);
+    pendingCreate.value = undefined;
+  } catch {
+    createError.value = '无法清除创建请求 ID，请恢复浏览器存储后刷新。';
+  }
+}
+
+async function createShortcut(): Promise<void> {
+  if (creating.value || !createStorageAvailable) return;
+  if (!onlineDevices.value.some((item) => item.id === createDraft.deviceId)) {
+    createError.value = '请选择在线的目标 Mac。';
+    return;
+  }
+  if (!createDraft.directory.startsWith('/') || !createDraft.name.trim() || !createDraft.command.trim()) {
+    createError.value = '请填写名称、Mac 上的绝对目录和命令。';
+    return;
+  }
+  if (!window.confirm(`在 Mac「${createDraft.deviceId}」创建快捷任务“${createDraft.name}”？命令将保存并在该 Mac 的「${createDraft.directory}」执行。`)) return;
+  let submission = pendingCreate.value;
+  if (!submission) {
+    submission = { requestId: createUuid(), id: createUuid(), deviceId: createDraft.deviceId };
+    try {
+      window.localStorage.setItem(pendingCreateKey, JSON.stringify(submission));
+    } catch {
+      createStorageAvailable = false;
+      createError.value = '无法保存创建请求 ID，任务未提交。';
+      return;
+    }
+    pendingCreate.value = submission;
+  }
+  if (submission.deviceId !== createDraft.deviceId) {
+    createError.value = '待确认请求属于另一台 Mac；请切换回原设备。';
+    return;
+  }
+  creating.value = true;
+  createError.value = undefined;
+  createNotice.value = undefined;
+  try {
+    const { deviceId: _deviceId, ...definition } = createDraft;
+    await request<{ id: string }>(`/api/shortcuts/devices/${encodeURIComponent(submission.deviceId)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ ...definition, id: submission.id, requestId: submission.requestId }),
+    });
+    if (disposed) return;
+    clearPendingCreate();
+    createNotice.value = '任务已在目标 Mac 创建。';
+    createOpen.value = false;
+    createDraft.name = '';
+    createDraft.description = '';
+    createDraft.command = '';
+    void refresh();
+  } catch (reason) {
+    if (!disposed) createError.value = `创建结果未确认：${message(reason)}。请核实 Mac 任务列表，或保持字段不变用同一 ID 重试。`;
+  } finally {
+    if (!disposed) creating.value = false;
+  }
+}
+
+function abandonCreate(): void {
+  if (creating.value || !pendingCreate.value || !window.confirm('任务可能已经在 Mac 上创建。确定放弃追踪此请求？')) return;
+  clearPendingCreate();
+  createError.value = undefined;
 }
 
 async function start(shortcut: Shortcut): Promise<void> {
@@ -420,9 +534,43 @@ onBeforeUnmount(() => {
   <section class="shortcut-panel" aria-label="快捷任务">
     <div class="shortcut-heading">
       <div><small>SHORTCUTS</small><strong>快捷任务</strong></div>
-      <button type="button" :disabled="loading" @click="refresh">{{ loading ? '刷新中…' : '刷新' }}</button>
+      <div class="shortcut-heading-actions">
+        <button type="button" :disabled="loading" @click="refresh">{{ loading ? '刷新中…' : '刷新' }}</button>
+        <button type="button" @click="createOpen = !createOpen">{{ createOpen ? '收起' : '新建' }}</button>
+      </div>
     </div>
     <div class="shortcut-scroll">
+      <p v-if="createNotice" class="shortcut-input-notice" role="status">{{ createNotice }}</p>
+      <p v-if="createError" class="shortcut-error" role="alert">{{ createError }}</p>
+      <p v-if="!createStorageAvailable" class="shortcut-error" role="alert">无法读取待确认的创建请求；请恢复浏览器本地存储后重试。</p>
+      <div v-if="pendingCreate" class="shortcut-pending" role="status">
+        <strong>待确认创建 · {{ pendingCreate.deviceId }}</strong>
+        <span>请求 ID：{{ pendingCreate.requestId }}。核实目标 Mac；若需重试，请保持所有字段与上次提交完全相同。</span>
+        <div><button type="button" :disabled="creating" @click="createOpen = true">填写并重试</button>
+          <button type="button" :disabled="creating" @click="abandonCreate">放弃追踪</button></div>
+      </div>
+      <form v-if="createOpen" class="shortcut-create" @submit.prevent="createShortcut">
+        <h3>在 Mac 上新建任务</h3>
+        <label>目标机器<select v-model="createDraft.deviceId" required :disabled="creating">
+          <option value="" disabled>选择在线 Mac</option>
+          <option v-for="device in onlineDevices" :key="device.id" :value="device.id">{{ device.id }}</option>
+        </select></label>
+        <label>名称<input v-model="createDraft.name" required maxlength="128" :disabled="creating"></label>
+        <label>说明<input v-model="createDraft.description" maxlength="500" :disabled="creating"></label>
+        <label>Mac 本地工作目录<input v-model="createDraft.directory" required maxlength="4096" placeholder="/Users/you/project" :disabled="creating"></label>
+        <label>命令<textarea v-model="createDraft.command" required maxlength="16384" rows="5" spellcheck="false" :disabled="creating"></textarea></label>
+        <label>代理<select v-model="createDraft.proxyMode" :disabled="creating">
+          <option value="inherit">继承 Mac 设置</option><option value="disabled">禁用</option><option value="custom">自定义</option>
+        </select></label>
+        <template v-if="createDraft.proxyMode === 'custom'">
+          <label>HTTP Proxy<input v-model="createDraft.httpProxy" maxlength="2048" :disabled="creating"></label>
+          <label>HTTPS Proxy<input v-model="createDraft.httpsProxy" maxlength="2048" :disabled="creating"></label>
+          <label>ALL Proxy<input v-model="createDraft.allProxy" maxlength="2048" :disabled="creating"></label>
+          <label>NO_PROXY<input v-model="createDraft.noProxy" maxlength="2048" :disabled="creating"></label>
+        </template>
+        <label class="shortcut-create-check"><input v-model="createDraft.requiresConfirmation" type="checkbox" :disabled="creating"> 每次运行前确认</label>
+        <div class="shortcut-create-actions"><button type="submit" :disabled="creating || !onlineDevices.length || !createStorageAvailable">{{ creating ? '创建中…' : pendingCreate ? '用相同 ID 重试' : '创建任务' }}</button></div>
+      </form>
       <p v-if="error" class="shortcut-error" role="alert">{{ error }}</p>
       <p v-if="inputError" class="shortcut-error" role="alert">{{ inputError }}</p>
       <p v-if="inputNotice" class="shortcut-input-notice" role="status">{{ inputNotice }}</p>
@@ -479,7 +627,7 @@ onBeforeUnmount(() => {
       <section class="shortcut-available" aria-label="可用快捷任务">
         <h3>可用任务</h3>
         <p v-if="loading && !shortcuts.length" class="shortcut-empty">正在读取快捷任务…</p>
-        <p v-else-if="!shortcuts.length" class="shortcut-empty">暂无快捷任务。可在 Mac 上配置任务。</p>
+        <p v-else-if="!shortcuts.length" class="shortcut-empty">暂无快捷任务。</p>
         <p v-else-if="!availableShortcuts.length" class="shortcut-empty">Mac 当前离线，暂无可运行任务。</p>
         <div v-else class="shortcut-list">
           <article v-for="shortcut in availableShortcuts" :key="shortcut.id" class="shortcut-task">

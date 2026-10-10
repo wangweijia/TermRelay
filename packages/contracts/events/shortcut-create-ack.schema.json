@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/shortcut-create-ack.schema.json",
+  "title": "shortcut.create.ack payload",
+  "type": "object",
+  "required": ["requestId", "id", "status"],
+  "properties": {
+    "requestId": { "type": "string", "format": "uuid" },
+    "id": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["accepted", "rejected"] },
+    "message": { "type": "string", "maxLength": 2048 }
+  },
+  "additionalProperties": false
+}

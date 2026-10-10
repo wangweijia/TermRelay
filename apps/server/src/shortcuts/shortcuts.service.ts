@@ -6,8 +6,9 @@ import type {
   ShortcutCatalogPayload, ShortcutRunUpdatePayload, ShortcutRunStartPayload,
   ShortcutRunCancelPayload,
   ShortcutRunInputPayload, ShortcutRunInputAckPayload,
+  ShortcutCreatePayload, ShortcutCreateAckPayload,
 } from '@termrelay/contracts';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { DeviceConnectionRegistry } from '../realtime/device-connection.registry';
 import {
@@ -19,6 +20,7 @@ const RUNNING_WRITE_INTERVAL_MS = 250;
 const INPUT_ACK_TIMEOUT_MS = 10_000;
 const INPUT_RESULT_LIMIT = 512;
 const UNKNOWN_INPUT_DELIVERY = 'Device disconnected; shortcut input delivery is unknown. Check the run before trying again.';
+const UNKNOWN_CREATE_DELIVERY = '创建结果未知，请使用相同请求 ID 重试，并在 Mac 上核实任务。';
 
 interface InputRequest {
   runId: string;
@@ -38,6 +40,23 @@ interface CompletedInput extends InputRequest {
   result: { accepted: true } | Error;
 }
 
+interface CreateRequest {
+  deviceId: string;
+  id: string;
+  fingerprint: string;
+  socket: WebSocket;
+}
+
+interface PendingCreate extends CreateRequest {
+  promise: Promise<{ id: string }>;
+  settle: (error?: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
+interface CompletedCreate extends CreateRequest {
+  result: { id: string } | Error;
+}
+
 interface RunningWrites {
   deviceId: string;
   pending?: ShortcutRunUpdatePayload;
@@ -54,6 +73,8 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
   private readonly runningWrites = new Map<string, RunningWrites>();
   private readonly pendingInputs = new Map<string, PendingInput>();
   private readonly completedInputs = new Map<string, CompletedInput>();
+  private readonly pendingCreates = new Map<string, PendingCreate>();
+  private readonly completedCreates = new Map<string, CompletedCreate>();
 
   constructor(
     private readonly store: ShortcutsRepository,
@@ -64,6 +85,7 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
     this.unsubscribe = this.registry.subscribe((device) => {
       if (device.presence === 'offline') {
         this.failInputs(device.deviceId);
+        this.failCreates(device.deviceId);
         void this.store.failActive(device.deviceId, UNKNOWN_EXECUTION_RESULT);
       }
     });
@@ -79,6 +101,65 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
       pending.settle(new ConflictException(UNKNOWN_INPUT_DELIVERY));
     }
     this.completedInputs.clear();
+    for (const pending of this.pendingCreates.values()) pending.settle(new ConflictException(UNKNOWN_CREATE_DELIVERY));
+    this.completedCreates.clear();
+  }
+
+  create(deviceId: string, payload: ShortcutCreatePayload): Promise<{ id: string }> {
+    const requestId = payload.requestId.toLowerCase();
+    const fingerprint = createHash('sha256').update(JSON.stringify({ deviceId, ...payload, requestId })).digest('hex');
+    const prior = this.pendingCreates.get(requestId) ?? this.completedCreates.get(requestId);
+    if (prior) {
+      if (prior.deviceId !== deviceId || prior.id !== payload.id.toLowerCase() || prior.fingerprint !== fingerprint) {
+        throw new ConflictException('requestId belongs to another shortcut creation');
+      }
+      if ('promise' in prior) return prior.promise;
+      if (!(prior.result instanceof Error) || prior.result.message !== UNKNOWN_CREATE_DELIVERY) {
+        return prior.result instanceof Error ? Promise.reject(prior.result) : Promise.resolve(prior.result);
+      }
+      this.completedCreates.delete(requestId);
+    }
+    const socket = this.connected(deviceId);
+    if (!socket) throw new ServiceUnavailableException('shortcut device is offline');
+    let resolve!: (result: { id: string }) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<{ id: string }>((yes, no) => { resolve = yes; reject = no; });
+    const request: CreateRequest = { deviceId, id: payload.id.toLowerCase(), fingerprint, socket };
+    const settle = (error?: Error) => {
+      if (this.pendingCreates.get(requestId)?.promise !== promise) return;
+      clearTimeout(timer);
+      this.pendingCreates.delete(requestId);
+      const result = error ?? { id: request.id };
+      this.completedCreates.set(requestId, { ...request, result });
+      if (this.completedCreates.size > 512) this.completedCreates.delete(this.completedCreates.keys().next().value!);
+      if (error) reject(error);
+      else resolve(result as { id: string });
+    };
+    const timer = setTimeout(() => settle(new GatewayTimeoutException(UNKNOWN_CREATE_DELIVERY)), INPUT_ACK_TIMEOUT_MS);
+    this.pendingCreates.set(requestId, { ...request, promise, settle, timer });
+    try {
+      this.send(socket, deviceId, 'shortcut.create', payload, (error) => {
+        if (error) settle(new ConflictException(UNKNOWN_CREATE_DELIVERY));
+      });
+    } catch {
+      settle(new ConflictException(UNKNOWN_CREATE_DELIVERY));
+    }
+    return promise;
+  }
+
+  acknowledgeCreate(socket: WebSocket, deviceId: string, payload: ShortcutCreateAckPayload): boolean {
+    const requestId = payload.requestId.toLowerCase();
+    const pending = this.pendingCreates.get(requestId);
+    const completed = this.completedCreates.get(requestId);
+    const request = pending ?? completed;
+    if (!request || request.deviceId !== deviceId || request.id !== payload.id.toLowerCase()
+      || request.socket !== socket || this.registry.getClient(deviceId) !== socket
+      || socket.readyState !== WebSocket.OPEN) return false;
+    const result = payload.status === 'rejected'
+      ? new ConflictException(payload.message || 'shortcut creation rejected by device') : { id: request.id };
+    if (pending) pending.settle(result instanceof Error ? result : undefined);
+    else if (completed?.result instanceof GatewayTimeoutException) completed.result = result;
+    return true;
   }
 
   catalog(deviceId: string, payload: ShortcutCatalogPayload): Promise<boolean> {
@@ -311,6 +392,7 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
 
   async disconnected(deviceId: string): Promise<void> {
     this.failInputs(deviceId);
+    this.failCreates(deviceId);
     for (const [id, state] of this.runningWrites) {
       if (state.deviceId === deviceId) {
         if (state.timer) clearTimeout(state.timer);
@@ -326,6 +408,12 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private failCreates(deviceId: string): void {
+    for (const pending of this.pendingCreates.values()) {
+      if (pending.deviceId === deviceId) pending.settle(new ConflictException(UNKNOWN_CREATE_DELIVERY));
+    }
+  }
+
   private connected(deviceId: string): WebSocket | undefined {
     const socket = this.registry.getClient(deviceId);
     return socket?.readyState === WebSocket.OPEN ? socket : undefined;
@@ -333,8 +421,8 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
 
   private send(
     socket: WebSocket, deviceId: string,
-    type: 'shortcut.run.start' | 'shortcut.run.cancel' | 'shortcut.run.input',
-    payload: ShortcutRunStartPayload | ShortcutRunCancelPayload | ShortcutRunInputPayload,
+    type: 'shortcut.run.start' | 'shortcut.run.cancel' | 'shortcut.run.input' | 'shortcut.create',
+    payload: ShortcutRunStartPayload | ShortcutRunCancelPayload | ShortcutRunInputPayload | ShortcutCreatePayload,
     onSent?: (error?: Error) => void,
   ): void {
     if (socket.readyState !== WebSocket.OPEN) throw new Error('device offline');

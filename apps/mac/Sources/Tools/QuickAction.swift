@@ -124,3 +124,8 @@ enum QuickActionInputResult: Sendable {
     case accepted
     case rejected(String)
 }
+
+struct QuickActionCreateRequest: Sendable {
+    let requestID: UUID
+    let action: QuickAction
+}

@@ -534,6 +534,16 @@ p { color: #9aa8b7; line-height: 1.6; margin: 0; }
 .shortcut-heading small { color: #728191; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .1em; }
 .shortcut-heading button, .shortcut-task button, .shortcut-result button { padding: 8px 12px; border: 1px solid #327453; border-radius: 7px; color: #a8f0c8; background: #173025; cursor: pointer; }
 .shortcut-heading button:disabled, .shortcut-task button:disabled, .shortcut-result button:disabled { opacity: .45; cursor: not-allowed; }
+.shortcut-heading-actions { display: flex; gap: 8px; }
+.shortcut-create { display: grid; gap: 10px; margin-bottom: 18px; padding: 14px; border: 1px solid #303d49; border-radius: 7px; background: #151e27; }
+.shortcut-create h3 { margin: 0 0 4px; font-size: 14px; }
+.shortcut-create label { display: grid; gap: 5px; color: #aebdc9; font-size: 12px; }
+.shortcut-create input:not([type="checkbox"]), .shortcut-create select, .shortcut-create textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid #394957; border-radius: 5px; color: #e0e9f1; background: #10171e; font: inherit; }
+.shortcut-create textarea { resize: vertical; font-family: ui-monospace, monospace; }
+.shortcut-create .shortcut-create-check { display: flex; align-items: center; gap: 8px; }
+.shortcut-create-actions { display: flex; justify-content: flex-end; }
+.shortcut-create-actions button { padding: 8px 12px; border: 1px solid #327453; border-radius: 6px; color: #a8f0c8; background: #173025; cursor: pointer; }
+.shortcut-create-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .shortcut-dialog .shortcut-heading { padding-right: 56px; }
 .shortcut-scroll { flex: 1; min-height: 0; padding: 14px; overflow-y: auto; overscroll-behavior: contain; }
 .shortcut-empty { padding: 20px 4px; text-align: center; }

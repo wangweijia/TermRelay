@@ -16,6 +16,7 @@ import type {
   ShortcutCatalogPayload,
   ShortcutRunUpdatePayload,
   ShortcutRunInputAckPayload,
+  ShortcutCreateAckPayload,
   FilePreviewResultPayload,
 } from '@termrelay/contracts';
 import {
@@ -35,6 +36,7 @@ import {
   shortcutCatalogSchema,
   shortcutRunUpdateSchema,
   shortcutRunInputAckSchema,
+  shortcutCreateAckSchema,
   filePreviewResultSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
@@ -58,6 +60,7 @@ export type ValidClientMessage =
   | { type: 'shortcut.catalog'; envelope: Envelope<ShortcutCatalogPayload> }
   | { type: 'shortcut.run.update'; envelope: Envelope<ShortcutRunUpdatePayload> }
   | { type: 'shortcut.run.input.ack'; envelope: Envelope<ShortcutRunInputAckPayload> }
+  | { type: 'shortcut.create.ack'; envelope: Envelope<ShortcutCreateAckPayload> }
   | { type: 'file.preview.result'; envelope: Envelope<FilePreviewResultPayload> };
 
 export type ProtocolValidationResult =
@@ -101,6 +104,7 @@ export class ProtocolValidator {
       ['shortcut.catalog', ajv.compile(shortcutCatalogSchema)],
       ['shortcut.run.update', ajv.compile(shortcutRunUpdateSchema)],
       ['shortcut.run.input.ack', ajv.compile(shortcutRunInputAckSchema)],
+      ['shortcut.create.ack', ajv.compile(shortcutCreateAckSchema)],
       ['file.preview.result', ajv.compile(filePreviewResultSchema)],
     ]);
   }
@@ -152,7 +156,7 @@ export class ProtocolValidator {
         return invalidContext(envelope, 'file.preview.result requires sessionId and must not include seq or commandId.');
       }
     } else if (envelope.type === 'shortcut.catalog' || envelope.type === 'shortcut.run.update'
-      || envelope.type === 'shortcut.run.input.ack') {
+      || envelope.type === 'shortcut.run.input.ack' || envelope.type === 'shortcut.create.ack') {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, `${envelope.type} must not include sessionId, seq, or commandId.`);
       }
@@ -325,6 +329,8 @@ function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
       return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunUpdatePayload> } };
     case 'shortcut.run.input.ack':
       return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunInputAckPayload> } };
+    case 'shortcut.create.ack':
+      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutCreateAckPayload> } };
     case 'file.preview.result':
       return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<FilePreviewResultPayload> } };
     default:

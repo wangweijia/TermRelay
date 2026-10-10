@@ -1,8 +1,13 @@
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import { ShortcutsService } from './shortcuts.service';
+import { shortcutCreateSchema, type ShortcutCreatePayload } from '@termrelay/contracts';
+import Ajv2020 from 'ajv/dist/2020';
 import type { ShortcutRecord, ShortcutRunRecord } from './shortcuts.repository';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const ajv = new Ajv2020();
+ajv.addFormat('uuid', UUID);
+const validateCreate = ajv.compile(shortcutCreateSchema);
 
 @Controller('api/shortcuts')
 export class ShortcutsController {
@@ -11,6 +16,14 @@ export class ShortcutsController {
   @Get()
   list(): Promise<ShortcutRecord[]> {
     return this.shortcuts.list();
+  }
+
+  @Post('devices/:deviceId')
+  create(@Param('deviceId') deviceId: string, @Body() body: unknown): Promise<{ id: string }> {
+    if (!UUID.test(deviceId) || !validateCreate(body)) {
+      throw new BadRequestException('invalid device ID or shortcut creation payload');
+    }
+    return this.shortcuts.create(deviceId, body as ShortcutCreatePayload);
   }
 
   @Get('runs')

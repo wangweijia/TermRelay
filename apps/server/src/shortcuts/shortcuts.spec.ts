@@ -77,6 +77,45 @@ test('registered device publishes a full metadata-only catalog; invalid and fore
   f.service.onModuleDestroy();
 });
 
+test('creation routes to one registered Mac and only its ACK can finish a deduplicated request', async () => {
+  const f = setup();
+  const deviceId = randomUUID();
+  await register(f, deviceId);
+  const payload = {
+    requestId: randomUUID(), id: randomUUID(), name: 'Build', description: '',
+    directory: '/Users/test/project', command: 'printf ok', proxyMode: 'disabled' as const,
+    requiresConfirmation: true,
+  };
+  await assert.rejects(async () => f.controller.create(randomUUID(), payload), { status: 503 });
+  for (const invalid of [{ ...payload, command: '' }, { ...payload, unexpected: 'secret' },
+    { ...payload, directory: '' }]) {
+    await assert.rejects(async () => f.controller.create(deviceId, invalid), { status: 400 });
+  }
+  const first = f.controller.create(deviceId, payload);
+  const repeated = f.controller.create(deviceId, payload);
+  assert.equal(f.socket.messages.filter((item) => item.data.type === 'shortcut.create').length, 1);
+  assert.deepEqual(f.socket.messages.at(-1)?.data.payload, payload);
+  await assert.rejects(async () => f.controller.create(deviceId, { ...payload, command: 'different' }), { status: 409 });
+  const foreign = new FakeSocket();
+  f.gateway.handleConnection(foreign.asSocket());
+  await f.gateway.handleMessage(foreign.asSocket(), message(randomUUID(), 'device.register', {
+    name: 'Other', appVersion: '1.0', platform: 'macOS', tools: [],
+  }));
+  await f.gateway.handleMessage(foreign.asSocket(), message(deviceId, 'shortcut.create.ack', {
+    requestId: payload.requestId, id: payload.id, status: 'accepted',
+  }));
+  assert.equal(foreign.messages.at(-1)?.data.payload.code, 'unknown_device');
+  await f.gateway.handleMessage(f.client, message(deviceId, 'shortcut.create.ack', {
+    requestId: payload.requestId, id: payload.id, status: 'accepted',
+  }));
+  assert.deepEqual(await first, { id: payload.id });
+  assert.deepEqual(await repeated, { id: payload.id });
+  assert.deepEqual(await f.controller.create(deviceId, payload), { id: payload.id });
+  assert.equal(f.socket.messages.filter((item) => item.data.type === 'shortcut.create').length, 1);
+  assert.deepEqual(await f.controller.list(), []);
+  f.service.onModuleDestroy();
+});
+
 test('start dispatches revision once, enforces run ID idempotency and one active run per shortcut', async () => {
   const f = setup();
   await register(f);

@@ -85,6 +85,34 @@ final class RemoteClientTests: XCTestCase {
         XCTAssertNil(wrongChannel)
     }
 
+    func testDecodesShortcutCreationWithoutSessionOrCommandContext() async {
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
+                                  commandHandler: { _ in .completed })
+        let requestID = UUID()
+        let shortcutID = UUID()
+        func envelope(directory: String, commandID: UUID? = nil) -> IncomingRelayEnvelope {
+            IncomingRelayEnvelope(
+                type: "shortcut.create", protocolVersion: "2", messageId: UUID(),
+                deviceId: "device", sessionId: nil, commandId: commandID,
+                payload: .object([
+                    "requestId": .string(requestID.uuidString), "id": .string(shortcutID.uuidString),
+                    "name": .string("Build"), "description": .string(""),
+                    "directory": .string(directory), "command": .string("true"),
+                    "proxyMode": .string("custom"), "httpsProxy": .string("http://127.0.0.1:7890"),
+                    "requiresConfirmation": .bool(true),
+                ])
+            )
+        }
+        let decoded = await client.decodeQuickActionCreate(envelope(directory: "/Users/test/project"))
+        XCTAssertEqual(decoded?.requestID, requestID)
+        XCTAssertEqual(decoded?.action.id, shortcutID)
+        XCTAssertEqual(decoded?.action.proxy.httpsProxy, "http://127.0.0.1:7890")
+        let relative = await client.decodeQuickActionCreate(envelope(directory: "relative/path"))
+        let withCommand = await client.decodeQuickActionCreate(envelope(directory: "/tmp", commandID: UUID()))
+        XCTAssertNil(relative)
+        XCTAssertNil(withCommand)
+    }
+
     func testPairingAPIURLUsesTheWebSocketOrigin() throws {
         let websocketURL = try XCTUnwrap(URL(string: "wss://relay.example.com/ws/client-public?ignored=1"))
         let apiURL = try ClientPairingClient.apiURL(

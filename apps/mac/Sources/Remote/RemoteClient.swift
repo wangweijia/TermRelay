@@ -7,6 +7,7 @@ actor RemoteClient {
     typealias AuthorizationInvalidatedHandler = @Sendable () -> Void
     typealias QuickActionHandler = @Sendable (QuickActionCommand) async -> Void
     typealias QuickActionInputHandler = @Sendable (QuickActionInputRequest) async -> QuickActionInputResult
+    typealias QuickActionCreateHandler = @Sendable (QuickActionCreateRequest) async -> QuickActionInputResult
     typealias FilePreviewWorkspaceHandler = @Sendable (UUID, String) async -> URL?
 
     private let deviceID: UUID
@@ -16,6 +17,7 @@ actor RemoteClient {
     private let authorizationInvalidatedHandler: AuthorizationInvalidatedHandler
     private let quickActionHandler: QuickActionHandler
     private let quickActionInputHandler: QuickActionInputHandler
+    private let quickActionCreateHandler: QuickActionCreateHandler
     private let filePreviewWorkspaceHandler: FilePreviewWorkspaceHandler
     private var serverURL: URL?
     private var credential: String?
@@ -53,6 +55,7 @@ actor RemoteClient {
         authorizationInvalidatedHandler: @escaping AuthorizationInvalidatedHandler = {},
         quickActionHandler: @escaping QuickActionHandler = { _ in },
         quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
+        quickActionCreateHandler: @escaping QuickActionCreateHandler = { _ in .rejected("Mac App 不可用") },
         filePreviewWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
         outboxDirectory: URL? = nil
     ) {
@@ -63,6 +66,7 @@ actor RemoteClient {
         self.authorizationInvalidatedHandler = authorizationInvalidatedHandler
         self.quickActionHandler = quickActionHandler
         self.quickActionInputHandler = quickActionInputHandler
+        self.quickActionCreateHandler = quickActionCreateHandler
         self.filePreviewWorkspaceHandler = filePreviewWorkspaceHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
@@ -467,6 +471,13 @@ actor RemoteClient {
             }
             return
         }
+        if registered, envelope.type == "shortcut.create" {
+            if let request = decodeQuickActionCreate(envelope) {
+                let result = await quickActionCreateHandler(request)
+                await acknowledgeQuickActionCreate(request, result: result)
+            }
+            return
+        }
         if envelope.type == "protocol.error" {
             let message = envelope.payload.object?["message"]?.string ?? "Server 拒绝了消息"
             if
@@ -553,6 +564,49 @@ actor RemoteClient {
               let answer = payload["answer"]?.string.flatMap(QuickActionAnswer.init(rawValue:))
         else { return nil }
         return QuickActionInputRequest(runID: runID, commandID: commandID, answer: answer)
+    }
+
+    func decodeQuickActionCreate(_ envelope: IncomingRelayEnvelope) -> QuickActionCreateRequest? {
+        guard envelope.sessionId == nil, envelope.commandId == nil,
+              let payload = envelope.payload.object,
+              let requestID = payload["requestId"]?.string.flatMap(UUID.init(uuidString:)),
+              let id = payload["id"]?.string.flatMap(UUID.init(uuidString:)),
+              let name = payload["name"]?.string,
+              let description = payload["description"]?.string,
+              let directory = payload["directory"]?.string, directory.hasPrefix("/"),
+              let command = payload["command"]?.string,
+              let mode = payload["proxyMode"]?.string.flatMap(ToolProxyMode.init(rawValue:)),
+              let requiresConfirmation = payload["requiresConfirmation"]?.bool else { return nil }
+        let proxy = ToolProxyConfiguration(
+            mode: mode, httpProxy: payload["httpProxy"]?.string ?? "",
+            httpsProxy: payload["httpsProxy"]?.string ?? "",
+            allProxy: payload["allProxy"]?.string ?? "",
+            noProxy: payload["noProxy"]?.string ?? "localhost,127.0.0.1,::1"
+        )
+        return QuickActionCreateRequest(
+            requestID: requestID,
+            action: QuickAction(id: id, revision: 0, name: name, description: description,
+                                directory: URL(fileURLWithPath: directory).standardizedFileURL,
+                                command: command, proxy: proxy,
+                                requiresConfirmation: requiresConfirmation)
+        )
+    }
+
+    private func acknowledgeQuickActionCreate(
+        _ request: QuickActionCreateRequest, result: QuickActionInputResult
+    ) async {
+        var payload: [String: JSONValue] = [
+            "requestId": .string(request.requestID.uuidString.lowercased()),
+            "id": .string(request.action.id.uuidString.lowercased()),
+        ]
+        switch result {
+        case .accepted:
+            payload["status"] = .string("accepted")
+        case .rejected(let message):
+            payload["status"] = .string("rejected")
+            payload["message"] = .string(String(message.prefix(2048)))
+        }
+        _ = await send(type: "shortcut.create.ack", payload: payload)
     }
 
     private func acknowledgeQuickActionInput(

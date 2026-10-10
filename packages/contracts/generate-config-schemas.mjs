@@ -32,6 +32,8 @@ const shortcutSchemas = [
   ['shortcutRunCancelSchema', 'shortcut-run-cancel'],
   ['shortcutRunInputSchema', 'shortcut-run-input'],
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
+  ['shortcutCreateSchema', 'shortcut-create'],
+  ['shortcutCreateAckSchema', 'shortcut-create-ack'],
 ];
 const filePreviewSchemas = [
   ['filePreviewRequestSchema', 'commands/file-preview-request'],
@@ -91,6 +93,28 @@ export interface ShortcutRunInputPayload {
 export interface ShortcutRunInputAckPayload {
   runId: string;
   commandId: string;
+  status: 'accepted' | 'rejected';
+  message?: string;
+}
+
+export interface ShortcutCreatePayload {
+  requestId: string;
+  id: string;
+  name: string;
+  description: string;
+  directory: string;
+  command: string;
+  proxyMode: 'inherit' | 'disabled' | 'custom';
+  httpProxy?: string;
+  httpsProxy?: string;
+  allProxy?: string;
+  noProxy?: string;
+  requiresConfirmation: boolean;
+}
+
+export interface ShortcutCreateAckPayload {
+  requestId: string;
+  id: string;
   status: 'accepted' | 'rejected';
   message?: string;
 }

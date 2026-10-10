@@ -65,6 +65,34 @@ final class QuickActionTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteCreateIsIdempotentAndCannotOverwriteExistingAction() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termrelay-remote-create-\(UUID())")
+        let suiteName = "QuickActionCreateTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let store = QuickActionStore(directory: directory)
+        let model = AppModel(defaults: defaults, quickActionStore: store)
+        var action = QuickAction.draft(directory: directory)
+        action.name = "Remote build"
+        action.command = "true"
+        let request = QuickActionCreateRequest(requestID: UUID(), action: action)
+        guard case .accepted = model.handleQuickActionCreate(request) else { return XCTFail("Create rejected") }
+        guard case .accepted = model.handleQuickActionCreate(request) else { return XCTFail("Retry rejected") }
+        XCTAssertEqual(try store.load().count, 1)
+        XCTAssertEqual(model.quickActions.first?.revision, 1)
+        action.command = "false"
+        guard case .rejected = model.handleQuickActionCreate(
+            QuickActionCreateRequest(requestID: UUID(), action: action)
+        ) else { return XCTFail("Existing shortcut overwritten") }
+        XCTAssertEqual(try store.load().first?.command, "true")
+    }
+
+    @MainActor
     func testRunnerUsesPerRunProxyAndReportsExitCode() async throws {
         let directory = FileManager.default.temporaryDirectory
         let runner = QuickActionRunner { _ in }
