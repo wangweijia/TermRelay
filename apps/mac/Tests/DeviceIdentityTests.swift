@@ -3,6 +3,53 @@ import XCTest
 @testable import TermRelay
 
 final class DeviceIdentityTests: XCTestCase {
+    func testPackagedAppUsesStandardDefaultsWithoutCreatingForbiddenSuite() throws {
+        let suite = "TermRelayTests.packagedPreferences.\(UUID())"
+        let standard = try XCTUnwrap(UserDefaults(suiteName:suite))
+        defer { standard.removePersistentDomain(forName:suite) }
+        let originalID = UUID()
+        standard.set(originalID.uuidString,forKey:"deviceID")
+        standard.set(true,forKey:"aiServiceEnabled")
+        var suiteRequested = false
+        let result = DeviceIdentity.resolvePreferences(bundleIdentifier:"com.termrelay.mac",standard:standard,makeSuite:{ _ in
+            suiteRequested = true
+            return nil
+        })
+        XCTAssertFalse(suiteRequested)
+        XCTAssertTrue(result === standard)
+        XCTAssertTrue(result.bool(forKey:"aiServiceEnabled"))
+        XCTAssertEqual(DeviceIdentity.load(defaults:result,hardwareID:"same-mac"),originalID)
+    }
+
+    func testUnavailableSuiteFallsBackWithoutChangingDeviceID() throws {
+        let suite = "TermRelayTests.unavailablePreferences.\(UUID())"
+        let standard = try XCTUnwrap(UserDefaults(suiteName:suite))
+        defer { standard.removePersistentDomain(forName:suite) }
+        let originalID = UUID()
+        standard.set(originalID.uuidString,forKey:"deviceID")
+        let result = DeviceIdentity.resolvePreferences(bundleIdentifier:nil,standard:standard,makeSuite:{ _ in nil })
+        XCTAssertTrue(result === standard)
+        XCTAssertEqual(DeviceIdentity.load(defaults:result,hardwareID:"same-mac"),originalID)
+    }
+
+    func testDevelopmentLaunchMigratesPreferencesWithoutOverwritingFixedIdentity() throws {
+        let suites = ["TermRelayTests.oldPreferences.\(UUID())","TermRelayTests.fixedPreferences.\(UUID())"]
+        let standard = try XCTUnwrap(UserDefaults(suiteName:suites[0]))
+        let fixed = try XCTUnwrap(UserDefaults(suiteName:suites[1]))
+        defer { standard.removePersistentDomain(forName:suites[0]); fixed.removePersistentDomain(forName:suites[1]) }
+        let originalID = UUID()
+        fixed.set(originalID.uuidString,forKey:"deviceID")
+        standard.set(UUID().uuidString,forKey:"deviceID")
+        standard.set("ws://example.test:3007/ws/client",forKey:"serverURL")
+        let result = DeviceIdentity.resolvePreferences(bundleIdentifier:"swiftpm.executable",standard:standard,makeSuite:{ name in
+            XCTAssertEqual(name,"com.termrelay.mac")
+            return fixed
+        })
+        XCTAssertTrue(result === fixed)
+        XCTAssertEqual(result.string(forKey:"serverURL"),standard.string(forKey:"serverURL"))
+        XCTAssertEqual(DeviceIdentity.load(defaults:result,hardwareID:nil),originalID)
+    }
+
     func testStoredIdentitySurvivesRecreatedPreferencesAndChangingHardwareProbe() throws {
         let suite = "TermRelayTests.identity.\(UUID())"
         let first = try XCTUnwrap(UserDefaults(suiteName:suite))

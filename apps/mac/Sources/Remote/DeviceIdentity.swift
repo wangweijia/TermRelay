@@ -3,12 +3,23 @@ import CryptoKit
 import IOKit
 
 enum DeviceIdentity {
+    private static let preferenceDomain = "com.termrelay.mac"
     // A fixed domain is shared by SwiftPM launches and packaged App launches.
     static var preferences: UserDefaults {
-        let fixed = UserDefaults(suiteName:"com.termrelay.mac")!
+        resolvePreferences(bundleIdentifier:Bundle.main.bundleIdentifier,standard:.standard)
+    }
+
+    static func resolvePreferences(
+        bundleIdentifier: String?,
+        standard: UserDefaults,
+        makeSuite: (String) -> UserDefaults? = { UserDefaults(suiteName:$0) }
+    ) -> UserDefaults {
+        // Foundation forbids init(suiteName:) with the current app's bundle ID.
+        // In the packaged app, .standard already reads/writes our fixed domain.
+        let fixed = bundleIdentifier == preferenceDomain ? standard : (makeSuite(preferenceDomain) ?? standard)
         if !fixed.bool(forKey:"fixedPreferencesMigrated") {
             for key in ["deviceID","serverURL","workspaceIDs","codexInteractionMode","acpSendShortcut","toolExecutablePaths","toolProxyConfigurations"] {
-                if fixed.object(forKey:key) == nil, let value = UserDefaults.standard.object(forKey:key) { fixed.set(value,forKey:key) }
+                if fixed.object(forKey:key) == nil, let value = standard.object(forKey:key) { fixed.set(value,forKey:key) }
             }
             fixed.set(true,forKey:"fixedPreferencesMigrated")
             fixed.synchronize()
