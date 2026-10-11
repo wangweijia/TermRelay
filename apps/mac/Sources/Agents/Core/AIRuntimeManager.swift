@@ -182,14 +182,30 @@ actor AIRuntimeManager {
         if case .failed = event.payload { await eventHandler(event); await close(id); return }
         if case .turnStarted(let providerID) = event.payload { e.providerTurnID = providerID }
         if let turn = event.correlation.turnID, let active = e.providerTurnID, turn != active { return }
+        if case .approvalRequested(let request) = event.payload {
+            // Project API calls have no interactive approval owner. Resolve in the
+            // actor that owns their coordinator; the OS sandbox still applies.
+            entries[id] = e
+            await eventHandler(event)
+            do {
+                guard let decision = [ApprovalDecision.allowOnce, .allowSession, .allowPolicy]
+                    .first(where: request.availableDecisions.contains) else {
+                    throw AgentError.unsupportedCapability("approval has no allow decision")
+                }
+                try await e.coordinator.send(.resolveApproval(ApprovalResolution(
+                    approvalID: request.approvalID, turnID: request.turnID, decision: decision
+                )))
+            } catch {
+                guard entries[id] != nil else { return }
+                await report(AiUpdate(id: id, turnId: e.turn?.id, status: "failed",
+                                     errorCode: "automatic_approval_failed", waitingFor: "none"))
+                await close(id)
+            }
+            return
+        }
         var waiting: String?
         switch event.payload {
         case .assistantMessageCompleted(let text): e.text = text
-        case .approvalRequested(let request) where e.configuration.directory == nil:
-            entries[id] = e
-            _ = try? await e.coordinator.send(.resolveApproval(ApprovalResolution(approvalID:request.approvalID,turnID:request.turnID,decision:.deny)))
-            return
-        case .approvalRequested: waiting = "approval"
         case .userInputRequested: waiting = "input"
         case .approvalResolved, .userInputResolved: waiting = "none"
         default: break

@@ -67,6 +67,64 @@ final class AIRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(updates.contains(where:{$0.id == f.create.id && $0.turnId == turn.id && $0.status == "failed"}))
     }
 
+    func testProjectApprovalsAutomaticallyAllowAndContinueWithAndWithoutWorkspace() async throws {
+        for directory in [String?.none, FileManager.default.temporaryDirectory.path] {
+            let f = await fixture(lifecycle: "oneShot", directory: directory)
+            await f.manager.handle(type: "ai.session.create", payload: try payload(f.create))
+            await f.runtime.requestApproval(id: "first")
+            try await Task.sleep(for: .milliseconds(50))
+            await f.runtime.requestApproval(id: "second", decisions: [.allowSession, .deny])
+            try await Task.sleep(for: .milliseconds(50))
+            let resolutions = await f.runtime.resolutions
+            XCTAssertEqual(resolutions.map(\.approvalID), ["first", "second"])
+            XCTAssertEqual(resolutions.map(\.decision), [.allowOnce, .allowSession])
+            await f.runtime.complete(text: "approved work completed")
+            try await Task.sleep(for: .milliseconds(50))
+            let updates = await f.sink.updates
+            XCTAssertTrue(updates.contains(where: { $0.status == "succeeded" && $0.text == "approved work completed" }))
+            XCTAssertFalse(updates.contains(where: { $0.waitingFor == "approval" }))
+            await f.manager.disconnected()
+        }
+    }
+
+    func testAutomaticApprovalFailureEndsTurnInsteadOfLeavingItWaiting() async throws {
+        let f = await fixture(lifecycle: "oneShot")
+        await f.manager.handle(type: "ai.session.create", payload: try payload(f.create))
+        await f.runtime.setApprovalFailure()
+        await f.runtime.requestApproval(id: "failed")
+        try await Task.sleep(for: .milliseconds(50))
+        let updates = await f.sink.updates
+        XCTAssertTrue(updates.contains(where: {
+            $0.turnId == f.create.turn?.id && $0.status == "failed" && $0.errorCode == "automatic_approval_failed"
+        }))
+        let stopped = await f.runtime.stopCount
+        XCTAssertEqual(stopped, 1)
+        await f.manager.disconnected()
+    }
+
+    @MainActor
+    func testExternalSessionShowsAutomaticApprovalAndReturnsToRunningAfterResolution() {
+        let id = UUID()
+        let runtime = TestAIRuntime(id: id)
+        var approvalEvents = 0
+        let session = LocalStructuredAgentSession(id: id, directory: FileManager.default.temporaryDirectory,
+            adapter: TestAIAdapter(runtime: runtime), eventHandler: { _ in },
+            approvalHandler: { event in if case .approvalRequested = event.payload { approvalEvents += 1 } },
+            stateHandler: { _, _ in }, externalActionHandler: { _ in .completed })
+        XCTAssertTrue(session.autoApproveEnabled)
+        let request = ApprovalRequest(approvalID: "approval", turnID: "turn", itemID: nil,
+            kind: "command", risk: .low, title: "test", detail: nil,
+            availableDecisions: [.allowOnce, .deny], expiresAt: Date().addingTimeInterval(60))
+        session.observeExternal(ToolEvent(sessionID: id, sequence: 1, occurredAt: Date(),
+            correlation: AgentCorrelation(turnID: "turn", itemID: nil, approvalID: "approval"), payload: .approvalRequested(request)))
+        XCTAssertEqual(session.state, .awaitingApproval)
+        XCTAssertEqual(approvalEvents, 0)
+        session.observeExternal(ToolEvent(sessionID: id, sequence: 2, occurredAt: Date(),
+            correlation: AgentCorrelation(turnID: "turn", itemID: nil, approvalID: "approval"),
+            payload: .approvalResolved(approvalID: "approval", turnID: "turn", decision: .allowOnce)))
+        XCTAssertEqual(session.state, .running)
+    }
+
     func testFactsOnlySandboxDeniesForkExecAndWorkspaceWritesWhenExplicitlyEnabled() throws {
         guard ProcessInfo.processInfo.environment["TERMRELAY_RUN_AI_SANDBOX_PROBE"] == "1" else { throw XCTSkip("Opt-in OS sandbox probe; no model requests") }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("termrelay-sandbox-test-\(UUID())")
@@ -141,12 +199,12 @@ final class AIRuntimeManagerTests: XCTestCase {
         } catch { await coordinator.stop(); throw error }
     }
 
-    private func fixture(lifecycle: String) async -> AIFixture {
+    private func fixture(lifecycle: String, directory: String? = nil) async -> AIFixture {
         let id = UUID()
         let runtime = TestAIRuntime(id:id)
         let sink = AISink()
         let manager = AIRuntimeManager(factory:{_,_,_ in AILaunchContext(adapter:TestAIAdapter(runtime:runtime),environment:[:])},announce:{_,_,_ in},eventHandler:{_ in},updateHandler:{u in await sink.record(u)})
-        try! await manager.configure([AIExecutionConfiguration(provider:"codex",capacity:4,directory:nil)])
+        try! await manager.configure([AIExecutionConfiguration(provider:"codex",capacity:4,directory:directory)])
         await manager.connected()
         let turn = AiTurn(id:id.uuidString.lowercased(),sessionId:id.uuidString.lowercased(),input:AiInput(instructions:"Analyze"),output:AiOutput(kind:"json"),deadlineAt:deadline())
         let create = AiCreate(id:id.uuidString.lowercased(),projectId:"invest",provider:"codex",lifecycle:lifecycle,displayName:"test",turn:lifecycle == "oneShot" ? turn:nil)
@@ -173,12 +231,25 @@ private actor TestAIRuntime: StructuredAgentRuntime {
     private var active = ""
     var turns:[String] = []
     var stopCount = 0
+    var resolutions: [ApprovalResolution] = []
+    private var approvalFailure = false
     init(id:UUID) { self.id = id; let s = AsyncStream<ToolEvent>.makeStream(); events = s.stream; continuation = s.continuation }
     func start() async throws {}
     func createSession(_ request:AgentSessionRequest) async throws -> AgentSessionReference { AgentSessionReference(providerID:.codex,opaqueID:id.uuidString) }
     func send(_ action:ToolAction) async throws {
         if case .startTurn(let input,let key) = action { turns.append(input.text); active = key.uuidString; emit(.turnStarted(turnID:active)) }
+        if case .resolveApproval(let resolution) = action {
+            if approvalFailure { throw AgentError.protocolFailure("approval transport failed") }
+            resolutions.append(resolution)
+            emit(.approvalResolved(approvalID: resolution.approvalID, turnID: resolution.turnID, decision: resolution.decision))
+        }
         if case .interrupt = action { emit(.turnCompleted(turnID:active,status:.interrupted)) }
+    }
+    func setApprovalFailure() { approvalFailure = true }
+    func requestApproval(id: String, decisions: [ApprovalDecision] = [.allowOnce, .deny]) {
+        emit(.approvalRequested(ApprovalRequest(approvalID: id, turnID: active, itemID: nil,
+            kind: "command", risk: .low, title: "test", detail: nil,
+            availableDecisions: decisions, expiresAt: Date().addingTimeInterval(60))))
     }
     func complete(text:String) { emit(.reasoningDelta(text:"not a final answer")); emit(.assistantMessageCompleted(text:text)); emit(.turnCompleted(turnID:active,status:.completed)) }
     func stop() async { stopCount += 1; continuation.finish() }

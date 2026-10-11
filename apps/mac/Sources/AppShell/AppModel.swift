@@ -249,6 +249,7 @@ final class AppModel: ObservableObject {
         let workspace = workspaceID(for:directory)
         await remoteClient.publishWorkspace(id:workspace,directory:directory)
         await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId,lifecycle:create.lifecycle)
+        await remoteClient.publishAutoApprove(sessionID: id, enabled: true)
     }
     private func observeAI(_ event: ToolEvent) async {
         structuredSessions[event.sessionID]?.observeExternal(event)

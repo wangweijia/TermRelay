@@ -373,6 +373,7 @@ scripts/                  校验和发布脚本
 - [整体架构](docs/ARCHITECTURE.md)
 - [局域网 AI 服务设计](docs/AI_SERVICE_DESIGN.md)
 - [AI 服务配置与调用](docs/AI_SERVICE_SETUP.md)
+- [跨 Provider Skill 管理 TODO](docs/SKILL_MANAGEMENT_TODO.md)
 - [invest AI 接入待办（待确认）](docs/INVEST_AI_SERVICE_TODO.md)
 - [Codex App Server 架构决策](docs/ADR-001-CODEX-APP-SERVER.md)
 - [ACP 原生 UI 重构计划与完成记录](docs/CODEX_APP_SERVER_NATIVE_UI_REFACTOR_PLAN.md)

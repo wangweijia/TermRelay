@@ -63,6 +63,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.runtimeReadyHandler = runtimeReadyHandler
         self.externalActionHandler = externalActionHandler
         isExternal = externalActionHandler != nil
+        autoApproveEnabled = isExternal
         startedAt = RelayDate.now()
     }
 
@@ -232,12 +233,17 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     func observeExternal(_ event: ToolEvent) {
         events.append(event)
         if events.count > Self.eventTrimThreshold { events.removeFirst(events.count - Self.maximumRetainedEvents) }
-        approvalHandler(event)
+        if case .approvalRequested = event.payload, autoApproveEnabled {
+            // AIRuntimeManager resolves external approvals; avoid duplicate UI requests.
+        } else {
+            approvalHandler(event)
+        }
         enqueueTimelineEvent(event)
         switch event.payload {
         case .sessionStarted: setState(.ready)
         case .turnStarted: setState(.running)
         case .approvalRequested: setState(.awaitingApproval)
+        case .approvalResolved: setState(.running)
         case .userInputRequested: setState(.awaitingUserInput)
         case .turnCompleted: setState(.ready)
         case .failed: setState(.failed)
