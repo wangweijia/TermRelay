@@ -98,10 +98,13 @@ export interface ShortcutRunInputAckPayload {
 
 `;
 const historyTypes = `export interface SessionHistoryListPayload {
+  scope?: 'copilot' | 'external';
   cursor?: string;
 }
 
 export interface SessionHistoryEntry {
+  projectId?: string | null;
+  lifecycle?: 'oneShot' | 'longLived' | null;
   id: string;
   workspaceId: string;
   toolKey: string;

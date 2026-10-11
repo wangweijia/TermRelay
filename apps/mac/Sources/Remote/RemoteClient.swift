@@ -151,12 +151,13 @@ actor RemoteClient {
         _ = await send(type: "shortcut.run.update", payload: payload)
     }
 
-    func listCopilotHistory() async throws -> [RelayHistorySession] {
+    func listCopilotHistory(scope: String = "copilot") async throws -> [RelayHistorySession] {
         var cursor: String?
         var result: [RelayHistorySession] = []
         var seen = Set<String>()
         repeat {
-            let payload: [String: JSONValue] = cursor.map { ["cursor": .string($0)] } ?? [:]
+            var payload: [String: JSONValue] = cursor.map { ["cursor": .string($0)] } ?? [:]
+            if scope != "copilot" { payload["scope"] = .string(scope) }
             let response = try await requestHistory(type: "session.history.list", payload: payload)
             guard response.type == "session.history.listed",
                   let object = response.payload.object,

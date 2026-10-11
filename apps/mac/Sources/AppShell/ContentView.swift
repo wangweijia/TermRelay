@@ -119,6 +119,12 @@ struct ContentView: View {
                 Text(sessionPendingClose.projectID != nil ? "关闭“\(sessionPendingClose.displayName)”将结束项目会话，调用项目无法再使用该 conversationId。" : "关闭“\(sessionPendingClose.displayName)”将终止其中正在运行的终端进程。")
             }
         }
+        .task {
+            while !Task.isCancelled {
+                await appModel.refreshProjectHistory()
+                do { try await Task.sleep(for: .seconds(5)) } catch { break }
+            }
+        }
         .onAppear {
             selectedSessionID = appModel.sessions.last?.id ?? appModel.copilotHistory.first?.id
             synchronizeSidebarTab()
@@ -146,6 +152,8 @@ struct ContentView: View {
                 session: session,
                 displayName: selectedSession?.displayName ?? "Agent"
             )
+        } else if let id = selectedSessionID, let archive = appModel.projectArchive(id: id) {
+            CopilotHistoryView(archive: archive, isProject: true) { false }
         } else if let selectedSession {
             SessionSummaryView(session: selectedSession) {
                 isPresentingNewSession = true
@@ -181,7 +189,7 @@ struct ContentView: View {
     }
 
     private var visibleSessions: [ManagedSession] {
-        appModel.sessions
+        appModel.sessions + appModel.visibleProjectSessions
     }
 
     private func synchronizeSidebarTab() {
@@ -195,7 +203,15 @@ struct ContentView: View {
     }
 
     private func requestCloseSession(_ sessionID: UUID) {
-        sessionPendingClose = visibleSessions.first { $0.id == sessionID }
+        if !appModel.sessions.contains(where: { $0.id == sessionID }),
+           let archive = appModel.projectArchive(id: sessionID) {
+            guard archive.status == "finished" || archive.status == "failed" else { return }
+            purgeHistoryData = false
+            historyDeleteError = nil
+            historyPendingDelete = archive
+        } else {
+            sessionPendingClose = appModel.sessions.first { $0.id == sessionID }
+        }
     }
 
     private func confirmCloseSession() {
@@ -285,6 +301,7 @@ private struct ApprovalToastCenter: View {
 private struct CopilotHistoryView: View {
     @EnvironmentObject private var appModel: AppModel
     let archive: CopilotHistorySession
+    var isProject = false
     let resume: () async -> Bool
     @State private var error: String?
     @State private var importing = false
@@ -294,15 +311,15 @@ private struct CopilotHistoryView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(archive.displayName).font(.headline)
-                    Text(archive.directory?.path ?? "原工作目录未知")
+                    Text(isProject ? "项目调用 · \(archive.toolKey) · \(archive.status)" : archive.directory?.path ?? "原工作目录未知")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("历史记录 · 无法直接向旧会话发送消息")
                         .font(.caption).foregroundStyle(.secondary)
-                    Text("最多读取最近 1000 条事件；过期的历史无法恢复。新会话会在第一条消息中参考这些记录。")
+                    Text(isProject ? "新一轮由项目 API 提交。最多读取最近 1000 条保留事件。" : "最多读取最近 1000 条事件；过期的历史无法恢复。新会话会在第一条消息中参考这些记录。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("以历史创建新 Copilot 会话") {
+                if !isProject { Button("以历史创建新 Copilot 会话") {
                     importing = true
                     Task {
                         let success = await resume()
@@ -310,7 +327,7 @@ private struct CopilotHistoryView: View {
                         importing = false
                     }
                 }
-                .disabled(importing || archive.directory == nil || appModel.connectionState != .connected)
+                .disabled(importing || archive.directory == nil || appModel.connectionState != .connected) }
             }
             if appModel.historyLoadingID == archive.id || importing {
                 ProgressView()
@@ -321,7 +338,11 @@ private struct CopilotHistoryView: View {
                     ForEach(Array((appModel.historyMessages[archive.id] ?? []).enumerated()), id: \.offset) { _, message in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(message.role).font(.caption.bold()).foregroundStyle(.secondary)
-                            Text(message.text).textSelection(.enabled)
+                            if isProject && [archive.toolKey, "思考", "计划"].contains(message.role) {
+                                AgentMarkdownView(text: message.text)
+                            } else {
+                                Text(message.text).textSelection(.enabled)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -333,8 +354,12 @@ private struct CopilotHistoryView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: archive.id) {
-            do { _ = try await appModel.loadCopilotHistory(archive) }
-            catch { self.error = error.localizedDescription }
+            repeat {
+                do { _ = try await appModel.loadCopilotHistory(archive); self.error = nil }
+                catch { self.error = error.localizedDescription }
+                guard isProject, archive.status != "finished", archive.status != "failed" else { break }
+                do { try await Task.sleep(for: .seconds(5)) } catch { break }
+            } while !Task.isCancelled
         }
     }
 }

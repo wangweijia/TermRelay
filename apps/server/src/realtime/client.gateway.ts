@@ -261,7 +261,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       const records = await this.sessions.listCopilotHistoryForDevice(
-        envelope.deviceId, cursor, HISTORY_LIST_LIMIT + 1,
+        envelope.deviceId, cursor, HISTORY_LIST_LIMIT + 1, envelope.payload.scope,
       );
       const hasMore = records.length > HISTORY_LIST_LIMIT;
       const page = records.slice(0, HISTORY_LIST_LIMIT);
@@ -281,6 +281,8 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
             status: session.status,
             startedAt: session.startedAt,
             updatedAt: session.updatedAt,
+            projectId: session.projectId,
+            lifecycle: session.lifecycle,
           })),
           hasMore,
           relatedMessageId: envelope.messageId,
@@ -294,7 +296,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const { envelope } = result.message;
       const sessionId = envelope.sessionId!;
       const session = await this.sessions.findOwnedSession(envelope.deviceId, sessionId);
-      if (!session || session.toolKey !== 'copilot' || session.runtimeMode !== 'acp') {
+      if (!session || (session.toolKey !== 'copilot' && session.origin !== 'external') || session.runtimeMode !== 'acp') {
         this.sendProtocolError(
           client, 'unknown_session', 'Session does not exist for this device.',
           envelope.messageId, sessionId,
@@ -347,7 +349,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const { envelope } = result.message;
       const sessionId = envelope.sessionId!;
       const session = await this.sessions.findOwnedSession(envelope.deviceId, sessionId);
-      if (!session || session.toolKey !== 'copilot' || session.runtimeMode !== 'acp') {
+      if (!session || (session.toolKey !== 'copilot' && session.origin !== 'external') || session.runtimeMode !== 'acp') {
         this.sendProtocolError(
           client, 'unknown_session', 'Session does not exist for this device.',
           envelope.messageId, sessionId,

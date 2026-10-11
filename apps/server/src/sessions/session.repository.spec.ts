@@ -157,6 +157,21 @@ test('history index filters device, deletion, mode, and tool before paging', asy
     );
 });
 
+test('project history includes ended and active providers, excludes other devices and hidden records', async () => {
+  const store = new MemorySessions([
+    session('codex', 'acp', { origin: 'external', projectId: 'invest', status: 'finished', updatedAt: new Date(2000) }),
+    session('dsh', 'acp', { origin: 'external', toolKey: 'dsh', status: 'running', updatedAt: new Date(1000) }),
+    session('local', 'acp'),
+    session('hidden', 'acp', { origin: 'external', deletedAt: new Date() }),
+    session('other-device', 'acp', { origin: 'external', deviceId: 'device-b' }),
+  ]);
+  const first = await store.repository.listCopilotHistoryForDevice('device-a', undefined, 1, 'external');
+  assert.deepEqual(first.map(row => row.id), ['codex']);
+  assert.equal(first[0]?.projectId, 'invest');
+  const second = await store.repository.listCopilotHistoryForDevice('device-a', { updatedAt: new Date(2000), id: 'codex' }, 100, 'external');
+  assert.deepEqual(second.map(row => row.id), ['dsh']);
+});
+
 test('PTY output retains its 24-hour TTL while ACP events default to 30 days and allow an override', async () => {
   const previousTerminalTtl = process.env.TERMINAL_EVENT_TTL_HOURS;
   const previousAcpTtl = process.env.ACP_EVENT_TTL_HOURS;
@@ -324,6 +339,7 @@ class MemoryQuery {
         return row.updatedAt < updatedAt || (row.updatedAt.getTime() === updatedAt.getTime()
           && row.id < params.cursorId!);
       }
+      if (sql.includes('session.origin = :origin')) return row.origin === params.origin;
       if (sql.includes('session.toolKey')) return row.toolKey === params.toolKey;
       throw new Error(`Unhandled test query: ${sql}`);
     }));

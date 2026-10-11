@@ -88,8 +88,9 @@ struct SessionSidebar: View {
                                 Button(role: .destructive) {
                                     closeAction(session.id)
                                 } label: {
-                                    Label("关闭会话", systemImage: "xmark")
+                                    Label(session.projectID != nil && structuredSessions[session.id] == nil ? "删除历史" : "关闭会话", systemImage: "xmark")
                                 }
+                                .disabled(session.projectID != nil && structuredSessions[session.id] == nil && session.state != .finished && session.state != .failed)
                             }
                         }
                     } else {
@@ -190,10 +191,11 @@ private struct ClosableSessionSidebarRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .disabled(session.projectID != nil && structuredSession == nil && session.state != .finished && session.state != .failed)
             .opacity(isHovered || isSelected ? 1 : 0)
             .allowsHitTesting(isHovered || isSelected)
-            .help("关闭会话")
-            .accessibilityLabel("关闭会话")
+            .help(session.state == .finished || session.state == .failed ? "删除历史" : "关闭会话")
+            .accessibilityLabel(session.projectID != nil && structuredSession == nil ? "删除历史" : "关闭会话")
         }
         .onHover { isHovered = $0 }
     }
@@ -294,7 +296,7 @@ private struct SessionSidebarRowContent: View {
             }
         }
         .padding(.vertical, 3)
-        .help(session.directory.path)
+        .help(session.projectID != nil ? "项目调用：\(session.displayName)" : session.directory.path)
     }
 
     private var isRunning: Bool { state == .running }

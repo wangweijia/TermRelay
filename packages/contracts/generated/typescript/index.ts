@@ -1005,10 +1005,13 @@ export const commandAckSchema = {
   additionalProperties: false,
 } as const;
 export interface SessionHistoryListPayload {
+  scope?: 'copilot' | 'external';
   cursor?: string;
 }
 
 export interface SessionHistoryEntry {
+  projectId?: string | null;
+  lifecycle?: 'oneShot' | 'longLived' | null;
   id: string;
   workspaceId: string;
   toolKey: string;
@@ -1064,6 +1067,12 @@ export const sessionHistoryListSchema = {
       "minLength": 3,
       "maxLength": 1024,
       "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    },
+    "scope": {
+      "enum": [
+        "copilot",
+        "external"
+      ]
     }
   },
   "additionalProperties": false
@@ -1140,6 +1149,20 @@ export const sessionHistoryListedSchema = {
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "projectId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "lifecycle": {
+            "enum": [
+              "oneShot",
+              "longLived",
+              null
+            ]
           }
         },
         "additionalProperties": false

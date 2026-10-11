@@ -257,13 +257,15 @@ export class SessionRepository {
     deviceId: string,
     cursor: { updatedAt: Date; id: string } | undefined,
     limit: number,
+    scope: 'copilot' | 'external' = 'copilot',
   ): Promise<SessionRecord[]> {
     if (!this.dataSource) return [];
     const query = this.repository
       .createQueryBuilder('session')
       .where('session.deviceId = :deviceId', { deviceId })
       .andWhere('session.deletedAt IS NULL')
-      .andWhere('session.toolKey = :toolKey', { toolKey: 'copilot' })
+      .andWhere(scope === 'external' ? 'session.origin = :origin' : 'session.toolKey = :toolKey',
+        scope === 'external' ? { origin: 'external' } : { toolKey: 'copilot' })
       .andWhere('session.runtimeMode = :runtimeMode', { runtimeMode: 'acp' });
     if (cursor) {
       query.andWhere(

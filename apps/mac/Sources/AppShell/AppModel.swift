@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var terminalSessions: [UUID: LocalTerminalSession] = [:]
     @Published private(set) var structuredSessions: [UUID: LocalStructuredAgentSession] = [:]
     @Published private(set) var pendingApprovals = PendingApprovalInbox()
+    @Published private(set) var projectHistory: [RelayHistorySession] = []
     @Published private(set) var copilotHistory: [CopilotHistorySession] = []
     @Published private(set) var historyMessages: [UUID: [CopilotHistoryMessage]] = [:]
     @Published private(set) var historyLoadingID: UUID?
@@ -534,6 +535,30 @@ final class AppModel: ObservableObject {
         )
     }
 
+    var visibleProjectSessions: [ManagedSession] {
+        let localIDs = Set(sessions.map(\.id))
+        return projectHistory.compactMap { record in
+            guard let id = UUID(uuidString: record.id), !localIDs.contains(id) else { return nil }
+            return ManagedSession(id: id, directory: workingDirectory, toolID: record.toolKey,
+                displayName: record.displayName ?? record.toolKey, runtimeMode: .acp,
+                state: SessionState(rawValue: record.status) ?? .failed,
+                projectID: record.projectId ?? "API", lifecycle: record.lifecycle)
+        }
+    }
+
+    func projectArchive(id: UUID) -> CopilotHistorySession? {
+        guard let record = projectHistory.first(where: { UUID(uuidString: $0.id) == id }) else { return nil }
+        return CopilotHistorySession(id: id, workspaceId: record.workspaceId,
+            displayName: record.displayName ?? record.toolKey, status: record.status,
+            directory: nil, updatedAt: record.updatedAt, toolKey: record.toolKey)
+    }
+
+    func refreshProjectHistory() async {
+        guard connectionState == .connected, let remoteClient else { return }
+        do { projectHistory = try await remoteClient.listCopilotHistory(scope: "external") }
+        catch { errorMessage = "无法读取项目对话：\(error.localizedDescription)" }
+    }
+
     func refreshCopilotHistory() async {
         guard let remoteClient else { return }
         do {
@@ -564,17 +589,20 @@ final class AppModel: ObservableObject {
         historyLoadingID = archive.id
         defer { historyLoadingID = nil }
         let events = try await remoteClient.loadCopilotHistory(sessionID: archive.id)
-        historyMessages[archive.id] = CopilotHistory.messages(from: events)
+        historyMessages[archive.id] = projectArchive(id: archive.id) != nil
+            ? ProjectHistory.messages(from: events, provider: archive.toolKey)
+            : CopilotHistory.messages(from: events)
         return events
     }
 
     func deleteCopilotHistory(_ archive: CopilotHistorySession, purge: Bool) async throws {
         guard archive.status == "finished" || archive.status == "failed",
-              copilotHistory.contains(where: { $0.id == archive.id }) else {
+              (copilotHistory.contains(where: { $0.id == archive.id }) || projectArchive(id: archive.id) != nil) else {
             throw AgentError.providerUnavailable("只能删除已经结束的历史会话。")
         }
         guard let remoteClient else { throw AgentError.providerUnavailable("Server 未连接") }
         try await remoteClient.deleteCopilotHistory(sessionID: archive.id, purge: purge)
+        projectHistory.removeAll { UUID(uuidString: $0.id) == archive.id }
         copilotHistory.removeAll { $0.id == archive.id }
         historyMessages[archive.id] = nil
     }
@@ -587,7 +615,7 @@ final class AppModel: ObservableObject {
         }
         do {
             let events = try await loadCopilotHistory(archive)
-            guard !CopilotHistory.messages(from: events).isEmpty,
+            guard !CopilotHistory.messages(from: events, assistantName: archive.toolKey == "copilot" ? "Copilot" : archive.toolKey).isEmpty,
                   let context = CopilotHistory.context(from: events) else {
                 throw AgentError.providerUnavailable("Server 没有可用于继续的对话记录；历史可能已过期。")
             }

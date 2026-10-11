@@ -7,6 +7,7 @@ struct CopilotHistorySession: Identifiable, Sendable {
     let status: String
     let directory: URL?
     let updatedAt: String
+    var toolKey: String = "copilot"
 }
 
 struct CopilotHistoryMessage: Sendable, Equatable {
@@ -21,6 +22,8 @@ struct RelayHistorySession: Decodable, Sendable {
     let displayName: String?
     let runtimeMode: String
     let status: String
+    let projectId: String?
+    let lifecycle: String?
     let updatedAt: String
 }
 
@@ -32,7 +35,7 @@ struct RelayHistoryEvent: Decodable, Sendable {
 }
 
 enum CopilotHistory {
-    static func messages(from events: [RelayHistoryEvent]) -> [CopilotHistoryMessage] {
+    static func messages(from events: [RelayHistoryEvent], assistantName: String = "Copilot") -> [CopilotHistoryMessage] {
         events.compactMap { event in
             guard event.type == "tool.event",
                   let payload = event.payload.object,
@@ -41,7 +44,7 @@ enum CopilotHistory {
                   !text.isEmpty else { return nil }
             switch kind {
             case "user.message": return CopilotHistoryMessage(role: "用户", text: text)
-            case "assistant.completed": return CopilotHistoryMessage(role: "Copilot", text: text)
+            case "assistant.completed": return CopilotHistoryMessage(role: assistantName, text: text)
             default: return nil
             }
         }

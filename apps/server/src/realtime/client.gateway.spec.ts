@@ -296,6 +296,31 @@ test('lists only owned Copilot history in bounded pages on a registered connecti
     assert.equal(registeredSocket.messages.at(-1)?.data.payload.code, 'invalid_message');
   });
 
+test('project history routes external scope and permits owned external events and deletion only', async () => {
+  const { gateway, sessions } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  await gateway.handleMessage(client, envelope('device-a', 'device.register', {
+    name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['codex'],
+  }));
+  await gateway.handleMessage(client, envelope('device-a', 'session.history.list', { scope: 'external' }));
+  assert.equal(sessions.historyScope, 'external');
+  assert.equal(socket.messages.at(-1)?.data.type, 'session.history.listed');
+  sessions.historyToolKey = 'codex';
+  sessions.historyOrigin = 'external';
+  const request = { ...envelope('device-a', 'session.history.request', {}), sessionId: 'session-a' };
+  await gateway.handleMessage(client, request);
+  assert.equal(socket.messages.at(-1)?.data.type, 'session.history');
+  await gateway.handleMessage(client, { ...request, sessionId: 'not-owned' });
+  assert.equal(socket.messages.at(-1)?.data.payload.code, 'unknown_session');
+  await gateway.handleMessage(client, { ...envelope('device-a', 'session.history.delete', { purge: false }), sessionId: 'session-a' });
+  assert.deepEqual(sessions.deletions, [{ id: 'session-a', purge: false }]);
+  sessions.historyOrigin = 'local';
+  await gateway.handleMessage(client, request);
+  assert.equal(socket.messages.at(-1)?.data.payload.code, 'unknown_session');
+});
+
 test('returns owned Copilot events oldest-first with a bounded reverse cursor', async () => {
     const { gateway, sessions } = makeGateway();
     const socket = new FakeSocket();
@@ -451,6 +476,9 @@ class FakeSessionsService {
     | { status: 'error'; code: 'conflict'; detail: string; expectedSeq: number } = {
       status: 'accepted',
     };
+  historyToolKey = 'copilot';
+  historyOrigin = 'local';
+  historyScope?: string;
   autoApproveEnabled = false;
   deletions: Array<{ id: string; purge: boolean }> = [];
   deletionResult: 'deleted' | 'not_finished' | 'not_found' = 'deleted';
@@ -503,14 +531,16 @@ class FakeSessionsService {
       deviceId,
       stateVersion: 0,
       autoApproveEnabled: this.autoApproveEnabled,
-      toolKey: 'copilot',
+      toolKey: this.historyToolKey,
+      origin: this.historyOrigin,
       runtimeMode: 'acp',
     };
   }
 
   async listCopilotHistoryForDevice(
-    deviceId: string, cursor: { updatedAt: Date; id: string } | undefined, limit: number,
+    deviceId: string, cursor: { updatedAt: Date; id: string } | undefined, limit: number, scope?: string,
   ) {
+    this.historyScope = scope;
     this.lastHistoryQuery = [deviceId, cursor, limit];
     return this.historySessions
       .filter((session) => !cursor

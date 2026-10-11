@@ -181,9 +181,10 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     deviceId: string,
     cursor: { updatedAt: Date; id: string } | undefined,
     limit: number,
+    scope: 'copilot' | 'external' = 'copilot',
   ): Promise<SessionRecord[]> {
     await this.waitForWrites();
-    return this.sessions.listCopilotHistoryForDevice(deviceId, cursor, limit);
+    return this.sessions.listCopilotHistoryForDevice(deviceId, cursor, limit, scope);
   }
 
   async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
