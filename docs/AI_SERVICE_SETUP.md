@@ -71,6 +71,10 @@ API Key 管理接口位于 `/api/settings/ai`，与配置页一起沿用现有 W
 
 ## 4. 调用闭环
 
+在 Web 的“配置 → AI 设备”查看当前 Server 的已注册设备，点击“复制设备 ID”，填写到调用方的 `device_id` 或请求中的 `target.deviceId`。设备卡片同时展示在线状态、Profile ID、Provider、容量及模型／强度白名单。离线设备和在线但未开放 AI 能力的设备会明确标注不可调用；空闲容量仍以提交时的检查为准。列表可手动刷新，不能据旧列表断言设备当前一定可用。
+
+此列表通过浏览器管理接口 `GET /api/settings/ai/targets` 获取，不需要输入 API Key，与 Web 一样沿用入口登录保护；设备查看不要求启用数据库，启用数据库时也展示已保存的离线设备。调用方仍通过带 Key 的 `GET /api/ai/v1/targets` 查询实时执行能力。
+
 所有端点位于 `/api/ai/v1`，带 `Authorization: Bearer <API_KEY>`。先调用 `GET /targets`，确认设备在线和 Profile 已公布。请求正文不要传 projectId 或 Mac 路径。
 
 - 一次性推荐：`POST /jobs`，带 Idempotency-Key、target、profile、provider、input、output 和可选 deadlineSeconds。轮询 `GET /jobs/{id}`，在 succeeded 时读取 result；终态后释放运行时。下一次推荐使用新幂等键，创建新 job。

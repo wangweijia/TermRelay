@@ -11,6 +11,8 @@ import { DeviceConnectionRegistry } from '../realtime/device-connection.registry
 import { ProtocolValidator } from '../realtime/protocol-validator';
 import { AISettingsService } from './ai-settings.service';
 import { AISettingsController } from './ai-settings.controller';
+import { DevicesService } from '../devices/devices.service';
+import { DeviceRepository } from '../devices/device.repository';
 import type { FastifyRequest } from 'fastify';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -30,7 +32,8 @@ function fixture() {
   const key = {id:randomUUID(),projectId:'invest',keyHash:createHash('sha256').update(token).digest('hex'),grants:{deviceIds:[deviceId],profiles:['analysis'],capacity:4},revoked:false};
   repo.keys.set(key.id,key);
   const body = {target:{deviceId},profile:'analysis',provider:'codex' as const,input:{instructions:'Analyze',facts:{snapshotId:'1'}},output:{kind:'json' as const,schema:{type:'object',required:['answer'],properties:{answer:{type:'string'}},additionalProperties:false}},deadlineSeconds:180};
-  return {repo,registry,client,messages,deviceId,service,token,key,body};
+  const devices = new DevicesService(registry,new DeviceRepository());
+  return {repo,registry,client,messages,deviceId,service,token,key,body,devices};
 }
 
 test('Web settings generate, rotate and revoke general keys without project or device configuration', async () => {
@@ -59,7 +62,7 @@ test('Web settings generate, rotate and revoke general keys without project or d
 
 test('Web key management accepts the existing Web proxy boundary and rejects cross-origin and API-key admin requests', async () => {
   const f = fixture();
-  const controller = new AISettingsController(new AISettingsService(f.repo),f.repo);
+  const controller = new AISettingsController(new AISettingsService(f.repo),f.repo,f.service,f.devices);
   const request = {ip:'192.168.1.3',headers:{host:'192.168.1.2:3007',origin:'http://192.168.1.2:3007','x-termrelay-settings':'1','sec-fetch-site':'same-origin'}} as unknown as FastifyRequest;
   const overview = await controller.overview(request);
   assert.ok(Array.isArray(overview.keys));
@@ -89,12 +92,38 @@ test('key generation works without any connected Mac or profiles and concurrent 
   assert.equal((await settings.list()).filter(k => !k.legacy).length,2);
 });
 
+test('browser targets show live AI profiles, online devices without capabilities and persisted offline devices without requiring a database or key', async () => {
+  const f = fixture();
+  const stored = (await f.devices.list())[0]!;
+  const historicalId = randomUUID();
+  class HistoricalDevices extends DevicesService {
+    override async list() { return [...await super.list(),{...stored,id:historicalId,name:'Old Mac',status:'offline' as const}]; }
+  }
+  const noDatabase = new AIRepository();
+  const controller = new AISettingsController(new AISettingsService(noDatabase),noDatabase,f.service,new HistoricalDevices(f.registry,new DeviceRepository()));
+  const request = {headers:{host:'termrelay.example.com','cf-ray':'test-ray','x-forwarded-for':'8.8.8.8'}} as unknown as FastifyRequest;
+  let targets = await controller.targets(request);
+  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.profiles[0]?.id,'analysis');
+  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,true);
+  assert.deepEqual(targets.find(t => t.deviceId === historicalId),{deviceId:historicalId,name:'Old Mac',online:false,profiles:[]});
+  f.service.publishCapabilities(f.client,f.deviceId,{profiles:[]});
+  targets = await controller.targets(request);
+  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.profiles,[]);
+  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,true);
+  f.registry.disconnect(f.client);
+  targets = await controller.targets(request);
+  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,false);
+  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.profiles,[]);
+  await assert.rejects(controller.targets({...request,headers:{...request.headers,authorization:`Bearer ${f.token}`}} as FastifyRequest),{status:403});
+});
+
 test('settings HTTP routes allow Access/Tunnel headers, return one-time keys with no-store and reject cross-site writes', async () => {
   const f = fixture();
   @Module({controllers:[AISettingsController],providers:[
     {provide:AISettingsService,useValue:new AISettingsService(f.repo)},
     {provide:AIService,useValue:f.service},
     {provide:AIRepository,useValue:f.repo},
+    {provide:DevicesService,useValue:f.devices},
   ]}) class SettingsTestModule {}
   const adapter = new FastifyAdapter();
   const app = await NestFactory.create(SettingsTestModule,adapter,{logger:false});
@@ -102,6 +131,11 @@ test('settings HTTP routes allow Access/Tunnel headers, return one-time keys wit
     await app.init();
     const http = adapter.getInstance();
     const headers = {host:'termrelay.example.com',origin:'https://termrelay.example.com','x-termrelay-settings':'1','cf-ray':'test-ray','cf-access-jwt-assertion':'forwarded-by-access','x-forwarded-for':'8.8.8.8'};
+    const targets = await http.inject({method:'GET',url:'/api/settings/ai/targets',headers});
+    assert.equal(targets.statusCode,200);
+    assert.equal(targets.headers['cache-control'],'no-store');
+    assert.equal(targets.json()[0].deviceId,f.deviceId);
+    assert.equal(targets.json()[0].profiles[0].provider,'codex');
     f.registry.disconnect(f.client);
     const created = await http.inject({method:'POST',url:'/api/settings/ai/keys',headers,payload:{}});
     assert.equal(created.statusCode,201);

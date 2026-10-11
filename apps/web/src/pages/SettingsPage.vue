@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import type { NotificationSettings } from '../types';
+import type { AiProfile } from '@termrelay/contracts';
 
 interface ProjectKey { id: string; revoked: boolean; legacy: boolean }
+interface AITarget { deviceId: string; name: string; online: boolean; profiles: AiProfile[] }
+const targets = ref<AITarget[]>([]);
+const targetsLoading = ref(false);
+const targetsError = ref('');
+const copiedDeviceId = ref('');
+const deviceIdField = ref<HTMLInputElement>();
+const visibleTargets = computed(() => [...targets.value].sort((a,b) => Number(b.online && b.profiles.length > 0)-Number(a.online && a.profiles.length > 0) || Number(b.online)-Number(a.online) || a.name.localeCompare(b.name)));
 const keys = ref<ProjectKey[]>([]);
 const busy = ref(false);
 const loading = ref(false);
@@ -15,6 +23,25 @@ const secretField = ref<HTMLTextAreaElement>();
 const notifications = ref<NotificationSettings>();
 const notificationBusy = ref(false);
 const visibleKeys = computed(() => [...keys.value].sort((a,b) => Number(a.revoked)-Number(b.revoked)));
+
+async function refreshTargets() {
+  if (targetsLoading.value) return;
+  targetsLoading.value = true; targetsError.value = '';
+  try { targets.value = await request<AITarget[]>('/api/settings/ai/targets'); }
+  catch (reason) {
+    targets.value = [];
+    targetsError.value = reason instanceof Error ? reason.message : '读取设备失败';
+  } finally { targetsLoading.value = false; }
+}
+async function copyDeviceId(id: string) {
+  copiedDeviceId.value = id;
+  try { await navigator.clipboard.writeText(id); message.value = '设备 ID 已复制，可填入调用方的 device_id 或请求的 target.deviceId。'; }
+  catch {
+    await nextTick();
+    deviceIdField.value?.focus(); deviceIdField.value?.select();
+    message.value = '当前浏览器不支持自动复制，请复制已选中的设备 ID。';
+  }
+}
 
 async function request<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(url,{cache:'no-store',...(body === undefined ? {}:{method:'POST',headers:{'Content-Type':'application/json','X-TermRelay-Settings':'1'},body:JSON.stringify(body)})});
@@ -72,6 +99,7 @@ function beforeUnload(event: BeforeUnloadEvent) { if (generated.value && !saved.
 onBeforeRouteLeave(() => !generated.value || saved.value || window.confirm('Key 只显示一次。确定离开？未保存时需要重新生成。'));
 onMounted(() => {
   void refresh();
+  void refreshTargets();
   void fetch('/api/notifications/settings',{cache:'no-store'}).then(async r => { if (r.ok) notifications.value = await r.json() as NotificationSettings; }).catch(() => undefined);
   window.addEventListener('beforeunload',beforeUnload);
 });
@@ -83,6 +111,24 @@ onBeforeUnmount(() => { generated.value = undefined; window.removeEventListener(
     <div class="settings-heading"><div><h1>配置</h1><p>服务配置的统一入口</p></div><RouterLink to="/">返回会话</RouterLink><RouterLink to="/mobile">手机会话</RouterLink></div>
     <p v-if="error" class="settings-error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
+    <section class="settings-card">
+      <div class="settings-heading"><h2>AI 设备</h2><button :disabled="targetsLoading" @click="refreshTargets">{{ targetsLoading ? '读取中…' : '刷新设备' }}</button></div>
+      <p>复制设备 ID 到调用方的目标设备配置，再选择该设备下的 Profile。这里仅展示执行能力，不影响生成 Key。</p>
+      <p v-if="targetsError" class="settings-error" role="alert">{{ targetsError }}</p>
+      <p v-else-if="!targets.length && !targetsLoading">还没有已注册设备。请让 Mac App 连接当前 Server，然后刷新设备。</p>
+      <article v-for="target in visibleTargets" :key="target.deviceId" class="settings-device">
+        <div class="settings-heading"><strong class="device-name">{{ target.name }}</strong><span class="device-state" :class="{ available: target.online && target.profiles.length > 0 }">{{ !target.online ? '离线' : target.profiles.length ? '在线 · 已开放 AI 能力' : '在线 · 未开放 AI 能力' }}</span></div>
+        <div class="device-id"><code>{{ target.deviceId }}</code><button @click="copyDeviceId(target.deviceId)">复制设备 ID</button></div>
+        <p v-if="!target.online">设备当前不可调用；上线并公布能力后刷新查看。</p>
+        <p v-else-if="!target.profiles.length">设备尚未公布可用 AI Profile，请检查 Mac 的 AI 服务配置与 Provider 可用性。</p>
+        <div v-for="profile in target.profiles" :key="profile.id" class="device-profile">
+          <code>{{ profile.id }}</code><small>{{ profile.provider }} · {{ profile.policy === 'factsOnly' ? '仅事实分析' : '工作区工具' }} · 容量 {{ profile.capacity }}</small>
+          <small>模型：{{ profile.models?.length ? profile.models.join('、') : '使用 Profile 默认模型' }} · 强度：{{ profile.efforts?.length ? profile.efforts.join('、') : '使用默认强度' }}</small>
+        </div>
+      </article>
+      <label v-if="copiedDeviceId" class="device-copy">设备 ID（可手动复制）<input ref="deviceIdField" :value="copiedDeviceId" readonly aria-label="设备 ID" @focus="deviceIdField?.select()"></label>
+      <small>在线且已公布 Profile 不代表一定有空闲容量；提交时仍由 Server 和 Mac 检查。</small>
+    </section>
     <section class="settings-card">
       <div class="settings-heading"><h2>API Key</h2><button :disabled="loading || busy" @click="refresh">{{ loading ? '读取中…' : '刷新' }}</button></div>
       <p>直接生成并交给调用方即可。不绑定项目、设备或用途，也不需要 Mac 在线。</p>
@@ -122,6 +168,15 @@ textarea { margin: 12px 0; font-family: monospace; resize: vertical; }
 .settings-key { border-top: 1px solid #334155; padding: 16px 0; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; overflow-wrap: anywhere; }
 small { display: block; margin-top: 6px; color: #a9b4c4; }
 .settings-error { color: #ffb4b4; }
+.settings-device { padding: 16px 0; border-top: 1px solid #334155; }
+.device-name { flex: 1; }
+.device-state { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #253247; color: #a9b4c4; }
+.device-state.available { background: #183a32; color: #8ed9b9; }
+.device-id { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.device-id code, .device-profile code { overflow-wrap: anywhere; }
+.device-profile { padding: 10px 12px; margin-top: 8px; background: #172337; border-radius: 8px; }
+.device-copy { display: block; margin: 12px 0; color: #a9b4c4; }
+.device-copy input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; color: inherit; background: #172337; border: 1px solid #475569; border-radius: 6px; font-family: monospace; }
 button { padding: 8px 12px; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 @media (max-width: 640px) { .settings-page { padding: 14px; } .settings-card { padding: 14px; } }

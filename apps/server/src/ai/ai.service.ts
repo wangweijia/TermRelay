@@ -44,10 +44,15 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     if (!this.registry.isRegisteredClient(client,deviceId)) return;
     this.capabilities.set(deviceId, {client,profiles:value.profiles});
   }
-  targets(key: AIProjectKeyEntity): unknown[] {
-    return this.registry.listDevices().filter(d => key.grants.unrestricted === true || key.grants.deviceIds.includes(d.deviceId)).map(d => ({
+  availableTargets() {
+    return this.registry.listDevices().map(d => ({
       deviceId:d.deviceId, name:d.name, online:!!this.registry.getClient(d.deviceId),
-      profiles:this.profiles(d.deviceId).filter(p => key.grants.unrestricted === true || key.grants.profiles.includes(p.id)),
+      profiles:this.profiles(d.deviceId),
+    }));
+  }
+  targets(key: AIProjectKeyEntity) {
+    return this.availableTargets().filter(d => key.grants.unrestricted === true || key.grants.deviceIds.includes(d.deviceId)).map(d => ({
+      ...d,profiles:d.profiles.filter(p => key.grants.unrestricted === true || key.grants.profiles.includes(p.id)),
     }));
   }
   private profiles(deviceId: string): AiProfile[] {

@@ -47,7 +47,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 
 ## 核心能力
 
-- **统一 Web 配置**：顶部“配置”进入 `/settings`，一键生成通用 AI API Key（无需项目、设备或 Profile），支持一次性复制、替换、撤销和审批通知开关；沿用 Web 的 Cloudflare Access 登录保护，使用说明见 [AI 服务配置](docs/AI_SERVICE_SETUP.md)。
+- **统一 Web 配置**：顶部“配置”进入 `/settings`，查看 AI 设备、复制目标设备 ID 和查看可用 Profile；一键生成通用 AI API Key（无需项目、设备或 Profile），支持一次性复制、替换、撤销和审批通知开关。沿用 Web 的 Cloudflare Access 登录保护，使用说明见 [AI 服务配置](docs/AI_SERVICE_SETUP.md)。
 - **真实远程终端**：保留 ANSI、TrueColor、中文、Emoji、终端 resize、输入、Ctrl-C 和停止操作。
 - **多 Provider 原生 ACP 体验**：结构化呈现回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
 - **ACP Markdown 展示**：Mac 和 Web 自动识别并渲染 AI 回答、思考与计划中的 Markdown；普通文本保持原样，PTY 和命令输出仍按原方式展示。
