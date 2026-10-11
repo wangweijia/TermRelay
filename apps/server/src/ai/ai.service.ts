@@ -45,19 +45,14 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     this.capabilities.set(deviceId, {client,profiles:value.profiles});
   }
   targets(key: AIProjectKeyEntity): unknown[] {
-    return this.registry.listDevices().filter(d => key.grants.deviceIds.includes(d.deviceId)).map(d => ({
+    return this.registry.listDevices().filter(d => key.grants.unrestricted === true || key.grants.deviceIds.includes(d.deviceId)).map(d => ({
       deviceId:d.deviceId, name:d.name, online:!!this.registry.getClient(d.deviceId),
-      profiles:this.profiles(d.deviceId).filter(p => key.grants.profiles.includes(p.id)),
+      profiles:this.profiles(d.deviceId).filter(p => key.grants.unrestricted === true || key.grants.profiles.includes(p.id)),
     }));
   }
   private profiles(deviceId: string): AiProfile[] {
     const c = this.capabilities.get(deviceId);
     return c && this.registry.getClient(deviceId) === c.client ? c.profiles : [];
-  }
-
-  configurationTargets(): unknown[] {
-    return this.registry.listDevices().map(d => ({deviceId:d.deviceId,name:d.name,
-      online:!!this.registry.getClient(d.deviceId),profiles:this.profiles(d.deviceId)}));
   }
 
   async create(key: AIProjectKeyEntity, kind: 'job' | 'conversation', body: AiJobRequest | AiConversationRequest, idem: string): Promise<AIResource> {
@@ -69,7 +64,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       const deviceId = body.target.deviceId.toLowerCase();
       const p = this.admit(key,deviceId,body.profile,body.provider);
       const active = [...rows.values()].map(r => r.data).filter(r => r.kind !== 'turn' && !isTerminal(r));
-      if (active.filter(r => r.projectId === key.projectId).length >= key.grants.capacity
+      if ((key.grants.unrestricted !== true && active.filter(r => r.projectId === key.projectId).length >= key.grants.capacity)
         || active.filter(r => r.deviceId === deviceId).length >= 4
         || active.filter(r => r.deviceId === deviceId && r.profile === p.id).length >= p.capacity) throw new ConflictException('device_busy');
       if (body.model && !p.models?.includes(body.model)) throw new BadRequestException('unsupported_model');
@@ -203,7 +198,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     if (!this.send(r.deviceId,'ai.turn.cancel',{id:r.sessionId,turnId:r.id})) this.finish(r,'connection_lost');
   }
   private admit(key: AIProjectKeyEntity, deviceId: string, profile: string, provider: string): AiProfile {
-    if (!key.grants.deviceIds.includes(deviceId) || !key.grants.profiles.includes(profile)) throw new ForbiddenException('profile_forbidden');
+    if (key.grants.unrestricted !== true && (!key.grants.deviceIds.includes(deviceId) || !key.grants.profiles.includes(profile))) throw new ForbiddenException('profile_forbidden');
     if (!this.registry.getClient(deviceId)) throw new ServiceUnavailableException('device_offline');
     const p = this.profiles(deviceId).find(p => p.id === profile && p.provider === provider);
     if (!p) throw new ConflictException('capability_unavailable');
@@ -211,7 +206,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
   }
   private owned(rows: Map<string,AIResourceEntity>, key: AIProjectKeyEntity, id: string, kind?: AIResource['kind']): AIResource {
     const r = rows.get(id)?.data;
-    if (!r || r.projectId !== key.projectId || (kind && r.kind !== kind)) throw new NotFoundException();
+    if (!r || (key.grants.unrestricted !== true && r.projectId !== key.projectId) || (kind && r.kind !== kind)) throw new NotFoundException();
     return r;
   }
   private scope(key: AIProjectKeyEntity, operation: string, idem: string): string {

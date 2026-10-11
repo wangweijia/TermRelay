@@ -48,14 +48,16 @@ test('MySQL serializes idempotency and preserves results across service instance
     await keys.update(keyID,{revoked:true});
     await assert.rejects(b.authenticate(`Bearer ${token}`),{status:401});
     const settings = new AISettingsService(new AIRepository(db));
-    const created = await settings.create({projectId:`web_${randomUUID()}`,deviceIds:[deviceId],profiles:['probe'],capacity:2});
+    const created = await settings.create();
     keyIDs.add(created.id);
     const replacement = await settings.rotate(created.id);
     keyIDs.add(replacement.id);
-    assert.deepEqual(replacement.grants,created.grants);
+    assert.equal(replacement.legacy,false);
     await settings.revoke(created.id);
     await assert.rejects(a.authenticate(`Bearer ${created.apiKey}`),{status:401});
-    await a.authenticate(`Bearer ${replacement.apiKey}`);
+    const generalKey = await a.authenticate(`Bearer ${replacement.apiKey}`);
+    assert.equal(generalKey.grants.unrestricted,true);
+    assert.equal((await a.get(generalKey,first.id)).status,'succeeded');
     assert.ok((await settings.list()).every(key => !('keyHash' in key) && !('apiKey' in key)));
   } finally {
     // Remove only records created by this probe, not development/user resources.

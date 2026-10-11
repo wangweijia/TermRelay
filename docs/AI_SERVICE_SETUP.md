@@ -1,6 +1,6 @@
 # 局域网 AI 服务使用说明
 
-设计见 [AI_SERVICE_DESIGN.md](AI_SERVICE_DESIGN.md)。TermRelay 侧已加入项目 Key、一次性 job、长期 conversation、逐轮结果查询和 Mac 项目调用栏目。`invest` 的代码尚未修改，待办见 [INVEST_AI_SERVICE_TODO.md](INVEST_AI_SERVICE_TODO.md)。
+设计见 [AI_SERVICE_DESIGN.md](AI_SERVICE_DESIGN.md)。TermRelay 侧已加入API Key、一次性 job、长期 conversation、逐轮结果查询和 Mac 项目调用栏目。`invest` 的代码尚未修改，待办见 [INVEST_AI_SERVICE_TODO.md](INVEST_AI_SERVICE_TODO.md)。
 
 ## 1. Server 准备
 
@@ -49,21 +49,25 @@ DSH 可配置独立 ID、`provider: "dsh"` 和 `policy: "factsOnly"`，先在 Ma
 
 代码工作流仅对 Codex 开放 `policy: "workspace"`，并提供本机绝对 `directory`。工具使用 Codex workspace-write 沙箱和人工审批，不开放自动审批。此模式有意允许工作区工具操作，不适合仅输出事实分析的任务。调用方不能通过 API 改目录。修改 Profile 配置只影响新会话；关闭原会话后再创建，才能采用新配置。
 
-## 3. 为项目生成 Key
+## 3. 生成 API Key
 
 打开 TermRelay Web，点击顶部“配置”（手机也有入口），或直接访问局域网 Server 的 `/settings` 页面。例如 `http://JETSON_LAN_IP:3006/settings`，本地开发为 `http://127.0.0.1:3007/settings`。不需要命令行。
 
-1. 在“项目 API Key”填写项目标识，例如 `invest`。
-2. 从下拉列表选择 Mac，勾选允许的 Profiles，设置项目并发上限（默认 2）。没有设备或 Profile 时，先让 Mac 连接 Server 并开放 Profiles，然后点击刷新。
-3. 点击“生成 Key”，复制到项目后端的 `TERMRELAY_API_KEY` 环境配置；勾选“我已保存 Key”后关闭显示。
+1. 在“API Key”点击“生成 Key”，不需要填写项目、设备、Profile 或并发参数，Mac 不在线也可以生成。
+2. 复制给可信调用方，保存到其后端的 `TERMRELAY_API_KEY` 环境配置。
+3. 勾选“我已保存 Key”后关闭显示。
 
-完整 Key 只在生成后显示一次，不保存到浏览器缓存；列表只显示标识、权限和撤销状态，数据库只存 SHA-256 哈希。Key 不放在前端、URL 或提交到 Git。
+完整 Key 只在生成后显示一次，不保存到浏览器缓存；列表只显示标识和撤销状态，数据库只存 SHA-256 哈希。Key 不放在前端、URL 或提交到 Git。
 
-换 Key 时点击列表中的“生成替换 Key”，沿用原权限；新旧 Key 短期并存，调用方换好配置后再点击旧 Key 的“撤销”。项目资源和幂等记录按 projectId 归属，不受轮换影响。已有有效 Key 时不能生成不同权限的 Key；如需改变权限，先撤销该项目旧 Key，再生成新 Key。撤销不会自动取消已开始任务。
+换 Key 时点击“生成替换 Key”；新旧 Key 短期并存，调用方换好配置后再撤销旧 Key。新生成的 Key 权限相同：能调用已开放的 AI 能力、查询和控制 AI 资源，不区分项目或用途。幂等记录采用共享服务范围，调用方应使用 UUID 等不易冲突的幂等键。撤销不会自动取消已开始任务。
+
+已有旧版项目受限 Key 不会被自动扩大权限，可继续使用或生成替换 Key 改用通用鉴权。数据库旧 projectId／grants 字段仅用于兼容，不再是新 Key 的用户配置。
+
+Mac 的 Profile 是执行能力与工具权限配置，不是 Key 的授权清单。它只在真正提交任务时用于选择执行能力；未连接 Mac 或未开放能力时，任务不可执行，但不影响生成 Key。TermRelay 不检查调用方使用哪个项目、什么业务用途；持有人共享 AI API 访问权限，因此只向可信调用方分发。
 
 配置页同时提供审批通知开关，后续 Server 配置统一从这个入口扩展。本机目录、Provider 凭据与执行权限仍由 Mac 管理，不能通过 Web 修改。
 
-项目 Key 管理接口位于 `/api/settings/ai`，只允许受信 LAN 的浏览器同站点操作；拒绝公网／转发入口、跨站请求和项目 Bearer Key，不新增管理员账号体系。能够访问受信局域网的用户属于管理员信任范围，不能将端口开放给访客网络；Tunnel 应阻断 `/api/settings/ai*`，页面不会绕过限制。
+API Key 管理接口位于 `/api/settings/ai`，与配置页一起沿用现有 Web 的 Cloudflare Access 登录保护，登录后可通过 Tunnel 正常管理 Key；不再额外检查局域网来源或拒绝 Cloudflare／转发请求，也不新增管理员账号体系。保留同源校验及 AI Bearer Key 不能管理配置的边界。Access 保护范围必须包含 `/settings` 和 `/api/settings/ai*`，这些路径不能设置 Bypass；Server 不另行验证 Access JWT，与现有 Web 一样信任入口保护。局域网直连仍沿用现有开发模式，不应把绕过 Access 的 Server 端口暴露到公网或不可信网络。AI 调用接口 `/api/ai/v1/*` 的 LAN 限制不变。
 
 ## 4. 调用闭环
 

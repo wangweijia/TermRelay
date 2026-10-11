@@ -5,7 +5,8 @@ export class AIProjectKeyEntity {
   @PrimaryColumn({ type: 'varchar', length: 64 }) id!: string;
   @Column({ name: 'project_id', type: 'varchar', length: 64 }) projectId!: string;
   @Column({ name: 'key_hash', type: 'varchar', length: 64, unique: true }) keyHash!: string;
-  @Column({ type: 'json' }) grants!: { deviceIds: string[]; profiles: string[]; capacity: number };
+  // Legacy scoped keys remain valid; newly generated keys only authenticate service access.
+  @Column({ type: 'json' }) grants!: { deviceIds: string[]; profiles: string[]; capacity: number; unrestricted?: boolean };
   @Column({ type: 'boolean', default: false }) revoked!: boolean;
 }
 

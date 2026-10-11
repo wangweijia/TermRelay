@@ -2,13 +2,13 @@
 
 > 状态：TermRelay 第一版已实现；部署配置见 [AI_SERVICE_SETUP.md](AI_SERVICE_SETUP.md)。invest 接入待用户确认，见 [INVEST_AI_SERVICE_TODO.md](INVEST_AI_SERVICE_TODO.md)。
 >
-> 目标：让 `invest` 等项目通过局域网 API 调用 Mac 上的 Codex、DSH 能力。只提供长期会话和一次性会话两种模式，以项目 API Key 鉴权，不实现会话断线恢复。
+> 目标：让 `invest` 等项目通过局域网 API 调用 Mac 上的 Codex、DSH 能力。只提供长期会话和一次性会话两种模式，以通用 API Key 鉴权，不绑定项目、设备或用途，不实现会话断线恢复。
 
 ## 1. 结论与职责边界
 
 将 TermRelay 扩展为 AI 会话执行服务：Jetson 上的 Server 提供局域网 API，Mac App 沿现有 `/ws/client` 主动连接 Server，接收请求并运行 Agent。外部项目只与 Server 通信。
 
-- Server 管理项目 API Key、任务记录、结果和设备路由。
+- Server 管理API Key、任务记录、结果和设备路由。
 - Mac 保留模型凭据、本地路径、Agent 进程和工具权限的最终执行权。
 - 调用方保留业务编排、事实构造、预算、结果校验和数据库写入。
 
@@ -33,7 +33,7 @@
 
 ```mermaid
 flowchart LR
-    Client[invest / 其他项目] -->|局域网 HTTP + 项目 API Key| Server[Jetson TermRelay Server]
+    Client[invest / 其他项目] -->|局域网 HTTP + API Key| Server[Jetson TermRelay Server]
     Mac[Mac AI Runtime] -->|主动连接 /ws/client| Server
     Server -->|同一 WebSocket 下发命令| Mac
     Mac --> Codex[Codex App Server]
@@ -61,7 +61,7 @@ Server  ──沿已有 WebSocket 下发──> Mac ──运行 Codex / DSH
 
 当前 `device.register.tools` 是内置工具列表，不能证明 CLI 已安装、凭据可用或某个 profile 可执行。新增 `ai.capabilities`：Mac 连接后及配置变化时上报可用 Provider、profile ID／版本、支持的模型和强度、可强制执行的权限限制及容量，不上报密钥或真实路径。
 
-`GET /api/ai/v1/targets` 只返回当前项目获准使用的设备与 profile，包含在线状态、名称和实时能力。Server 下发前检查权限、连接和容量；Mac 接收后再次验证本地 profile 与实际能力。失败返回 `device_offline`、`device_busy` 或 `capability_unavailable`，不换设备重试。
+`GET /api/ai/v1/targets` 返回当前服务的设备与已开放能力，包含在线状态、名称和 profile。Key 不绑定设备或 profile；Server 检查实际连接、能力与容量，Mac 再次验证本地执行权限。失败返回 `device_offline`、`device_busy` 或 `capability_unavailable`，不换设备重试。
 
 ## 4. 生命周期与最小状态
 
@@ -86,7 +86,7 @@ Server 现有断线／启动结束会话的机制可沿用，并同步关闭 AI 
 创建顺序：Server 鉴权并持久化请求 → Mac 检查 profile、目录、权限、模型与容量 → 启动运行时和协议握手 → 创建 Provider 会话 → 应用模型配置 → 长期会话进入 `ready`，或一次性 job 提交首轮。失败时关闭已启动的进程，释放容量。
 
 - 第一版没有等待上线或容量释放的任务队列，不可用时立即拒绝。`202` 仅表示已接受并持久化，尚不证明启动或执行成功。
-- Server 原子限制项目／设备容量，Mac 启动前再次检查。空闲长期会话也计入运行时总量，为人工会话保留容量余量；失败或结束时释放占用。
+- Server 原子限制设备／profile 容量，Mac 启动前再次检查。空闲长期会话也计入运行时总量，为人工会话保留容量余量；失败或结束时释放占用。
 - 新会话有统一的启动超时；job／turn 的 `deadlineSeconds` 从接受时起算，覆盖启动、执行、审批等待和结果处理。Mac 也执行该截止时间。
 - turn 超时后请求取消，确认停止才结束该轮；长期运行时健康时保持可用，无法确认停止或运行时异常时关闭会话。一次性运行时在所有结束路径清理。
 - 取消用 `cancelRequested` 标记；返回 `202` 表示已请求取消，确认停止后为 `cancelled`。若成功结果先提交则保持 `succeeded`；取消期间连接故障则为 `failed`，结果可能未知。
@@ -94,7 +94,7 @@ Server 现有断线／启动结束会话的机制可沿用，并同步关闭 AI 
 
 ## 5. 对外 API 与结果契约
 
-所有 `/api/ai/v1/*` 请求携带 `Authorization: Bearer <project-api-key>`。项目身份由 Key 确定，正文无需提交 `projectId`。所有创建及 turn 提交必须携带 `Idempotency-Key`。
+所有 `/api/ai/v1/*` 请求携带 `Authorization: Bearer <api-key>`。Key 只做调用鉴权，不识别项目或业务用途，正文无需提交 `projectId`。所有创建及 turn 提交必须携带 `Idempotency-Key`。
 
 ### 5.1 一次性会话
 
@@ -143,7 +143,7 @@ Content-Type: application/json
 - `GET /conversations/{id}/turns/{turnId}`：查询该轮状态和结果。
 - `POST /conversations/{id}/turns/{turnId}/cancel`：请求取消当前轮。
 - `DELETE /conversations/{id}`：幂等关闭，拒绝后续 turn 并停止所属运行时；连接故障按第 4.1 节处理。
-- `GET /targets`：查询项目可用设备和能力。
+- `GET /targets`：查询服务可用设备和能力。
 
 调用方等待 conversation 为 `ready` 后提交 turn，启动中返回 `409 conversation_not_ready`，失败或已结束返回 `conversation_closed`。后续 turn 不修改目标、目录、Provider 或模型。长期会话空闲时不自动关闭，调用方负责在一天分析或研究结束后关闭。
 
@@ -161,7 +161,7 @@ Mac 只收集匹配当前 turn 的最终回答，不把思考、工具输出或�
 
 ### 5.4 最小幂等规则
 
-Server 在下发前原子持久化请求，以 `projectId + 操作范围 + Idempotency-Key` 建立唯一约束。操作范围含端点类型及父 conversation ID；同键同规范化请求返回原资源，同键不同内容返回 `409 idempotency_conflict`。Key 轮换不改变 projectId 或已有幂等记录。
+Server 在下发前原子持久化请求，以 `共享服务范围 + 操作范围 + Idempotency-Key` 建立唯一约束。操作范围含端点类型及父 conversation ID；同键同规范化请求返回原资源，同键不同内容返回 `409 idempotency_conflict`。所有通用 Key 共用范围，调用方使用 UUID 等唯一幂等键；Key 轮换不改变已有记录。旧版项目范围仅保留兼容。
 
 Mac 按稳定的 job／conversation／turn ID 去重。相同命令重复到达返回已有执行状态，不再次启动进程或 turn。ACK 只表示已接收，成功以该轮结束和合法最终结果为准。
 
@@ -177,9 +177,9 @@ Server 沿目标设备现有 WebSocket 下发 `ai.session.create`、`ai.turn.sta
 
 ### 6.1 项目调用栏目
 
-Mac 侧边栏增加“项目调用”，与手动会话的“当前”和“历史”分开。只列本机 API 创建的外部会话，按认证后的项目分组；长期会话每轮完成显示“等待下一轮”，一次性完成退出活动列表，可在任务历史查询。
+Mac 侧边栏增加“项目调用”，与手动会话的“当前”和“历史”分开。只列本机 API 创建的外部会话，不识别实际调用项目；通用调用统一标记为 API 来源；长期会话每轮完成显示“等待下一轮”，一次性完成退出活动列表，可在任务历史查询。
 
-创建元数据含 `origin = local | external`、认证确定的 projectId、jobId／conversationId 和 `lifecycle = oneShot | longLived`。传入 Mac ManagedSession 并随 `session.started` 持久化；旧记录缺少 origin 时按 local 兼容。数据库字段用显式 migration 添加，不从名称反推来源。
+创建元数据含 `origin = local | external`、内部兼容字段 projectId（通用调用固定为 api，不代表实际项目）、jobId／conversationId 和 `lifecycle = oneShot | longLived`。传入 Mac ManagedSession 并随 `session.started` 持久化；旧记录缺少 origin 时按 local 兼容。数据库字段用显式 migration 添加，不从名称反推来源。
 
 用户可查看、回复审批／用户问题、停止当前轮和显式关闭长期会话；关闭时提示调用方无法继续使用该 ID。第一版不允许 UI 向外部会话随意插入新 turn，避免改变调用方维护的上下文。Web 按相同 origin 分组，审批显示项目来源，人工审批不能扩大 profile 权限。
 
@@ -198,23 +198,23 @@ Mac 侧边栏增加“项目调用”，与手动会话的“当前”和“历�
 
 Mac 发布能力须声明可强制执行的限制；无法确保 profile 声明的限制时，不开放该 Provider／profile 组合，返回 `capability_unavailable`。第一版 `factsOnly` 强制禁止子进程和普通本地文件写入，但不隔离文件读取或网络访问；这是工具执行限制，不是完整数据防泄漏沙箱。没有网络／文件读取白名单或任意工具白名单配置，研究类细粒度 profile 留待后续。人工及自动审批都不能越过 profile 上限。`invest` 只发送最小必要事实，不通过工作区授予生产数据库访问。
 
-## 8. 项目 API Key 与局域网边界
+## 8. API Key 与局域网边界
 
-Web 提供统一 `/settings` 配置页：创建项目 Key、复制一次性明文、生成替换 Key、撤销，以及配置允许的 deviceId／profile 和并发上限。不使用 CLI 管理 Key，后续 Server 配置均扩展到该页。本机路径、模型凭据与执行权限仍留在 Mac。
+Web 提供统一 `/settings` 配置页：直接生成通用 Key、复制一次性明文、生成替换 Key、撤销。不需要项目、设备、Profile 或并发配置，不依赖 Mac 在线。不使用 CLI，后续 Server 配置均扩展到该页。本机路径、模型凭据与执行权限仍留在 Mac。
 
-项目 Key 管理使用独立 `/api/settings/ai` 接口，限定受信 LAN、同站点浏览器操作，拒绝转发／公网入口与项目 Bearer Key。管理端不复用项目调用凭据；当前单用户受信 LAN 范围不增加管理员账号或登录体系。同一项目的有效 Key 保持一致权限，轮换原子保存，避免并发生成不同权限。
+Key 管理使用独立 `/api/settings/ai` 接口，与配置页一起沿用 Web 现有的 Cloudflare Access 登录保护，允许登录后的浏览器通过 Tunnel 管理；不额外限制局域网来源或拒绝转发请求。保留同源校验并拒绝 AI Bearer Key 管理配置，不增加管理员账号或登录体系。Access 保护范围包含 `/settings` 和 `/api/settings/ai*`，不设置 Bypass；Server 沿用现有 Web 的入口信任方式，不另行验证 Access JWT，绕过 Access 的 Server 端口不得暴露到不可信网络。AI 调用接口的 LAN 限制与此独立。所有新 Key 具有相同 AI API 权限，不区分使用者、项目、设备或用途。
 
-- 使用密码学安全随机源生成至少 256 位随机 Key，完整 Key 仅生成时显示一次。Server 保存 Key 标识、哈希、projectId、权限和撤销状态，不保存明文。
+- 使用密码学安全随机源生成至少 256 位随机 Key，完整 Key 仅生成时显示一次。Server 保存 Key 标识、哈希和撤销状态；旧 projectId／grants 字段仅用于兼容，不保存明文。
 - `invest` 在忽略提交的环境配置中保存 `TERMRELAY_API_KEY`，每次请求带 Bearer Header。日志不记录 Header 或 Key，Key 不放在 URL、事件或前端资源中。
-- 缺少／无效／撤销 Key 返回 `401`；超出设备或 profile 授权返回 `403`。查询和取消校验资源 projectId，跨项目资源返回 `404`。
-- projectId 从鉴权结果写入记录，不能由调用方伪造。轮换可短期并存两把 Key 再撤销旧 Key；撤销后不接受新 API 操作，已有任务按原生命周期结束，管理员可另行停止。
+- 缺少／无效／撤销 Key 返回 `401`；所有通用 Key 可以调用已开放能力、查询和控制 AI 资源，不能把 Key 发给不可信调用方。Key 不扩大 Mac 的本地工具权限。
+- 轮换可短期并存两把 Key 再撤销旧 Key；撤销后不接受新 API 操作，已有任务按原生命周期结束。旧版受限 Key 不自动扩大权限，生成替换 Key 后改用通用鉴权。
 - API Key 只授权 AI 端点，不赋予普通管理接口、设备注册或浏览器审批权限。Mac 仍用受信 LAN `/ws/client`，设备身份机制不在本方案扩展。
 
-AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 Tunnel 或公网端口。若现有 Tunnel 转发整个 Server，必须在入口明确阻断 `/api/ai/v1/*`，避免因共用监听端口而对外可达。项目 Key 提供调用鉴权，不加密 HTTP 传输；当前 HTTP 部署限定在受信网络内。
+AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 Tunnel 或公网端口。若现有 Tunnel 转发整个 Server，必须在入口明确阻断 `/api/ai/v1/*`，避免因共用监听端口而对外可达。API Key 提供调用鉴权，不加密 HTTP 传输；当前 HTTP 部署限定在受信网络内。
 
 ## 9. `invest` 迁移与数据保留
 
-新增 `TermRelayProvider`，保留 `analyze()`、`complete_json()`、`repair_analysis()` 的业务语义。配置 Server 地址、项目 API Key、固定设备与 profile。返回类型兼容未知用量，预算不能依赖始终可用的精确 Token 统计；同时记录调用次数、耗时和业务输入哈希。
+新增 `TermRelayProvider`，保留 `analyze()`、`complete_json()`、`repair_analysis()` 的业务语义。配置 Server 地址、API Key、固定设备与 profile。返回类型兼容未知用量，预算不能依赖始终可用的精确 Token 统计；同时记录调用次数、耗时和业务输入哈希。
 
 1. 先验证一次性期权推荐或手动分析：发送冻结事实，查询结果，继续现有 Schema、证据和行动校验；修复由 `invest` 显式提交新请求。
 2. 接入一天内长期异常行情分析：业务持久化日期／研究主题与 conversationId 的关系，串行追加最新事实；收盘或用户结束后关闭。旧会话已关闭时，显式创建新会话并提供必要摘要，不自动恢复。
@@ -224,7 +224,7 @@ AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 T
 
 ## 10. 实施阶段与验收
 
-**阶段 1：一次性闭环。** 项目 Key 生成与校验、固定设备／profile 能力、权限强制、一次性 JSON job、Mac 后台运行、来源元数据与项目调用栏目、状态／结果查询。同步实现持久化、最小两端幂等、容量限制、本地超时、取消和结束清理，不推迟这些基本能力。
+**阶段 1：一次性闭环。** API Key 生成与校验、固定设备／profile 能力、权限强制、一次性 JSON job、Mac 后台运行、来源元数据与项目调用栏目、状态／结果查询。同步实现持久化、最小两端幂等、容量限制、本地超时、取消和结束清理，不推迟这些基本能力。
 
 **阶段 2：长期闭环。** 创建 conversation、逐轮串行、每轮查询／取消、显式关闭、人工审批、断线即结束。用同一交易日多次行情输入验证上下文连续性和事实更新，完成后迁移自动分析。
 
@@ -232,8 +232,8 @@ AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 T
 
 验收至少覆盖：
 
-- 无 Key／撤销 Key 无法访问，跨项目无法查看或控制资源，设备／profile 权限有效。
-- 同请求并发重试只创建一个资源，Mac 重复命令不再次执行；Key 轮换保持项目与幂等归属。
+- 无 Key／撤销 Key 无法访问，无需项目／设备／Profile 即可生成 Key；Mac 未上线也不阻止生成，本地执行权限仍有效。
+- 同请求并发重试只创建一个资源，Mac 重复命令不再次执行；Key 轮换不改变服务级幂等记录。
 - 一次性完成释放运行时，新推荐上下文独立；长期串行保留上下文，显式关闭后不可继续。
 - Mac 断线／退出或 Server 重启结束外部会话；恢复连接不恢复旧会话、重跑旧任务或让迟到结果覆盖终态。
 - 超时／取消确实停止当前轮，清理只影响 TermRelay 拥有的进程；结果未知时明确告知调用方。

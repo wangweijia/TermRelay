@@ -33,17 +33,18 @@ function fixture() {
   return {repo,registry,client,messages,deviceId,service,token,key,body};
 }
 
-test('Web settings generate, rotate and revoke project keys without exposing stored hashes', async () => {
+test('Web settings generate, rotate and revoke general keys without project or device configuration', async () => {
   const f = fixture();
   const settings = new AISettingsService(f.repo);
-  const input = {projectId:'new_project',deviceIds:[f.deviceId],profiles:['analysis'],capacity:2};
-  const created = await settings.create(input);
+  const created = await settings.create({});
   assert.match(created.apiKey,/^trai_[a-zA-Z0-9_-]{43}$/);
   assert.equal('keyHash' in created,false);
-  assert.equal((await f.service.authenticate(`Bearer ${created.apiKey}`)).projectId,'new_project');
+  assert.equal((await f.service.authenticate(`Bearer ${created.apiKey}`)).grants.unrestricted,true);
+  assert.equal('projectId' in created,false);
+  assert.equal('grants' in created,false);
   const replacement = await settings.rotate(created.id);
   assert.notEqual(replacement.apiKey,created.apiKey);
-  assert.deepEqual(replacement.grants,created.grants);
+  assert.equal(replacement.legacy,false);
   await f.service.authenticate(`Bearer ${created.apiKey}`);
   await settings.revoke(created.id);
   await settings.revoke(created.id);
@@ -52,23 +53,26 @@ test('Web settings generate, rotate and revoke project keys without exposing sto
   await assert.rejects(settings.rotate(created.id),{status:404});
   const summaries = await settings.list();
   assert.ok(summaries.every(key => !('apiKey' in key) && !('keyHash' in key)));
-  await assert.rejects(settings.create({...input,capacity:3}),{status:409});
-  for (const invalid of [{...input,projectId:'../invest'},{...input,capacity:0},{...input,deviceIds:[]},{...input,profiles:[]},{...input,extra:true}])
+  for (const invalid of [{projectId:'invest'},{capacity:2},{deviceIds:[]},{profiles:[]},{extra:true},null,[]])
     assert.throws(() => settings.create(invalid),{status:400});
 });
 
-test('Web key management rejects public/proxied, cross-origin and project-key admin requests', async () => {
+test('Web key management accepts the existing Web proxy boundary and rejects cross-origin and API-key admin requests', async () => {
   const f = fixture();
-  const controller = new AISettingsController(new AISettingsService(f.repo),f.service,f.repo);
+  const controller = new AISettingsController(new AISettingsService(f.repo),f.repo);
   const request = {ip:'192.168.1.3',headers:{host:'192.168.1.2:3007',origin:'http://192.168.1.2:3007','x-termrelay-settings':'1','sec-fetch-site':'same-origin'}} as unknown as FastifyRequest;
   const overview = await controller.overview(request);
-  assert.ok(overview.targets.length > 0);
-  const input = {projectId:'web_project',deviceIds:[f.deviceId],profiles:['analysis'],capacity:2};
+  assert.ok(Array.isArray(overview.keys));
+  const input = {};
   const created = await controller.create(request,input);
-  assert.equal(created.projectId,'web_project');
+  assert.equal(created.legacy,false);
+  const proxied = {...request,ip:'8.8.8.8',headers:{...request.headers,host:'termrelay.example.com',origin:'https://termrelay.example.com','cf-ray':'test-ray','cf-access-jwt-assertion':'forwarded-by-access','x-forwarded-for':'8.8.8.8'}} as unknown as FastifyRequest;
+  assert.ok(Array.isArray((await controller.overview(proxied)).keys));
+  const remoteKey = await controller.create(proxied,input);
+  const rotatedKey = await controller.rotate(proxied,remoteKey.id);
+  assert.notEqual(rotatedKey.apiKey,remoteKey.apiKey);
+  await controller.revoke(proxied,remoteKey.id);
   for (const bad of [
-    {...request,ip:'8.8.8.8'},
-    {...request,headers:{...request.headers,'x-forwarded-for':'192.168.1.3'}},
     {...request,headers:{...request.headers,authorization:`Bearer ${f.token}`}},
     {...request,headers:{...request.headers,origin:'https://evil.example'}},
     {...request,headers:{...request.headers,'sec-fetch-site':'cross-site'}},
@@ -77,15 +81,15 @@ test('Web key management rejects public/proxied, cross-origin and project-key ad
   await controller.revoke(request,created.id);
 });
 
-test('concurrent project key generation cannot introduce inconsistent permissions', async () => {
+test('key generation works without any connected Mac or profiles and concurrent requests create independent keys', async () => {
   const f = fixture(); const settings = new AISettingsService(f.repo);
-  const input = {projectId:'concurrent_project',deviceIds:[f.deviceId],profiles:['analysis'],capacity:2};
-  const results = await Promise.allSettled([settings.create(input),settings.create({...input,capacity:3})]);
-  assert.equal(results.filter(r => r.status === 'fulfilled').length,1);
-  assert.equal((await settings.list()).filter(k => k.projectId === input.projectId).length,1);
+  f.registry.disconnect(f.client);
+  const results = await Promise.all([settings.create(),settings.create({})]);
+  assert.notEqual(results[0]!.apiKey,results[1]!.apiKey);
+  assert.equal((await settings.list()).filter(k => !k.legacy).length,2);
 });
 
-test('settings HTTP routes return one-time keys with no-store and reject cross-site writes', async () => {
+test('settings HTTP routes allow Access/Tunnel headers, return one-time keys with no-store and reject cross-site writes', async () => {
   const f = fixture();
   @Module({controllers:[AISettingsController],providers:[
     {provide:AISettingsService,useValue:new AISettingsService(f.repo)},
@@ -97,8 +101,9 @@ test('settings HTTP routes return one-time keys with no-store and reject cross-s
   try {
     await app.init();
     const http = adapter.getInstance();
-    const headers = {host:'localhost:3007',origin:'http://localhost:3007','x-termrelay-settings':'1'};
-    const created = await http.inject({method:'POST',url:'/api/settings/ai/keys',headers,payload:{projectId:'http_project',deviceIds:[f.deviceId],profiles:['analysis'],capacity:2}});
+    const headers = {host:'termrelay.example.com',origin:'https://termrelay.example.com','x-termrelay-settings':'1','cf-ray':'test-ray','cf-access-jwt-assertion':'forwarded-by-access','x-forwarded-for':'8.8.8.8'};
+    f.registry.disconnect(f.client);
+    const created = await http.inject({method:'POST',url:'/api/settings/ai/keys',headers,payload:{}});
     assert.equal(created.statusCode,201);
     assert.equal(created.headers['cache-control'],'no-store');
     const data = created.json() as {id:string;apiKey:string};
@@ -114,6 +119,23 @@ test('settings HTTP routes return one-time keys with no-store and reject cross-s
     assert.equal(revoked.statusCode,200);
     await assert.rejects(f.service.authenticate(`Bearer ${data.apiKey}`),{status:401});
   } finally { await app.close(); }
+});
+
+test('general keys access available capabilities without project grants while runtime permission checks remain enforced', async () => {
+  const f = fixture(); const settings = new AISettingsService(f.repo);
+  const created = await settings.create();
+  const key = await f.service.authenticate(`Bearer ${created.apiKey}`);
+  assert.ok(f.service.targets(key).length > 0);
+  const legacyJob = await f.service.create(f.key,'job',f.body,'legacy-task-key');
+  assert.equal((await f.service.get(key,legacyJob.id)).id,legacyJob.id);
+  const job = await f.service.create(key,'job',f.body,'general-task-key');
+  const other = await settings.create();
+  const otherKey = await f.service.authenticate(`Bearer ${other.apiKey}`);
+  assert.equal((await f.service.get(otherKey,job.id)).id,job.id);
+  assert.equal((await f.service.create(otherKey,'job',f.body,'general-task-key')).id,job.id);
+  await f.service.cancel(otherKey,job.id,'job');
+  await assert.rejects(f.service.create(key,'job',{...f.body,profile:'not-published'},'missing-profile-key'),{status:409});
+  await assert.rejects(f.service.create(key,'job',{...f.body,model:'not-allowed'},'missing-model-key'),{status:400});
 });
 
 test('project keys reject missing/revoked credentials and isolate resources and targets', async () => {
