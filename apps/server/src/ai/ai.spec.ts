@@ -27,11 +27,11 @@ function fixture() {
   const deviceId = randomUUID();
   registry.connect(client); registry.register(client,deviceId,{name:'Mac',appVersion:'1',platform:'macOS',tools:[]});
   const service = new AIService(repo,registry);
-  service.publishCapabilities(client,deviceId,{profiles:[{id:'analysis',version:1,provider:'codex',capacity:4,policy:'factsOnly',models:['model-a'],efforts:['low']}]});
+  service.publishCapabilities(client,deviceId,{providers:[{provider:'codex',capacity:4,workspaceEnabled:false}]});
   const token = `trai_${randomBytes(32).toString('base64url')}`;
-  const key = {id:randomUUID(),projectId:'invest',keyHash:createHash('sha256').update(token).digest('hex'),grants:{deviceIds:[deviceId],profiles:['analysis'],capacity:4},revoked:false};
+  const key = {id:randomUUID(),projectId:'invest',keyHash:createHash('sha256').update(token).digest('hex'),grants:{unrestricted:true},revoked:false};
   repo.keys.set(key.id,key);
-  const body = {target:{deviceId},profile:'analysis',provider:'codex' as const,input:{instructions:'Analyze',facts:{snapshotId:'1'}},output:{kind:'json' as const,schema:{type:'object',required:['answer'],properties:{answer:{type:'string'}},additionalProperties:false}},deadlineSeconds:180};
+  const body = {target:{deviceId},provider:'codex' as const,input:{instructions:'Analyze',facts:{snapshotId:'1'}},output:{kind:'json' as const,schema:{type:'object',required:['answer'],properties:{answer:{type:'string'}},additionalProperties:false}},deadlineSeconds:180};
   const devices = new DevicesService(registry,new DeviceRepository());
   return {repo,registry,client,messages,deviceId,service,token,key,body,devices};
 }
@@ -56,7 +56,7 @@ test('Web settings generate, rotate and revoke general keys without project or d
   await assert.rejects(settings.rotate(created.id),{status:404});
   const summaries = await settings.list();
   assert.ok(summaries.every(key => !('apiKey' in key) && !('keyHash' in key)));
-  for (const invalid of [{projectId:'invest'},{capacity:2},{deviceIds:[]},{profiles:[]},{extra:true},null,[]])
+  for (const invalid of [{projectId:'invest'},{capacity:2},{deviceIds:[]},{providers:[]},{extra:true},null,[]])
     assert.throws(() => settings.create(invalid),{status:400});
 });
 
@@ -84,15 +84,15 @@ test('Web key management accepts the existing Web proxy boundary and rejects cro
   await controller.revoke(request,created.id);
 });
 
-test('key generation works without any connected Mac or profiles and concurrent requests create independent keys', async () => {
+test('key generation works without any connected Mac or providers and concurrent requests create independent keys', async () => {
   const f = fixture(); const settings = new AISettingsService(f.repo);
   f.registry.disconnect(f.client);
   const results = await Promise.all([settings.create(),settings.create({})]);
   assert.notEqual(results[0]!.apiKey,results[1]!.apiKey);
-  assert.equal((await settings.list()).filter(k => !k.legacy).length,2);
+  assert.equal((await settings.list()).filter(k => results.some(r => r.id === k.id)).length,2);
 });
 
-test('browser targets show live AI profiles, online devices without capabilities and persisted offline devices without requiring a database or key', async () => {
+test('browser targets show live AI providers, online devices without capabilities and persisted offline devices without requiring a database or key', async () => {
   const f = fixture();
   const stored = (await f.devices.list())[0]!;
   const historicalId = randomUUID();
@@ -103,17 +103,17 @@ test('browser targets show live AI profiles, online devices without capabilities
   const controller = new AISettingsController(new AISettingsService(noDatabase),noDatabase,f.service,new HistoricalDevices(f.registry,new DeviceRepository()));
   const request = {headers:{host:'termrelay.example.com','cf-ray':'test-ray','x-forwarded-for':'8.8.8.8'}} as unknown as FastifyRequest;
   let targets = await controller.targets(request);
-  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.profiles[0]?.id,'analysis');
+  assert.equal(targets.find(t => t.deviceId === f.deviceId)?.providers[0]?.provider,'codex');
   assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,true);
-  assert.deepEqual(targets.find(t => t.deviceId === historicalId),{deviceId:historicalId,name:'Old Mac',online:false,profiles:[]});
-  f.service.publishCapabilities(f.client,f.deviceId,{profiles:[]});
+  assert.deepEqual(targets.find(t => t.deviceId === historicalId),{deviceId:historicalId,name:'Old Mac',online:false,providers:[]});
+  f.service.publishCapabilities(f.client,f.deviceId,{providers:[]});
   targets = await controller.targets(request);
-  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.profiles,[]);
+  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.providers,[]);
   assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,true);
   f.registry.disconnect(f.client);
   targets = await controller.targets(request);
   assert.equal(targets.find(t => t.deviceId === f.deviceId)?.online,false);
-  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.profiles,[]);
+  assert.deepEqual(targets.find(t => t.deviceId === f.deviceId)?.providers,[]);
   await assert.rejects(controller.targets({...request,headers:{...request.headers,authorization:`Bearer ${f.token}`}} as FastifyRequest),{status:403});
 });
 
@@ -135,7 +135,7 @@ test('settings HTTP routes allow Access/Tunnel headers, return one-time keys wit
     assert.equal(targets.statusCode,200);
     assert.equal(targets.headers['cache-control'],'no-store');
     assert.equal(targets.json()[0].deviceId,f.deviceId);
-    assert.equal(targets.json()[0].profiles[0].provider,'codex');
+    assert.equal(targets.json()[0].providers[0].provider,'codex');
     f.registry.disconnect(f.client);
     const created = await http.inject({method:'POST',url:'/api/settings/ai/keys',headers,payload:{}});
     assert.equal(created.statusCode,201);
@@ -155,7 +155,7 @@ test('settings HTTP routes allow Access/Tunnel headers, return one-time keys wit
   } finally { await app.close(); }
 });
 
-test('general keys access available capabilities without project grants while runtime permission checks remain enforced', async () => {
+test('general keys choose provider and model without business configuration while execution admission remains enforced', async () => {
   const f = fixture(); const settings = new AISettingsService(f.repo);
   const created = await settings.create();
   const key = await f.service.authenticate(`Bearer ${created.apiKey}`);
@@ -168,20 +168,26 @@ test('general keys access available capabilities without project grants while ru
   assert.equal((await f.service.get(otherKey,job.id)).id,job.id);
   assert.equal((await f.service.create(otherKey,'job',f.body,'general-task-key')).id,job.id);
   await f.service.cancel(otherKey,job.id,'job');
-  await assert.rejects(f.service.create(key,'job',{...f.body,profile:'not-published'},'missing-profile-key'),{status:409});
-  await assert.rejects(f.service.create(key,'job',{...f.body,model:'not-allowed'},'missing-model-key'),{status:400});
+  await assert.rejects(f.service.create(key,'job',{...f.body,provider:'dsh'},'missing-provider-key'),{status:409});
+  const chosen = await f.service.create(key,'job',{...f.body,model:'caller-model',effort:'high'},'caller-model-key');
+  assert.equal(chosen.model,'caller-model');
+  assert.equal(f.messages.at(-1)?.data.payload.model,'caller-model');
+  assert.throws(() => validateRequest('job',{...f.body,profile:'removed'}),{status:400});
 });
 
-test('project keys reject missing/revoked credentials and isolate resources and targets', async () => {
+test('legacy keys cannot silently gain execution privileges and revoked credentials remain rejected', async () => {
   const f = fixture();
   await assert.rejects(f.service.authenticate(),{status:401});
   assert.equal((await f.service.authenticate(`Bearer ${f.token}`)).projectId,'invest');
   const r = await f.service.create(f.key,'job',f.body,'request-key-1');
-  const foreign = {...f.key,projectId:'other',grants:{...f.key.grants,deviceIds:[]}};
+  const foreign = {...f.key,projectId:'other',grants:{...f.key.grants,unrestricted:false,deviceIds:[]}};
   assert.deepEqual(f.service.targets(foreign),[]);
   await assert.rejects(f.service.get(foreign,r.id),{status:404});
   await assert.rejects(f.service.cancel(foreign,r.id,'job'),{status:404});
   await assert.rejects(f.service.create(foreign,'job',f.body,'foreign-key'),{status:403});
+  const legacy = {...f.key,grants:{unrestricted:false,deviceIds:[f.deviceId],capacity:4}};
+  await assert.rejects(f.service.create(legacy,'job',f.body,'legacy-key'),{status:403,message:'legacy_key_requires_replacement'});
+  assert.equal((await f.service.get(legacy,r.id)).id,r.id);
   f.key.revoked = true;
   await assert.rejects(f.service.authenticate(`Bearer ${f.token}`),{status:401});
 });
@@ -209,7 +215,7 @@ test('JSON results are turn-correlated, terminal and acknowledged only after per
 });
 test('long conversation runs successive turns, rejects busy and remains ready until closed', async () => {
   const f = fixture();
-  const c = await f.service.create(f.key,'conversation',{target:f.body.target,profile:'analysis',provider:'codex'},'conversation-key');
+  const c = await f.service.create(f.key,'conversation',{target:f.body.target,provider:'codex'},'conversation-key');
   await assert.rejects(f.service.turn(f.key,c.id,{input:f.body.input,output:f.body.output},'turn-key-1'),{status:409});
   await f.service.update(f.client,f.deviceId,{id:c.id,status:'ready'});
   const t = await f.service.turn(f.key,c.id,{input:f.body.input,output:f.body.output},'turn-key-1');
@@ -258,28 +264,27 @@ test('LAN controller blocks forwarded/public requests and hides raw request data
   await assert.rejects(controller.targets({...request,headers:{'x-forwarded-for':'192.168.1.3'}} as FastifyRequest,`Bearer ${f.token}`),{status:403});
   await assert.rejects(controller.targets({...request,ip:'8.8.8.8'} as FastifyRequest,`Bearer ${f.token}`),{status:403});
 });
-test('AI wire validation rejects invalid messages and duplicate capability profiles', () => {
+test('AI wire validation rejects invalid messages and duplicate capability providers', () => {
   const validator = new ProtocolValidator();
   const msg = {type:'ai.update',protocolVersion:'2',messageId:randomUUID(),deviceId:randomUUID(),sentAt:new Date().toISOString(),payload:{id:randomUUID(),status:'succeeded',text:'{}'}};
   assert.equal(validator.validate(msg).ok,true);
   assert.equal(validator.validate({...msg,seq:0}).ok,false);
   assert.equal(validator.validate({...msg,payload:{...msg.payload,status:'invented'}}).ok,false);
-  const profile = {id:'analysis',version:1,provider:'codex',capacity:1,policy:'factsOnly'};
-  assert.equal(validator.validate({...msg,type:'ai.capabilities',payload:{profiles:[profile,profile]}}).ok,false);
+  const provider = {provider:'codex',capacity:1,workspaceEnabled:false};
+  assert.equal(validator.validate({...msg,type:'ai.capabilities',payload:{providers:[provider,provider]}}).ok,false);
 });
 
-test('capacity is per profile and socket replacement terminates old resources', async () => {
+test('capacity is per provider and socket replacement terminates old resources', async () => {
   const f = fixture();
   await f.service.onModuleInit();
   try {
-    f.service.publishCapabilities(f.client,f.deviceId,{profiles:[
-      {id:'analysis',version:1,provider:'codex',capacity:1,policy:'factsOnly'},
-      {id:'other',version:1,provider:'codex',capacity:1,policy:'factsOnly'},
+    f.service.publishCapabilities(f.client,f.deviceId,{providers:[
+      {provider:'codex',capacity:1,workspaceEnabled:false},
+      {provider:'dsh',capacity:1,workspaceEnabled:false},
     ]});
-    f.key.grants.profiles.push('other');
     const first = await f.service.create(f.key,'job',f.body,'capacity-first');
     await assert.rejects(f.service.create(f.key,'job',f.body,'capacity-second'),{status:409});
-    const second = await f.service.create(f.key,'job',{...f.body,profile:'other'},'capacity-other');
+    const second = await f.service.create(f.key,'job',{...f.body,provider:'dsh'},'capacity-other');
     const next = {readyState:1,send:()=>undefined,close:()=>undefined} as unknown as WebSocket;
     f.registry.connect(next);
     f.registry.register(next,f.deviceId,{name:'Mac',appVersion:'1',platform:'macOS',tools:[]});

@@ -19,48 +19,25 @@ struct AiOutput: Codable, Sendable {
     }
 }
 
-struct AiProfile: Codable, Sendable {
-    let id: String
-    let version: Int
-    let provider: String
-    let capacity: Int
-    let policy: String
-    let models: [String]?
-    let efforts: [String]?
-    init(id: String, version: Int, provider: String, capacity: Int, policy: String, models: [String]? = nil, efforts: [String]? = nil) {
-        self.id = id
-        self.version = version
-        self.provider = provider
-        self.capacity = capacity
-        self.policy = policy
-        self.models = models
-        self.efforts = efforts
-    }
-}
-
 struct AiCapabilities: Codable, Sendable {
-    let profiles: [AiProfile]
-    init(profiles: [AiProfile]) {
-        self.profiles = profiles
+    let providers: [AiProviderCapability]
+    init(providers: [AiProviderCapability]) {
+        self.providers = providers
     }
 }
 
 struct AiCreate: Codable, Sendable {
     let id: String
     let projectId: String
-    let profile: String
-    let profileVersion: Int
     let provider: String
     let lifecycle: String
     let displayName: String
     let model: String?
     let effort: String?
     let turn: AiTurn?
-    init(id: String, projectId: String, profile: String, profileVersion: Int, provider: String, lifecycle: String, displayName: String, model: String? = nil, effort: String? = nil, turn: AiTurn? = nil) {
+    init(id: String, projectId: String, provider: String, lifecycle: String, displayName: String, model: String? = nil, effort: String? = nil, turn: AiTurn? = nil) {
         self.id = id
         self.projectId = projectId
-        self.profile = profile
-        self.profileVersion = profileVersion
         self.provider = provider
         self.lifecycle = lifecycle
         self.displayName = displayName
@@ -115,9 +92,19 @@ struct AiUpdate: Codable, Sendable {
     }
 }
 
+struct AiProviderCapability: Codable, Sendable {
+    let provider: String
+    let capacity: Int
+    let workspaceEnabled: Bool
+    init(provider: String, capacity: Int, workspaceEnabled: Bool) {
+        self.provider = provider
+        self.capacity = capacity
+        self.workspaceEnabled = workspaceEnabled
+    }
+}
+
 struct AiJobRequest: Codable, Sendable {
     let target: [String: JSONValue]
-    let profile: String
     let provider: String
     let model: String?
     let effort: String?
@@ -126,9 +113,8 @@ struct AiJobRequest: Codable, Sendable {
     let output: AiOutput
     let deadlineSeconds: Int?
     let contextId: String?
-    init(target: [String: JSONValue], profile: String, provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil, input: AiInput, output: AiOutput, deadlineSeconds: Int? = nil, contextId: String? = nil) {
+    init(target: [String: JSONValue], provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil, input: AiInput, output: AiOutput, deadlineSeconds: Int? = nil, contextId: String? = nil) {
         self.target = target
-        self.profile = profile
         self.provider = provider
         self.model = model
         self.effort = effort
@@ -142,14 +128,12 @@ struct AiJobRequest: Codable, Sendable {
 
 struct AiConversationRequest: Codable, Sendable {
     let target: [String: JSONValue]
-    let profile: String
     let provider: String
     let model: String?
     let effort: String?
     let displayName: String?
-    init(target: [String: JSONValue], profile: String, provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil) {
+    init(target: [String: JSONValue], provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil) {
         self.target = target
-        self.profile = profile
         self.provider = provider
         self.model = model
         self.effort = effort

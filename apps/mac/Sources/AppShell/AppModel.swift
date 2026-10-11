@@ -35,16 +35,22 @@ final class AppModel: ObservableObject {
         didSet { defaults.set(acpSendShortcut.rawValue, forKey: Keys.acpSendShortcut) }
     }
     @Published var sessionName = ""
-    @Published var aiProfilesJSON: String {
+    @Published var aiServiceEnabled: Bool {
         didSet {
-            defaults.set(aiProfilesJSON,forKey:"aiProfilesJSON")
+            defaults.set(aiServiceEnabled,forKey:"aiServiceEnabled")
+            Task { await publishAICapabilities() }
+        }
+    }
+    @Published var aiWorkingDirectory: String {
+        didSet {
+            defaults.set(aiWorkingDirectory,forKey:"aiWorkingDirectory")
             Task { await publishAICapabilities() }
         }
     }
     private lazy var aiRuntime = AIRuntimeManager(
-        factory: { [weak self] profile, root, directory in
+        factory: { [weak self] configuration, root, directory in
             guard let self else { throw AgentError.providerUnavailable("Mac App 已关闭") }
-            return try await self.aiLaunch(profile:profile,root:root,directory:directory)
+            return try await self.aiLaunch(configuration:configuration,root:root,directory:directory)
         },
         announce: { [weak self] create,directory,adapter in await self?.announceAI(create,directory:directory,adapter:adapter) },
         eventHandler: { [weak self] event in await self?.observeAI(event) },
@@ -54,7 +60,7 @@ final class AppModel: ObservableObject {
         didSet { persistProxyConfigurations() }
     }
     @Published var toolExecutablePaths: [String: String] {
-        didSet { defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths) }
+        didSet { defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths); Task { await publishAICapabilities() } }
     }
     @Published var serverURL: String {
         didSet {
@@ -81,7 +87,7 @@ final class AppModel: ObservableObject {
     }
 
     init(
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults = DeviceIdentity.preferences,
         credentialStore: any CredentialStoring = KeychainCredentialStore(),
         pairingClient: ClientPairingClient = ClientPairingClient(),
         quickActionStore: QuickActionStore = QuickActionStore()
@@ -90,7 +96,8 @@ final class AppModel: ObservableObject {
         self.credentialStore = credentialStore
         self.pairingClient = pairingClient
         self.quickActionStore = quickActionStore
-        aiProfilesJSON = defaults.string(forKey:"aiProfilesJSON") ?? "[]"
+        aiServiceEnabled = defaults.bool(forKey:"aiServiceEnabled")
+        aiWorkingDirectory = defaults.string(forKey:"aiWorkingDirectory") ?? ""
         do {
             quickActions = try quickActionStore.load()
         } catch {
@@ -111,13 +118,7 @@ final class AppModel: ObservableObject {
             serverURL = developmentServerURL
             defaults.set(developmentServerURL, forKey: Keys.serverURL)
         }
-        if let stored = defaults.string(forKey: Keys.deviceID), let id = UUID(uuidString: stored) {
-            deviceID = id
-        } else {
-            let id = UUID()
-            deviceID = id
-            defaults.set(id.uuidString, forKey: Keys.deviceID)
-        }
+        deviceID = DeviceIdentity.load(defaults:defaults)
         dshAPIKeyConfigured = ((try? credentialStore.read(account: Keys.dshAPIKeyAccount)) ?? nil)?
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         refreshClientAuthorizationState()
@@ -175,15 +176,15 @@ final class AppModel: ObservableObject {
 
     func beginConnecting() { connectionState = .connecting }
 
-    private func aiLaunch(profile: AIProfileConfiguration, root: URL, directory: URL) throws -> AILaunchContext {
-        guard serverURL.hasSuffix("/ws/client"), let tool = BuiltInTool(rawValue:profile.provider),
-              let executable = configuredExecutableURL(for:tool) ?? ExecutableLocator.find(named:profile.provider) else {
+    private func aiLaunch(configuration: AIExecutionConfiguration, root: URL, directory: URL) throws -> AILaunchContext {
+        guard serverURL.hasSuffix("/ws/client"), let tool = BuiltInTool(rawValue:configuration.provider),
+              let executable = configuredExecutableURL(for:tool) ?? ExecutableLocator.find(named:configuration.provider) else {
             throw AgentError.providerUnavailable("AI Provider 不可用或不是局域网连接")
         }
         var environment = TerminalEnvironment.make(proxy:proxyConfiguration(for:tool),executableURL:executable)
-        if profile.provider == "dsh" {
-            guard let key = try credentialStore.read(account:Keys.dshAPIKeyAccount), !key.isEmpty, profile.policy == "factsOnly" else {
-                throw AgentError.unsupportedCapability("DSH factsOnly/key")
+        if configuration.provider == "dsh" {
+            guard let key = try credentialStore.read(account:Keys.dshAPIKeyAccount), !key.isEmpty, configuration.directory == nil else {
+                throw AgentError.unsupportedCapability("DSH key/workspace")
             }
             environment["DEEPSEEK_API_KEY"] = key
             let adapter = DSHStructuredAdapter(configuredExecutableURL:executable,transportFactory:{ executable,directory,env in
@@ -194,7 +195,7 @@ final class AppModel: ObservableObject {
         }
         let sandbox: AIRuntimeSandbox?
         let binary: URL
-        if profile.policy == "factsOnly" {
+        if configuration.directory == nil {
             guard let native = AIRuntimeSandbox.nativeCodex(executable) else { throw AgentError.unsupportedCapability("Codex native executable") }
             binary = native
             let state = root.appendingPathComponent("provider-state",isDirectory:true)
@@ -213,15 +214,26 @@ final class AppModel: ObservableObject {
     private func publishAICapabilities() async {
         guard serverURL.hasSuffix("/ws/client"), let remoteClient else { return }
         do {
-            try await aiRuntime.configure(aiProfilesJSON)
+            let configurations: [AIExecutionConfiguration] = aiServiceEnabled ? [
+                AIExecutionConfiguration(provider:"codex",capacity:4,directory:aiWorkingDirectory.isEmpty ? nil:aiWorkingDirectory),
+                AIExecutionConfiguration(provider:"dsh",capacity:4,directory:nil),
+            ] : []
+            try await aiRuntime.configure(configurations)
             var available = Set<String>()
             if let codex = configuredExecutableURL(for:.codex) ?? ExecutableLocator.find(named:"codex"), AIRuntimeSandbox.nativeCodex(codex) != nil { available.insert("codex") }
             if dshAPIKeyConfigured, (configuredExecutableURL(for:.dsh) ?? ExecutableLocator.find(named:"dsh")) != nil { available.insert("dsh") }
             await remoteClient.publishAI(type:"ai.capabilities",payload:await aiRuntime.capabilities(availableProviders:available))
         } catch {
-            errorMessage = "AI profiles：\(error.localizedDescription)"
-            await remoteClient.publishAI(type:"ai.capabilities",payload:AiCapabilities(profiles:[]))
+            errorMessage = "AI 服务：\(error.localizedDescription)"
+            await remoteClient.publishAI(type:"ai.capabilities",payload:AiCapabilities(providers:[]))
         }
+    }
+
+    func chooseAIWorkingDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
+        panel.message = "选择允许外部 Codex 会话操作的工作目录。目录只保存在这台 Mac。"
+        if panel.runModal() == .OK, let url = panel.url { aiWorkingDirectory = url.resolvingSymlinksInPath().path }
     }
 
     private func announceAI(_ create: AiCreate, directory: URL, adapter: any StructuredAgentAdapter) async {
@@ -399,11 +411,13 @@ final class AppModel: ObservableObject {
         }
         try credentialStore.write(trimmed, account: Keys.dshAPIKeyAccount)
         dshAPIKeyConfigured = true
+        Task { await publishAICapabilities() }
     }
 
     func removeDSHAPIKey() throws {
         try credentialStore.delete(account: Keys.dshAPIKeyAccount)
         dshAPIKeyConfigured = false
+        Task { await publishAICapabilities() }
     }
 
     func chooseExecutable(for tool: BuiltInTool) {

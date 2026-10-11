@@ -4,7 +4,6 @@
   "type": "object",
   "required": [
     "target",
-    "profile",
     "provider"
   ],
   "properties": {
@@ -20,11 +19,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "profile": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128
     },
     "provider": {
       "enum": [
@@ -81,70 +75,17 @@
       },
       "additionalProperties": false
     },
-    "AiProfile": {
-      "type": "object",
-      "required": [
-        "id",
-        "version",
-        "provider",
-        "capacity",
-        "policy"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "maxLength": 128,
-          "minLength": 1
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "provider": {
-          "enum": [
-            "codex",
-            "dsh"
-          ]
-        },
-        "capacity": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 16
-        },
-        "policy": {
-          "enum": [
-            "factsOnly",
-            "workspace"
-          ]
-        },
-        "models": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "type": "string"
-          }
-        },
-        "efforts": {
-          "type": "array",
-          "maxItems": 10,
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
     "AiCapabilities": {
       "type": "object",
       "required": [
-        "profiles"
+        "providers"
       ],
       "properties": {
-        "profiles": {
+        "providers": {
           "type": "array",
-          "maxItems": 32,
+          "maxItems": 2,
           "items": {
-            "$ref": "#/$defs/AiProfile"
+            "$ref": "#/$defs/AiProviderCapability"
           }
         }
       },
@@ -155,8 +96,6 @@
       "required": [
         "id",
         "projectId",
-        "profile",
-        "profileVersion",
         "provider",
         "lifecycle",
         "displayName"
@@ -170,15 +109,6 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 64
-        },
-        "profile": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "profileVersion": {
-          "type": "integer",
-          "minimum": 1
         },
         "provider": {
           "enum": [
@@ -306,6 +236,31 @@
         "effort": {
           "type": "string",
           "maxLength": 32
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiProviderCapability": {
+      "type": "object",
+      "required": [
+        "provider",
+        "capacity",
+        "workspaceEnabled"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "codex",
+            "dsh"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "workspaceEnabled": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

@@ -2,16 +2,16 @@
 import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import type { NotificationSettings } from '../types';
-import type { AiProfile } from '@termrelay/contracts';
+import type { AiProviderCapability } from '@termrelay/contracts';
 
 interface ProjectKey { id: string; revoked: boolean; legacy: boolean }
-interface AITarget { deviceId: string; name: string; online: boolean; profiles: AiProfile[] }
+interface AITarget { deviceId: string; name: string; online: boolean; providers: AiProviderCapability[] }
 const targets = ref<AITarget[]>([]);
 const targetsLoading = ref(false);
 const targetsError = ref('');
 const copiedDeviceId = ref('');
 const deviceIdField = ref<HTMLInputElement>();
-const visibleTargets = computed(() => [...targets.value].sort((a,b) => Number(b.online && b.profiles.length > 0)-Number(a.online && a.profiles.length > 0) || Number(b.online)-Number(a.online) || a.name.localeCompare(b.name)));
+const visibleTargets = computed(() => [...targets.value].sort((a,b) => Number(b.online && b.providers.length > 0)-Number(a.online && a.providers.length > 0) || Number(b.online)-Number(a.online) || a.name.localeCompare(b.name)));
 const keys = ref<ProjectKey[]>([]);
 const busy = ref(false);
 const loading = ref(false);
@@ -113,21 +113,21 @@ onBeforeUnmount(() => { generated.value = undefined; window.removeEventListener(
     <p v-if="message" role="status">{{ message }}</p>
     <section class="settings-card">
       <div class="settings-heading"><h2>AI 设备</h2><button :disabled="targetsLoading" @click="refreshTargets">{{ targetsLoading ? '读取中…' : '刷新设备' }}</button></div>
-      <p>复制设备 ID 到调用方的目标设备配置，再选择该设备下的 Profile。这里仅展示执行能力，不影响生成 Key。</p>
+      <p>复制设备 ID 到调用方的目标设备配置，选择可用 Provider 即可。任务内容、模型和输出格式由调用方指定。</p>
       <p v-if="targetsError" class="settings-error" role="alert">{{ targetsError }}</p>
       <p v-else-if="!targets.length && !targetsLoading">还没有已注册设备。请让 Mac App 连接当前 Server，然后刷新设备。</p>
       <article v-for="target in visibleTargets" :key="target.deviceId" class="settings-device">
-        <div class="settings-heading"><strong class="device-name">{{ target.name }}</strong><span class="device-state" :class="{ available: target.online && target.profiles.length > 0 }">{{ !target.online ? '离线' : target.profiles.length ? '在线 · 已开放 AI 能力' : '在线 · 未开放 AI 能力' }}</span></div>
+        <div class="settings-heading"><strong class="device-name">{{ target.name }}</strong><span class="device-state" :class="{ available: target.online && target.providers.length > 0 }">{{ !target.online ? '离线' : target.providers.length ? '在线 · 已开放 AI 能力' : '在线 · 未开放 AI 能力' }}</span></div>
         <div class="device-id"><code>{{ target.deviceId }}</code><button @click="copyDeviceId(target.deviceId)">复制设备 ID</button></div>
         <p v-if="!target.online">设备当前不可调用；上线并公布能力后刷新查看。</p>
-        <p v-else-if="!target.profiles.length">设备尚未公布可用 AI Profile，请检查 Mac 的 AI 服务配置与 Provider 可用性。</p>
-        <div v-for="profile in target.profiles" :key="profile.id" class="device-profile">
-          <code>{{ profile.id }}</code><small>{{ profile.provider }} · {{ profile.policy === 'factsOnly' ? '仅事实分析' : '工作区工具' }} · 容量 {{ profile.capacity }}</small>
-          <small>模型：{{ profile.models?.length ? profile.models.join('、') : '使用 Profile 默认模型' }} · 强度：{{ profile.efforts?.length ? profile.efforts.join('、') : '使用默认强度' }}</small>
+        <p v-else-if="!target.providers.length">请在 Mac 设置中开启 AI 服务，并检查工具是否可用；DSH 还需要配置 DeepSeek Key。</p>
+        <div v-for="provider in target.providers" :key="provider.provider" class="device-provider">
+          <strong>{{ provider.provider }}</strong><small>{{ provider.workspaceEnabled ? '已授权工作目录，可使用工具（保留人工审批）' : '隔离执行，未授权工作目录工具' }} · 会话容量 {{ provider.capacity }}</small>
+          <small>模型和推理强度可由调用方选择；省略时使用 Provider 默认值，实际支持情况由 Provider 验证。</small>
         </div>
       </article>
       <label v-if="copiedDeviceId" class="device-copy">设备 ID（可手动复制）<input ref="deviceIdField" :value="copiedDeviceId" readonly aria-label="设备 ID" @focus="deviceIdField?.select()"></label>
-      <small>在线且已公布 Profile 不代表一定有空闲容量；提交时仍由 Server 和 Mac 检查。</small>
+      <small>在线不代表一定有空闲容量；提交时仍由 Server 和 Mac 检查。</small>
     </section>
     <section class="settings-card">
       <div class="settings-heading"><h2>API Key</h2><button :disabled="loading || busy" @click="refresh">{{ loading ? '读取中…' : '刷新' }}</button></div>
@@ -173,8 +173,8 @@ small { display: block; margin-top: 6px; color: #a9b4c4; }
 .device-state { font-size: 12px; padding: 4px 8px; border-radius: 6px; background: #253247; color: #a9b4c4; }
 .device-state.available { background: #183a32; color: #8ed9b9; }
 .device-id { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
-.device-id code, .device-profile code { overflow-wrap: anywhere; }
-.device-profile { padding: 10px 12px; margin-top: 8px; background: #172337; border-radius: 8px; }
+.device-id code { overflow-wrap: anywhere; }
+.device-provider { padding: 10px 12px; margin-top: 8px; background: #172337; border-radius: 8px; }
 .device-copy { display: block; margin: 12px 0; color: #a9b4c4; }
 .device-copy input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px; color: inherit; background: #172337; border: 1px solid #475569; border-radius: 6px; font-family: monospace; }
 button { padding: 8px 12px; cursor: pointer; }

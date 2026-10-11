@@ -24,7 +24,7 @@ export class AISettingsController {
     const live = new Map(this.ai.availableTargets().map(target => [target.deviceId,target]));
     return (await this.devices.list()).map(device => ({
       deviceId:device.id,name:device.name,online:live.get(device.id)?.online ?? false,
-      profiles:live.get(device.id)?.profiles ?? [],
+      providers:live.get(device.id)?.providers ?? [],
     }));
   }
   @Get() @Header('Cache-Control','no-store') async overview(@Req() req: FastifyRequest) {

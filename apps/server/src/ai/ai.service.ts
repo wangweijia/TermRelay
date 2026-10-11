@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, ForbiddenException, NotFoundException, ConflictException, ServiceUnavailableException, BadRequestException, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
-import type { AiCapabilities, AiProfile, AiUpdate, AiCreate, AiTurn, AiJobRequest, AiConversationRequest, AiTurnRequest } from '@termrelay/contracts';
+import type { AiCapabilities, AiProviderCapability, AiUpdate, AiCreate, AiTurn, AiJobRequest, AiConversationRequest, AiTurnRequest } from '@termrelay/contracts';
 import type WebSocket from 'ws';
 import { DeviceConnectionRegistry } from '../realtime/device-connection.registry';
 import { AIRepository } from './ai.repository';
@@ -12,7 +12,7 @@ export const isTerminal = (r: AIResource): boolean => ['closed','succeeded','fai
 @Injectable()
 export class AIService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AIService.name);
-  private capabilities = new Map<string, { client: WebSocket; profiles: AiProfile[] }>();
+  private capabilities = new Map<string, { client: WebSocket; providers: AiProviderCapability[] }>();
   private timer?: NodeJS.Timeout;
   private unsubscribe?: () => void;
   private lastPruneAt = 0;
@@ -42,22 +42,20 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
 
   publishCapabilities(client: WebSocket, deviceId: string, value: AiCapabilities): void {
     if (!this.registry.isRegisteredClient(client,deviceId)) return;
-    this.capabilities.set(deviceId, {client,profiles:value.profiles});
+    this.capabilities.set(deviceId, {client,providers:value.providers});
   }
   availableTargets() {
     return this.registry.listDevices().map(d => ({
       deviceId:d.deviceId, name:d.name, online:!!this.registry.getClient(d.deviceId),
-      profiles:this.profiles(d.deviceId),
+      providers:this.providers(d.deviceId),
     }));
   }
   targets(key: AIProjectKeyEntity) {
-    return this.availableTargets().filter(d => key.grants.unrestricted === true || key.grants.deviceIds.includes(d.deviceId)).map(d => ({
-      ...d,profiles:d.profiles.filter(p => key.grants.unrestricted === true || key.grants.profiles.includes(p.id)),
-    }));
+    return key.grants.unrestricted === true ? this.availableTargets() : [];
   }
-  private profiles(deviceId: string): AiProfile[] {
+  private providers(deviceId: string): AiProviderCapability[] {
     const c = this.capabilities.get(deviceId);
-    return c && this.registry.getClient(deviceId) === c.client ? c.profiles : [];
+    return c && this.registry.getClient(deviceId) === c.client ? c.providers : [];
   }
 
   async create(key: AIProjectKeyEntity, kind: 'job' | 'conversation', body: AiJobRequest | AiConversationRequest, idem: string): Promise<AIResource> {
@@ -67,18 +65,15 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       const old = [...rows.values()].find(r => r.idempotencyScope === scope);
       if (old) return this.repeat(old.data,body);
       const deviceId = body.target.deviceId.toLowerCase();
-      const p = this.admit(key,deviceId,body.profile,body.provider);
+      const p = this.admit(key,deviceId,body.provider);
       const active = [...rows.values()].map(r => r.data).filter(r => r.kind !== 'turn' && !isTerminal(r));
-      if ((key.grants.unrestricted !== true && active.filter(r => r.projectId === key.projectId).length >= key.grants.capacity)
-        || active.filter(r => r.deviceId === deviceId).length >= 4
-        || active.filter(r => r.deviceId === deviceId && r.profile === p.id).length >= p.capacity) throw new ConflictException('device_busy');
-      if (body.model && !p.models?.includes(body.model)) throw new BadRequestException('unsupported_model');
-      if (body.effort && !p.efforts?.includes(body.effort)) throw new BadRequestException('unsupported_effort');
+      if (active.filter(r => r.deviceId === deviceId).length >= 4
+        || active.filter(r => r.deviceId === deviceId && r.provider === p.provider).length >= p.capacity) throw new ConflictException('device_busy');
       const id = randomUUID();
       const now = new Date().toISOString();
       const job = body as AiJobRequest;
-      const r: AIResource = { id,kind,projectId:key.projectId,deviceId,sessionId:id,profile:p.id,profileVersion:p.version,provider:body.provider,
-        displayName:body.displayName ?? `${key.projectId} · ${body.profile}`,fingerprint:fingerprint(body),status:kind === 'job' ? 'accepted':'starting',
+      const r: AIResource = { id,kind,projectId:key.projectId,deviceId,sessionId:id,provider:body.provider,
+        displayName:body.displayName ?? body.provider,fingerprint:fingerprint(body),status:kind === 'job' ? 'accepted':'starting',
         activeTurnId:kind === 'job' ? id:null,waitingFor:null,cancelRequested:false,result:null,error:null,actualModel:null,actualEffort:null,usage:null,
         createdAt:now,finishedAt:null,deadlineAt:new Date(Date.now()+(kind === 'job' ? job.deadlineSeconds ?? 180:30)*1000).toISOString(),
         ...(body.model ? {model:body.model}:{}),...(body.effort ? {effort:body.effort}:{}),
@@ -90,7 +85,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
   }
   private async dispatchCreate(r: AIResource): Promise<void> {
     if (isTerminal(r) || r.status === 'ready' || r.status === 'running') return;
-    const payload: AiCreate = {id:r.id,projectId:r.projectId,profile:r.profile,profileVersion:r.profileVersion,provider:r.provider,
+    const payload: AiCreate = {id:r.id,projectId:r.projectId,provider:r.provider,
       lifecycle:r.kind === 'job' ? 'oneShot':'longLived',displayName:r.displayName,
       ...(r.model ? {model:r.model}:{}),...(r.effort ? {effort:r.effort}:{}),...(r.kind === 'job' ? {turn:this.turnPayload(r)}:{})};
     if (!this.send(r.deviceId,'ai.session.create',payload)) await this.disconnected(r.deviceId);
@@ -102,7 +97,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       const old = [...rows.values()].find(r => r.idempotencyScope === scope);
       if (old) return this.repeat(old.data,body);
       const c = this.owned(rows,key,sessionId,'conversation');
-      this.admit(key,c.deviceId,c.profile,c.provider);
+      this.admit(key,c.deviceId,c.provider);
       if (c.status === 'closed') throw new ConflictException('conversation_closed');
       if (c.status !== 'ready') throw new ConflictException('conversation_not_ready');
       if (c.activeTurnId) throw new ConflictException('conversation_busy');
@@ -202,10 +197,11 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     r.cancelDeadlineAt ??= new Date(Date.now()+10000).toISOString();
     if (!this.send(r.deviceId,'ai.turn.cancel',{id:r.sessionId,turnId:r.id})) this.finish(r,'connection_lost');
   }
-  private admit(key: AIProjectKeyEntity, deviceId: string, profile: string, provider: string): AiProfile {
-    if (key.grants.unrestricted !== true && (!key.grants.deviceIds.includes(deviceId) || !key.grants.profiles.includes(profile))) throw new ForbiddenException('profile_forbidden');
+  private admit(key: AIProjectKeyEntity, deviceId: string, provider: string): AiProviderCapability {
+    // Old profile-scoped credentials cannot silently gain broader execution access.
+    if (key.grants.unrestricted !== true) throw new ForbiddenException('legacy_key_requires_replacement');
     if (!this.registry.getClient(deviceId)) throw new ServiceUnavailableException('device_offline');
-    const p = this.profiles(deviceId).find(p => p.id === profile && p.provider === provider);
+    const p = this.providers(deviceId).find(p => p.provider === provider);
     if (!p) throw new ConflictException('capability_unavailable');
     return p;
   }

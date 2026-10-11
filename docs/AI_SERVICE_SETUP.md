@@ -16,44 +16,28 @@ pnpm --filter @termrelay/server migration:run
 
 仅将端口开放到受信 LAN／Docker 网络。AI Controller 拒绝公网来源及携带转发／Cloudflare 标识的请求；若已有 Tunnel 转发整个服务，仍需显式阻断 `/api/ai/v1/*`。API Key 是调用凭据，HTTP 不提供传输加密。Mac 使用 `/ws/client`，公网设备入口不接收 AI 服务事件。
 
-## 2. Mac 开放 Profile
+## 2. Mac 开启 AI 服务
 
-设置 → “局域网 AI 服务 Profiles”，默认值为 `[]`，即不开放执行能力。可填入：
+Mac 设置分为“连接与交互”“AI 服务”“工具与凭据”三个页签，不再填写 Profile JSON。
 
-```json
-[
-  {
-    "id": "invest.market-analysis.v1",
-    "version": 1,
-    "provider": "codex",
-    "capacity": 2,
-    "policy": "factsOnly"
-  },
-  {
-    "id": "invest.options-recommendation.v1",
-    "version": 1,
-    "provider": "codex",
-    "capacity": 2,
-    "policy": "factsOnly"
-  }
-]
-```
+1. 在“连接与交互”设置 Server 连接地址并连接。本机设备 ID 可直接复制；它使用固定偏好域保存，兼容已有 ID，首次生成以本机硬件标识派生、不直接暴露硬件标识。重启、开发／打包启动和更换 Server 不产生新 ID。
+2. 在“工具与凭据”选择 Codex 或 DSH。工具默认自动查找；自定义可执行文件通过文件选择器指定。Codex 需已有可用登录凭据；DSH 的 DeepSeek Key 通过密码框保存到 macOS 钥匙串。
+3. 在“AI 服务”打开“开启 AI 服务”，默认关闭。Mac 自动公布可用 Provider，无需配置业务用途、Profile、模型白名单或提示词。
+4. 可选：使用“选择文件夹”授权 Codex 工作目录。不选择时使用隔离临时目录；选择后新的 Codex 会话可以在该目录使用工具，保留人工审批。真实目录只保存在 Mac，调用方不能通过请求指定任意本机路径。DSH 不支持工作目录工具。
 
-每个 ID 唯一，version 为正整数，capacity 为 1–4。Mac 最多运行四个外部会话；空闲长期会话仍占容量。目录和 Profile 配置只保存在这台 Mac。
+未授权工作目录时，macOS sandbox-exec 禁止子进程和普通文件写入，仅允许独立 Provider 状态目录写入；这不是网络与文件读取的完整隔离。Codex 使用隔离 CODEX_HOME，不继承用户 MCP／插件配置，只复制本地登录凭据，并在资源结束后清理。需要可定位的原生二进制；包装器或沙箱禁止的启动辅助程序会明确失败，不降级 PTY。
 
-`factsOnly` 在新建的临时工作区执行，使用 macOS `sandbox-exec` 限制进程：禁止 fork 和执行其他二进制，工作区及普通本地文件不可写，只有独立的 Provider 状态目录可写。Codex 使用独立 CODEX_HOME，不继承用户 MCP／插件配置，仅复制本地登录凭据文件，并在结束时删除整个临时目录。需要已登录 Codex／可用凭据，以及可定位的原生 Codex 二进制；npm 安装的 macOS 平台二进制会自动定位。若依赖 CLI 包装器、自定义凭据存储或沙箱中被禁止的启动辅助进程，应改为受支持安装方式；启动失败会返回错误，不降级 PTY。
+调用方决定任务内容、模型、推理强度、事实和输出格式；省略模型／强度时使用 Provider 默认值，指定值由 Provider 验证实际支持情况，DSH 当前不支持任意模型／强度设置。权限和工作目录仍需本机授权，不受调用方提示词覆盖。
 
-可添加 `model` 指定 Codex 默认模型、`models` 作为可请求模型白名单、`efforts` 作为强度白名单。省略时不接受调用方任意选模型／强度，使用隔离 Provider 默认模型并记录握手可确认的配置。列表是管理员授权范围，启动时仍由 Provider 验证实际可用选项，不能视为模型访问 entitlement 保证。
+每台 Mac 最多保留四个外部会话；Codex 与 DSH 共用设备总容量，空闲长期会话仍占容量。改变目录只影响新会话，已有会话保留创建时的权限；需要先关闭旧会话才能采用新权限。
 
-DSH 可配置独立 ID、`provider: "dsh"` 和 `policy: "factsOnly"`，先在 Mac 设置中保存 DeepSeek Key；不配置 model／models／efforts。DSH 在自己的临时 DSH_HOME 中执行，同样受 OS 写入／子进程限制。DSH 的自定义启动层若要求额外子进程，会明确启动失败；不放宽限制来兼容。
-
-代码工作流仅对 Codex 开放 `policy: "workspace"`，并提供本机绝对 `directory`。工具使用 Codex workspace-write 沙箱和人工审批，不开放自动审批。此模式有意允许工作区工具操作，不适合仅输出事实分析的任务。调用方不能通过 API 改目录。修改 Profile 配置只影响新会话；关闭原会话后再创建，才能采用新配置。
+此改动同时更新 Mac／Server／Web 协议，必须一起更新。旧 Profile 请求不再接受，客户端删除 profile 字段；旧 JSON 配置不再使用。旧版受限 Key 可查询原有资源，但不能创建／继续新执行，需在 Web 生成通用替换 Key，不自动扩大旧凭据权限。
 
 ## 3. 生成 API Key
 
 打开 TermRelay Web，点击顶部“配置”（手机也有入口），或直接访问局域网 Server 的 `/settings` 页面。例如 `http://JETSON_LAN_IP:3006/settings`，本地开发为 `http://127.0.0.1:3007/settings`。不需要命令行。
 
-1. 在“API Key”点击“生成 Key”，不需要填写项目、设备、Profile 或并发参数，Mac 不在线也可以生成。
+1. 在“API Key”点击“生成 Key”，不需要填写项目、设备或并发参数，Mac 不在线也可以生成。
 2. 复制给可信调用方，保存到其后端的 `TERMRELAY_API_KEY` 环境配置。
 3. 勾选“我已保存 Key”后关闭显示。
 
@@ -61,9 +45,9 @@ DSH 可配置独立 ID、`provider: "dsh"` 和 `policy: "factsOnly"`，先在 Ma
 
 换 Key 时点击“生成替换 Key”；新旧 Key 短期并存，调用方换好配置后再撤销旧 Key。新生成的 Key 权限相同：能调用已开放的 AI 能力、查询和控制 AI 资源，不区分项目或用途。幂等记录采用共享服务范围，调用方应使用 UUID 等不易冲突的幂等键。撤销不会自动取消已开始任务。
 
-已有旧版项目受限 Key 不会被自动扩大权限，可继续使用或生成替换 Key 改用通用鉴权。数据库旧 projectId／grants 字段仅用于兼容，不再是新 Key 的用户配置。
+已有旧版项目受限 Key 不会被自动扩大权限，查询原资源仍兼容；新执行需生成替换 Key 改用通用鉴权。数据库旧 projectId／grants 字段仅用于兼容，不再是新 Key 的用户配置。
 
-Mac 的 Profile 是执行能力与工具权限配置，不是 Key 的授权清单。它只在真正提交任务时用于选择执行能力；未连接 Mac 或未开放能力时，任务不可执行，但不影响生成 Key。TermRelay 不检查调用方使用哪个项目、什么业务用途；持有人共享 AI API 访问权限，因此只向可信调用方分发。
+执行时只选择设备与 Provider；未连接 Mac 或未开启 AI 服务时，任务不可执行，但不影响生成 Key。TermRelay 不检查调用方使用哪个项目、什么业务用途；持有人共享 AI API 访问权限，因此只向可信调用方分发。
 
 配置页同时提供审批通知开关，后续 Server 配置统一从这个入口扩展。本机目录、Provider 凭据与执行权限仍由 Mac 管理，不能通过 Web 修改。
 
@@ -71,13 +55,13 @@ API Key 管理接口位于 `/api/settings/ai`，与配置页一起沿用现有 W
 
 ## 4. 调用闭环
 
-在 Web 的“配置 → AI 设备”查看当前 Server 的已注册设备，点击“复制设备 ID”，填写到调用方的 `device_id` 或请求中的 `target.deviceId`。设备卡片同时展示在线状态、Profile ID、Provider、容量及模型／强度白名单。离线设备和在线但未开放 AI 能力的设备会明确标注不可调用；空闲容量仍以提交时的检查为准。列表可手动刷新，不能据旧列表断言设备当前一定可用。
+在 Web 的“配置 → AI 设备”查看当前 Server 的已注册设备，点击“复制设备 ID”，填写到调用方的 `device_id` 或请求中的 `target.deviceId`。设备卡片展示在线状态、Provider、容量及是否授权工作目录工具。离线设备和在线但未开放 AI 能力的设备会明确标注不可调用；空闲容量仍以提交时的检查为准。列表可手动刷新，不能据旧列表断言设备当前一定可用。
 
 此列表通过浏览器管理接口 `GET /api/settings/ai/targets` 获取，不需要输入 API Key，与 Web 一样沿用入口登录保护；设备查看不要求启用数据库，启用数据库时也展示已保存的离线设备。调用方仍通过带 Key 的 `GET /api/ai/v1/targets` 查询实时执行能力。
 
-所有端点位于 `/api/ai/v1`，带 `Authorization: Bearer <API_KEY>`。先调用 `GET /targets`，确认设备在线和 Profile 已公布。请求正文不要传 projectId 或 Mac 路径。
+所有端点位于 `/api/ai/v1`，带 `Authorization: Bearer <API_KEY>`。先调用 `GET /targets`，确认设备在线且 providers 包含所需 Provider。请求正文不要传 profile、projectId 或 Mac 路径。
 
-- 一次性推荐：`POST /jobs`，带 Idempotency-Key、target、profile、provider、input、output 和可选 deadlineSeconds。轮询 `GET /jobs/{id}`，在 succeeded 时读取 result；终态后释放运行时。下一次推荐使用新幂等键，创建新 job。
+- 一次性推荐：`POST /jobs`，带 Idempotency-Key、target、provider、input、output 和可选 deadlineSeconds。轮询 `GET /jobs/{id}`，在 succeeded 时读取 result；终态后释放运行时。下一次推荐使用新幂等键，创建新 job。
 - 一天内分析：`POST /conversations`，等待状态 ready。随后 `POST /conversations/{id}/turns`，每轮使用独立幂等键并提交新快照。轮询 `/conversations/{id}/turns/{turnId}` 获取结果；一天结束后 `DELETE /conversations/{id}`。
 - 中断：job 使用 `/jobs/{id}/cancel`，长期会话使用 `/conversations/{id}/turns/{turnId}/cancel`。202 表示已请求，查询确认 cancelled 或其他终态。Mac／Web 也能中断、审批及关闭。
 

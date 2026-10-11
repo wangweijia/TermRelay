@@ -37,7 +37,7 @@ export class AISettingsService {
   private generate(keys: Map<string,AIProjectKeyEntity>) {
     const apiKey = `trai_${randomBytes(32).toString('base64url')}`;
     // Shared internal namespace, not a caller's project identity. No per-key routing or permissions.
-    const key = {id:randomUUID(),projectId:'api',grants:{unrestricted:true,deviceIds:[],profiles:[],capacity:16},revoked:false,keyHash:createHash('sha256').update(apiKey).digest('hex')};
+    const key = {id:randomUUID(),projectId:'api',grants:{unrestricted:true},revoked:false,keyHash:createHash('sha256').update(apiKey).digest('hex')};
     keys.set(key.id,key);
     return {...keySummary(key),apiKey};
   }

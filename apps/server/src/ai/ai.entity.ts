@@ -6,7 +6,7 @@ export class AIProjectKeyEntity {
   @Column({ name: 'project_id', type: 'varchar', length: 64 }) projectId!: string;
   @Column({ name: 'key_hash', type: 'varchar', length: 64, unique: true }) keyHash!: string;
   // Legacy scoped keys remain valid; newly generated keys only authenticate service access.
-  @Column({ type: 'json' }) grants!: { deviceIds: string[]; profiles: string[]; capacity: number; unrestricted?: boolean };
+  @Column({ type: 'json' }) grants!: { deviceIds?: string[]; capacity?: number; unrestricted?: boolean };
   @Column({ type: 'boolean', default: false }) revoked!: boolean;
 }
 
@@ -23,8 +23,6 @@ export interface AIResource {
   projectId: string;
   deviceId: string;
   sessionId: string;
-  profile: string;
-  profileVersion: number;
   provider: 'codex' | 'dsh';
   displayName: string;
   model?: string;

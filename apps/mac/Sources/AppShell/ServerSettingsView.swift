@@ -2,12 +2,31 @@ import SwiftUI
 
 struct ServerSettingsView: View {
     @EnvironmentObject private var appModel: AppModel
+    @State private var selectedTool: BuiltInTool = .codex
 
     var body: some View {
+        TabView {
+            connectionSettings.tabItem { Label("连接与交互", systemImage:"network") }
+            aiSettings.tabItem { Label("AI 服务", systemImage:"sparkles") }
+            toolSettings.tabItem { Label("工具与凭据", systemImage:"wrench.and.screwdriver") }
+        }
+        .padding(16)
+        .frame(width:620,height:600)
+    }
+
+    private var connectionSettings: some View {
         Form {
             Section("TermRelay Server") {
-                TextField("Server WebSocket URL", text: $appModel.serverURL)
-                LabeledContent("Device ID", value: appModel.deviceID.uuidString)
+                TextField("连接地址", text: $appModel.serverURL, prompt:Text("ws://服务器地址:3006/ws/client"))
+                LabeledContent("本机设备 ID") {
+                    Text(appModel.deviceID.uuidString.lowercased()).font(.system(.caption,design:.monospaced)).textSelection(.enabled)
+                    Button("复制") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(appModel.deviceID.uuidString.lowercased(),forType:.string)
+                    }
+                }
+                Text("设备 ID 固定保存在本机，开发运行与打包运行共用；更换 Server 不改变它。")
+                    .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("重新连接") { appModel.reconnectToServer() }
                     Button("使用公网地址") { appModel.useDefaultPublicServer() }
@@ -31,30 +50,53 @@ struct ServerSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            DSHCredentialSettingsSection()
-
-            Section("局域网 AI 服务 Profiles") {
-                TextEditor(text:$appModel.aiProfilesJSON)
-                    .font(.system(.caption,design:.monospaced))
-                    .frame(height:120)
-                Text("默认不开放。配置说明见 docs/AI_SERVICE_SETUP.md；真实目录只保存在本机。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            ForEach(BuiltInTool.allCases) { tool in
-                ToolExecutableSettingsSection(tool: tool)
-                ToolProxySettingsSection(tool: tool)
-            }
-
-            Section {
-                Text("代理配置仅保存在这台 Mac，并在新建对应会话时注入进程环境；不会上传到 TermRelay Server。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
         .formStyle(.grouped)
-        .padding()
-        .frame(width: 520)
+    }
+
+    private var aiSettings: some View {
+        Form {
+            Section("对外提供 AI 能力") {
+                Toggle("开启 AI 服务",isOn:$appModel.aiServiceEnabled)
+                Text("通过局域网 Server 为持有 API Key 的调用方提供本机可用的 Codex／DSH。任务内容、提示词和输出格式由调用方决定。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("工具路径与 DeepSeek Key 在“工具与凭据”中设置；API Key 在 Web 配置页生成。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Codex 工作目录（可选）") {
+                LabeledContent("已授权目录") {
+                    Text(appModel.aiWorkingDirectory.isEmpty ? "未授权":appModel.aiWorkingDirectory)
+                        .textSelection(.enabled).lineLimit(3)
+                }
+                HStack {
+                    Button("选择文件夹…") { appModel.chooseAIWorkingDirectory() }
+                    if !appModel.aiWorkingDirectory.isEmpty {
+                        Button("取消目录授权",role:.destructive) { appModel.aiWorkingDirectory = "" }
+                    }
+                }
+                Text("未选择目录时使用隔离临时目录，不允许文件写入或启动工具子进程。选择目录后，新的 Codex 会话可在该目录使用工具，并保留人工审批。DSH 不支持工作目录工具。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("目录与权限由本机授权，真实路径不上传 Server。配置改变只影响新会话；已有会话需先关闭。每台 Mac 最多保留 4 个外部会话，空闲长会话也占容量。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.formStyle(.grouped)
+    }
+
+    private var toolSettings: some View {
+        VStack {
+            Picker("工具",selection:$selectedTool) {
+                ForEach(BuiltInTool.allCases) { tool in Text(tool.displayName).tag(tool) }
+            }.pickerStyle(.segmented)
+            Form {
+                ToolExecutableSettingsSection(tool:selectedTool)
+                if selectedTool == .dsh { DSHCredentialSettingsSection() }
+                ToolProxySettingsSection(tool:selectedTool)
+                Section {
+                    Text("可执行文件和代理配置只保存在本机，应用于新建会话，不上传 Server。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.formStyle(.grouped)
+        }
     }
 }
 
@@ -168,7 +210,8 @@ private struct ToolExecutableSettingsSection: View {
     var body: some View {
         Section("\(tool.displayName) 可执行文件") {
             HStack {
-                TextField("自动从 PATH 查找", text: path)
+                Text(path.wrappedValue.isEmpty ? "自动查找":path.wrappedValue)
+                    .textSelection(.enabled).lineLimit(2)
                 Button("选择…") { appModel.chooseExecutable(for: tool) }
                 if !path.wrappedValue.isEmpty {
                     Button("自动查找") { appModel.setExecutablePath("", for: tool) }

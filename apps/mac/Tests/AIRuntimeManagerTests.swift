@@ -3,6 +3,21 @@ import XCTest
 @testable import TermRelay
 
 final class AIRuntimeManagerTests: XCTestCase {
+    func testCapabilitiesAreProviderBasedAndServiceCanBeDisabled() async throws {
+        let f = await fixture(lifecycle:"longLived")
+        let capabilities = await f.manager.capabilities(availableProviders:["codex"])
+        XCTAssertEqual(capabilities.providers.map(\.provider),["codex"])
+        XCTAssertEqual(capabilities.providers.first?.workspaceEnabled,false)
+        try await f.manager.configure([])
+        let disabled = await f.manager.capabilities(availableProviders:["codex"])
+        XCTAssertTrue(disabled.providers.isEmpty)
+        await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
+        let turns = await f.runtime.turns
+        XCTAssertTrue(turns.isEmpty)
+        let updates = await f.sink.updates
+        XCTAssertTrue(updates.contains(where:{$0.status == "failed"}))
+    }
+
     func testOneShotReturnsOnlyFinalAnswerAndDeduplicatesExecution() async throws {
         let f = await fixture(lifecycle:"oneShot")
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
@@ -131,10 +146,10 @@ final class AIRuntimeManagerTests: XCTestCase {
         let runtime = TestAIRuntime(id:id)
         let sink = AISink()
         let manager = AIRuntimeManager(factory:{_,_,_ in AILaunchContext(adapter:TestAIAdapter(runtime:runtime),environment:[:])},announce:{_,_,_ in},eventHandler:{_ in},updateHandler:{u in await sink.record(u)})
-        try! await manager.configure("[{\"id\":\"analysis\",\"version\":1,\"provider\":\"codex\",\"capacity\":2,\"policy\":\"factsOnly\"}]")
+        try! await manager.configure([AIExecutionConfiguration(provider:"codex",capacity:4,directory:nil)])
         await manager.connected()
         let turn = AiTurn(id:id.uuidString.lowercased(),sessionId:id.uuidString.lowercased(),input:AiInput(instructions:"Analyze"),output:AiOutput(kind:"json"),deadlineAt:deadline())
-        let create = AiCreate(id:id.uuidString.lowercased(),projectId:"invest",profile:"analysis",profileVersion:1,provider:"codex",lifecycle:lifecycle,displayName:"test",turn:lifecycle == "oneShot" ? turn:nil)
+        let create = AiCreate(id:id.uuidString.lowercased(),projectId:"invest",provider:"codex",lifecycle:lifecycle,displayName:"test",turn:lifecycle == "oneShot" ? turn:nil)
         return AIFixture(manager:manager,runtime:runtime,sink:sink,create:create)
     }
     private func payload<T:Encodable>(_ value:T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self,from:JSONEncoder().encode(value)) }

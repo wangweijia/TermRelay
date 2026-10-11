@@ -30,12 +30,12 @@ test('MySQL serializes idempotency and preserves results across service instance
     registry.register(client,deviceId,{name:'AI DB probe',appVersion:'test',platform:'macOS',tools:[]});
     const token = `trai_${randomBytes(32).toString('base64url')}`;
     const keys = db.getRepository(AIProjectKeyEntity);
-    await keys.insert({id:keyID,projectId,keyHash:createHash('sha256').update(token).digest('hex'),revoked:false,grants:{deviceIds:[deviceId],profiles:['probe'],capacity:2}});
+    await keys.insert({id:keyID,projectId,keyHash:createHash('sha256').update(token).digest('hex'),revoked:false,grants:{unrestricted:true}});
     const a = new AIService(new AIRepository(db),registry);
     const b = new AIService(new AIRepository(db),registry);
-    for (const service of [a,b]) service.publishCapabilities(client,deviceId,{profiles:[{id:'probe',version:1,provider:'codex',policy:'factsOnly',capacity:2}]});
+    for (const service of [a,b]) service.publishCapabilities(client,deviceId,{providers:[{provider:'codex',capacity:2,workspaceEnabled:false}]});
     const key = await a.authenticate(`Bearer ${token}`);
-    const body = {target:{deviceId},profile:'probe',provider:'codex' as const,input:{facts:{snapshot:1}},output:{kind:'json' as const,schema:{type:'object'}}};
+    const body = {target:{deviceId},provider:'codex' as const,input:{facts:{snapshot:1}},output:{kind:'json' as const,schema:{type:'object'}}};
     const [first,second] = await Promise.all([a.create(key,'job',body,'probe-idempotency'),b.create(key,'job',body,'probe-idempotency')]);
     resourceIDs.add(first.id); resourceIDs.add(second.id);
     assert.equal(first.id,second.id);

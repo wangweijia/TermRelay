@@ -23,7 +23,8 @@ export class AIController {
     return this.ai.authenticate(authorization);
   }
   private view(r: AIResource) {
-    const {input,output,fingerprint,...result} = r;
+    // Persisted historical JSON may contain fields removed from the current API.
+    const {input,output,fingerprint,profile,profileVersion,...result} = r as AIResource & {profile?:unknown;profileVersion?:unknown};
     const identifiers = r.kind === 'job' ? {jobId:r.id}:r.kind === 'conversation' ? {conversationId:r.id}:{turnId:r.id,conversationId:r.sessionId};
     return {...result,...identifiers,actualProvider:r.provider,elapsedMs:Math.max(0,Date.parse(r.finishedAt ?? new Date().toISOString())-Date.parse(r.createdAt)),links:{self:r.kind === 'turn' ? `/api/ai/v1/conversations/${r.sessionId}/turns/${r.id}`:`/api/ai/v1/${r.kind === 'job' ? 'jobs':'conversations'}/${r.id}`}};
   }

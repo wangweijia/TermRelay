@@ -1,15 +1,9 @@
 import Foundation
 
-struct AIProfileConfiguration: Codable, Sendable {
-    let id: String
-    let version: Int
+struct AIExecutionConfiguration: Sendable {
     let provider: String
     let capacity: Int
-    let policy: String
     let directory: String?
-    let model: String?
-    let models: [String]?
-    let efforts: [String]?
 }
 
 struct AILaunchContext: Sendable {
@@ -18,13 +12,13 @@ struct AILaunchContext: Sendable {
 }
 
 actor AIRuntimeManager {
-    typealias Factory = @Sendable (AIProfileConfiguration, URL, URL) async throws -> AILaunchContext
+    typealias Factory = @Sendable (AIExecutionConfiguration, URL, URL) async throws -> AILaunchContext
     typealias Announce = @Sendable (AiCreate, URL, any StructuredAgentAdapter) async -> Void
     typealias EventHandler = @Sendable (ToolEvent) async -> Void
     typealias UpdateHandler = @Sendable (AiUpdate) async -> Void
     private struct Entry {
         let create: AiCreate
-        let profile: AIProfileConfiguration
+        let configuration: AIExecutionConfiguration
         let root: URL
         let directory: URL
         let coordinator: StructuredSessionCoordinator
@@ -37,7 +31,7 @@ actor AIRuntimeManager {
         var effort: String?
         var ready = false
     }
-    private var profiles: [AIProfileConfiguration] = []
+    private var configurations: [AIExecutionConfiguration] = []
     private var entries: [String:Entry] = [:]
     private var creates = Set<String>()
     private var pendingCreates: [String:String] = [:]
@@ -54,21 +48,19 @@ actor AIRuntimeManager {
     init(factory: @escaping Factory, announce: @escaping Announce, eventHandler: @escaping EventHandler, updateHandler: @escaping UpdateHandler) {
         self.factory = factory; self.announce = announce; self.eventHandler = eventHandler; self.updateHandler = updateHandler
     }
-    func configure(_ value: String) throws {
-        let p = try JSONDecoder().decode([AIProfileConfiguration].self,from:Data(value.utf8))
-        guard p.count <= 32, Set(p.map(\.id)).count == p.count,
-              p.allSatisfy({ !$0.id.isEmpty && $0.id.count <= 128 && $0.version > 0 && (1...4).contains($0.capacity)
-                && ["codex","dsh"].contains($0.provider) && ["factsOnly","workspace"].contains($0.policy)
-                && ($0.policy != "workspace" || ($0.provider == "codex" && $0.directory?.hasPrefix("/") == true)) }) else {
-            throw AgentError.protocolFailure("AI profiles 配置无效")
+    func configure(_ value: [AIExecutionConfiguration]) throws {
+        guard value.count <= 2, Set(value.map(\.provider)).count == value.count,
+              value.allSatisfy({ (1...4).contains($0.capacity) && ["codex","dsh"].contains($0.provider)
+                && ($0.directory == nil || ($0.provider == "codex" && $0.directory?.hasPrefix("/") == true)) }) else {
+            throw AgentError.protocolFailure("AI 执行配置无效")
         }
-        profiles = p
+        configurations = value
     }
     func connected() { online = true }
     func capabilities(availableProviders: Set<String>) -> AiCapabilities {
-        AiCapabilities(profiles: profiles.filter { availableProviders.contains($0.provider)
-            && ($0.policy != "factsOnly" || FileManager.default.isExecutableFile(atPath:"/usr/bin/sandbox-exec")) }.map {
-            AiProfile(id:$0.id,version:$0.version,provider:$0.provider,capacity:$0.capacity,policy:$0.policy,models:$0.models ?? $0.model.map {[$0]},efforts:$0.efforts)
+        AiCapabilities(providers: configurations.filter { availableProviders.contains($0.provider)
+            && ($0.directory != nil || FileManager.default.isExecutableFile(atPath:"/usr/bin/sandbox-exec")) }.map {
+            AiProviderCapability(provider:$0.provider,capacity:$0.capacity,workspaceEnabled:$0.directory != nil)
         })
     }
     func disconnected() async {
@@ -114,18 +106,16 @@ actor AIRuntimeManager {
             return
         }
         guard creates.count < 10000, unconfirmed.count < 32, entries.count + pendingCreates.count < 4,
-              let p = profiles.first(where: {$0.id == c.profile && $0.version == c.profileVersion && $0.provider == c.provider}),
-              entries.values.filter({$0.profile.id == p.id}).count + pendingCreates.values.filter({$0 == p.id}).count < p.capacity else { throw AgentError.unsupportedCapability("profile/capacity") }
+              let p = configurations.first(where: {$0.provider == c.provider}),
+              entries.values.filter({$0.configuration.provider == p.provider}).count + pendingCreates.values.filter({$0 == p.provider}).count < p.capacity else { throw AgentError.unsupportedCapability("provider/capacity") }
         creates.insert(c.id)
-        guard c.model == nil || (p.models ?? p.model.map {[$0]} ?? []).contains(c.model!),
-              c.effort == nil || (p.efforts ?? []).contains(c.effort!) else { throw AgentError.unsupportedCapability("model/effort whitelist") }
-        pendingCreates[c.id] = p.id
+        pendingCreates[c.id] = p.provider
         defer { pendingCreates.removeValue(forKey:c.id) }
         let generation = epoch
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("termrelay-ai-\(c.id)",isDirectory:true)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
         let directory: URL
-        if p.policy == "workspace" {
+        if p.directory != nil {
             directory = URL(fileURLWithPath:p.directory!).resolvingSymlinksInPath()
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath:directory.path,isDirectory:&isDirectory), isDirectory.boolValue else {
@@ -144,7 +134,7 @@ actor AIRuntimeManager {
         catch { try? FileManager.default.removeItem(at:root); throw error }
         guard online, generation == epoch, !closed.contains(c.id) else { await runtime.stop(); try? FileManager.default.removeItem(at:root); return }
         let coordinator = StructuredSessionCoordinator(runtime:runtime)
-        entries[c.id] = Entry(create:c,profile:p,root:root,directory:directory,coordinator:coordinator)
+        entries[c.id] = Entry(create:c,configuration:p,root:root,directory:directory,coordinator:coordinator)
         await announce(c,directory,launch.adapter)
         let events = coordinator.events
         entries[c.id]?.eventTask = Task { [weak self] in
@@ -157,7 +147,7 @@ actor AIRuntimeManager {
             try await coordinator.start(request:AgentSessionRequest(sessionID:uuid,workspaceURL:directory))
             guard online, epoch == generation, entries[c.id] != nil else { await coordinator.stop(); return }
             let options = try await coordinator.configurationOptions()
-            if let model = c.model ?? p.model { _ = try await coordinator.setConfiguration(id:"model",value:model) }
+            if let model = c.model { _ = try await coordinator.setConfiguration(id:"model",value:model) }
             if let effort = c.effort { _ = try await coordinator.setConfiguration(id:"effort",value:effort) }
             let configured = try await coordinator.configurationOptions()
             entries[c.id]?.model = configured.first(where:{$0.id == "model"})?.currentValue ?? options.first(where:{$0.id == "model"})?.currentValue
@@ -195,7 +185,7 @@ actor AIRuntimeManager {
         var waiting: String?
         switch event.payload {
         case .assistantMessageCompleted(let text): e.text = text
-        case .approvalRequested(let request) where e.profile.policy == "factsOnly":
+        case .approvalRequested(let request) where e.configuration.directory == nil:
             entries[id] = e
             _ = try? await e.coordinator.send(.resolveApproval(ApprovalResolution(approvalID:request.approvalID,turnID:request.turnID,decision:.deny)))
             return
@@ -222,8 +212,8 @@ actor AIRuntimeManager {
         guard let e = entries[id] else { return .rejected("conversation_closed","外部会话已关闭") }
         switch action {
         case .startTurn, .steer: return .rejected("external_session","请通过项目 API 提交新一轮")
-        case .resolveApproval(let resolution) where e.profile.policy == "factsOnly" && resolution.decision != .deny:
-            return .rejected("profile_forbidden","Profile 禁止工具操作")
+        case .resolveApproval(let resolution) where e.configuration.directory == nil && resolution.decision != .deny:
+            return .rejected("workspace_not_enabled","未授权工作目录，不能执行工具操作")
         case .interrupt: await cancel(id); return .completed
         default: break
         }

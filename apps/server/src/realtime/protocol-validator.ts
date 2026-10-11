@@ -155,8 +155,8 @@ export class ProtocolValidator {
     if (envelope.type === 'ai.capabilities' || envelope.type === 'ai.update') {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) return invalidContext(envelope,'AI messages must not include sessionId, seq or commandId.');
       if (envelope.type === 'ai.capabilities') {
-        const profiles = (envelope.payload as unknown as AiCapabilities).profiles;
-        if (new Set(profiles.map(p => p.id)).size !== profiles.length) return invalidContext(envelope,'AI profile IDs must be unique.');
+        const providers = (envelope.payload as unknown as AiCapabilities).providers;
+        if (new Set(providers.map(p => p.provider)).size !== providers.length) return invalidContext(envelope,'AI providers must be unique.');
       }
     } else if (envelope.type === 'file.preview.result') {
       if (!envelope.sessionId || envelope.seq !== undefined || envelope.commandId !== undefined) {

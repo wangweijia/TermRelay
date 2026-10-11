@@ -6,7 +6,7 @@
 
 ## 1. 配置与适配器
 
-- [ ] 在 invest 配置中增加 Server 局域网地址、TERMRELAY_API_KEY、固定 deviceId 和 profile 映射；密钥只放后端忽略提交的配置，前端不得获取。
+- [ ] 在 invest 配置中增加 Server 局域网地址、TERMRELAY_API_KEY、固定 deviceId 和 Provider；不配置业务 Profile，模型、提示词、事实和输出格式由 invest 决定。密钥只放后端忽略提交的配置，前端不得获取。
 - [ ] 新增 TermRelayProvider，适配现有 AnalysisProvider／ResearchProvider；沿用 analyze、complete_json、repair_analysis 业务接口。
 - [ ] 实现 targets 检查、创建、轮询、取消和关闭；保留现有模型 Provider 作为明确配置的降级选项。
 - [ ] 区分传输重试与业务重提：请求重试使用原幂等键，新分析／新修复使用新键；Key 轮换不改变资源归属。

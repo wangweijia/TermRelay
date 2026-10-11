@@ -53,15 +53,15 @@ Server  ──沿已有 WebSocket 下发──> Mac ──运行 Codex / DSH
 
 ### 3.1 固定目标 Mac
 
-每次创建必须指定 `target.deviceId`。Server 不自动选设备或故障转移；会话创建后固定设备、Provider、模型、profile ID／版本和工作区。后续 turn 不允许切换这些配置。
+每次创建必须指定 `target.deviceId`。Server 不自动选设备或故障转移；会话创建后固定设备、Provider、模型和本机工作目录授权。后续 turn 不允许切换这些配置。设备 ID 使用固定偏好域保存，兼容已有值；首次生成可由本机硬件标识派生，开发与打包启动共用，不随重启或 Server 变化而变化。
 
 第一版只支持 deviceId。后续可增加管理员配置的单设备别名，映射调整只影响新请求。重复提交先查询已有幂等记录，命中时返回原资源；只有新请求才解析当前别名并保存实际 deviceId，避免别名调整改变已有任务。
 
 ### 3.2 能力发现
 
-当前 `device.register.tools` 是内置工具列表，不能证明 CLI 已安装、凭据可用或某个 profile 可执行。新增 `ai.capabilities`：Mac 连接后及配置变化时上报可用 Provider、profile ID／版本、支持的模型和强度、可强制执行的权限限制及容量，不上报密钥或真实路径。
+当前 `device.register.tools` 是内置工具列表，不能证明 CLI 已安装或凭据可用。`ai.capabilities` 使用 providers 数组：Mac 连接后及配置变化时上报可用 Provider、容量和 workspaceEnabled，不上报密钥或真实路径。删除业务 Profile 和模型／强度白名单；实际可用模型与强度由 Provider 在启动时验证，列表不保证凭据或模型请求一定成功。
 
-`GET /api/ai/v1/targets` 返回当前服务的设备与已开放能力，包含在线状态、名称和 profile。Key 不绑定设备或 profile；Server 检查实际连接、能力与容量，Mac 再次验证本地执行权限。失败返回 `device_offline`、`device_busy` 或 `capability_unavailable`，不换设备重试。
+`GET /api/ai/v1/targets` 返回当前服务的设备与已开放 Provider，包含在线状态、名称、容量和工作目录授权状态。Key 不绑定设备或用途；Server 检查实际连接、能力与容量，Mac 再次验证本地执行权限。失败返回 `device_offline`、`device_busy` 或 `capability_unavailable`，不换设备重试。Web 配置页通过独立浏览器管理接口展示这些能力并支持复制固定设备 ID。
 
 ## 4. 生命周期与最小状态
 
@@ -83,10 +83,10 @@ Server 现有断线／启动结束会话的机制可沿用，并同步关闭 AI 
 
 ### 4.2 启动、容量与超时
 
-创建顺序：Server 鉴权并持久化请求 → Mac 检查 profile、目录、权限、模型与容量 → 启动运行时和协议握手 → 创建 Provider 会话 → 应用模型配置 → 长期会话进入 `ready`，或一次性 job 提交首轮。失败时关闭已启动的进程，释放容量。
+创建顺序：Server 鉴权并持久化请求 → Mac 检查 Provider、目录、权限与容量 → 启动运行时和协议握手 → 创建 Provider 会话 → 验证并应用调用方模型配置 → 长期会话进入 `ready`，或一次性 job 提交首轮。失败时关闭已启动的进程，释放容量。
 
 - 第一版没有等待上线或容量释放的任务队列，不可用时立即拒绝。`202` 仅表示已接受并持久化，尚不证明启动或执行成功。
-- Server 原子限制设备／profile 容量，Mac 启动前再次检查。空闲长期会话也计入运行时总量，为人工会话保留容量余量；失败或结束时释放占用。
+- Server 原子限制设备／Provider 容量，Mac 启动前再次检查。每台 Mac 最多四个外部会话，空闲长期会话也计入运行时总量；失败或结束时释放占用。
 - 新会话有统一的启动超时；job／turn 的 `deadlineSeconds` 从接受时起算，覆盖启动、执行、审批等待和结果处理。Mac 也执行该截止时间。
 - turn 超时后请求取消，确认停止才结束该轮；长期运行时健康时保持可用，无法确认停止或运行时异常时关闭会话。一次性运行时在所有结束路径清理。
 - 取消用 `cancelRequested` 标记；返回 `202` 表示已请求取消，确认停止后为 `cancelled`。若成功结果先提交则保持 `succeeded`；取消期间连接故障则为 `failed`，结果可能未知。
@@ -106,7 +106,6 @@ Content-Type: application/json
 
 {
   "target": { "deviceId": "<mac-device-uuid>" },
-  "profile": "invest.options-recommendation.v1",
   "provider": "codex",
   "input": {
     "instructions": "根据本次冻结事实生成期权推荐，只返回约定 JSON。",
@@ -137,7 +136,7 @@ Content-Type: application/json
 
 ### 5.2 长期会话
 
-- `POST /conversations`：使用 target、profile、provider、可选 model／effort 和显示名称创建，返回 conversationId、`starting` 和查询链接，不隐式执行首轮。
+- `POST /conversations`：使用 target、provider、可选 model／effort 和显示名称创建，返回 conversationId、`starting` 和查询链接，不隐式执行首轮。
 - `GET /conversations/{id}`：查询状态、activeTurnId 和关闭原因。
 - `POST /conversations/{id}/turns`：提交 input、output、deadlineSeconds 与幂等键，返回独立 turnId 和 `accepted`。
 - `GET /conversations/{id}/turns/{turnId}`：查询该轮状态和结果。
@@ -151,7 +150,7 @@ Content-Type: application/json
 
 ### 5.3 输入、输出和错误
 
-`input.instructions` 是任务指令，`input.facts` 是业务事实，至少一项非空。Mac Adapter 序列化并映射到 Provider，不默认等价于原生 system role。Profile 固定规则和权限始终有效，调用方指令不能覆盖权限；第一版不暴露任意 system／developer 配置覆盖。
+`input.instructions` 是调用方任务指令，`input.facts` 是业务事实，至少一项非空。Mac Adapter 序列化并映射到 Provider，不默认等价于原生 system role。TermRelay 不判断业务用途；本机授权权限始终有效，调用方指令不能覆盖权限，第一版不暴露任意 system／developer 配置覆盖。
 
 `output.kind` 支持 `text` 和 `json`，每轮显式声明。JSON 可携带受限内联 Schema，Server 不建立投资业务 Schema 注册表；保存所用 Schema 内容哈希供审计。限制输入、Schema 和输出大小，拒绝远程 `$ref`，限制嵌套深度和校验复杂度。
 
@@ -169,11 +168,11 @@ Mac 在连接有效时保留未确认结果，直到 Server 确认已持久化�
 
 ## 6. Mac 运行时与界面
 
-新增 `AIRuntimeManager`，复用 `StructuredAgentAdapter`、`StructuredSessionCoordinator` 和 Codex／DSH Adapter，将启动、容量、Profile 权限和清理从 UI 流程抽离。后台运行时使用 actor 与 Sendable 边界，UI 状态留在 `@MainActor`。
+新增 `AIRuntimeManager`，复用 `StructuredAgentAdapter`、`StructuredSessionCoordinator` 和 Codex／DSH Adapter，将启动、容量、本机权限和清理从 UI 流程抽离。后台运行时使用 actor 与 Sendable 边界，UI 状态留在 `@MainActor`。
 
 Server 沿目标设备现有 WebSocket 下发 `ai.session.create`、`ai.turn.start`、`ai.turn.cancel`、`ai.session.close`，Mac 返回规范化 ACK、事件和结果。跨组件消息先写入 `packages/contracts/**/*.schema.json` 再生成 Swift／TypeScript 类型，不修改生成文件；Server 不解析 Provider 原始协议。
 
-模型对照目标 Mac 能力与 profile 白名单；默认值由 profile 明确配置，不继承 UI 上一次选择。当前 Codex 支持模型与推理强度配置，当前 DSH Adapter 未实现任意模型／强度选择，携带不支持参数时明确拒绝。API 结构化启动失败返回错误，不降级为无法满足结果契约的 PTY；手动会话原有 PTY fallback 保留。
+模型与强度由调用方指定，不使用业务白名单；省略时采用 Provider 默认值，不继承 UI 上一次选择。当前 Codex 支持模型与推理强度配置，当前 DSH Adapter 未实现任意模型／强度选择，携带不支持参数时明确拒绝。API 结构化启动失败返回错误，不降级为无法满足结果契约的 PTY；手动会话原有 PTY fallback 保留。
 
 ### 6.1 项目调用栏目
 
@@ -181,26 +180,19 @@ Mac 侧边栏增加“项目调用”，与手动会话的“当前”和“历�
 
 创建元数据含 `origin = local | external`、内部兼容字段 projectId（通用调用固定为 api，不代表实际项目）、jobId／conversationId 和 `lifecycle = oneShot | longLived`。传入 Mac ManagedSession 并随 `session.started` 持久化；旧记录缺少 origin 时按 local 兼容。数据库字段用显式 migration 添加，不从名称反推来源。
 
-用户可查看、回复审批／用户问题、停止当前轮和显式关闭长期会话；关闭时提示调用方无法继续使用该 ID。第一版不允许 UI 向外部会话随意插入新 turn，避免改变调用方维护的上下文。Web 按相同 origin 分组，审批显示项目来源，人工审批不能扩大 profile 权限。
+用户可查看、回复审批／用户问题、停止当前轮和显式关闭长期会话；关闭时提示调用方无法继续使用该 ID。第一版不允许 UI 向外部会话随意插入新 turn，避免改变调用方维护的上下文。Web 按相同 origin 分组，人工审批不能扩大本机权限。
 
 ## 7. 工作区与权限
 
-调用方不能传入 Mac 绝对路径。Mac profile 将不透明工作区 ID 映射到隔离临时目录或授权目录，检查规范化路径、存在性与访问权限。Server 只存不透明 ID；目录失效返回错误，不退回用户主目录。长期会话固定创建时的目录与权限快照，管理员撤销 Profile 权限时应先在 UI 或 API 显式关闭相关会话；第一版不提供批量终止活动会话的独立管理接口。
+Mac 设置分为连接与交互、AI 服务、工具与凭据三个页签。AI 服务只有开启开关和可选 Codex 工作目录选择器；可执行文件使用文件选择器，凭据使用密码输入框，代理地址使用明确标注的文本框，不要求用户编辑 JSON。
 
-| Profile 示例 | 工作区 | 适用模式 | 工具权限 |
-| --- | --- | --- | --- |
-| `invest.market-analysis.v1` | 隔离临时目录 | 一天内长期行情分析 | 只处理传入事实，禁止命令与文件修改 |
-| `invest.options-recommendation.v1` | 隔离临时目录 | 一次性期权推荐 | 只处理传入事实，禁止命令与文件修改 |
-| `invest.research.v1` | 隔离目录或授权资料目录 | 长期研究 | 仅白名单工具，按 profile 人工审批 |
-| `invest.code-maintenance.v1` | Mac 授权代码目录 | 按业务选择 | 明确开放的工具，按 profile 人工审批 |
+调用方不能传入 Mac 绝对路径。未授权工作目录时创建隔离临时目录；授权目录通过本机文件夹选择器设置，检查规范化路径、存在性与访问权限。Server 只存不透明工作区 ID；目录失效返回错误，不退回用户主目录。长期会话固定创建时的目录与权限快照，撤销目录授权时应先在 UI 或 API 显式关闭相关会话；第一版不提供批量终止活动会话的独立管理接口。
 
-权限必须在 Provider 配置、工具处理层或进程隔离层强制执行。临时目录和提示词不等于禁止命令；审批拒绝只能限制需要审批的操作。当前 Codex Adapter 的 `workspace-write`／`on-request` 默认配置不能直接作为纯分析 profile 的权限实现。
-
-Mac 发布能力须声明可强制执行的限制；无法确保 profile 声明的限制时，不开放该 Provider／profile 组合，返回 `capability_unavailable`。第一版 `factsOnly` 强制禁止子进程和普通本地文件写入，但不隔离文件读取或网络访问；这是工具执行限制，不是完整数据防泄漏沙箱。没有网络／文件读取白名单或任意工具白名单配置，研究类细粒度 profile 留待后续。人工及自动审批都不能越过 profile 上限。`invest` 只发送最小必要事实，不通过工作区授予生产数据库访问。
+未授权目录时使用 OS 沙箱禁止子进程和普通文件写入，不隔离文件读取或网络访问，不承诺完整数据防泄漏。授权 Codex 目录后使用 workspace-write 和人工审批；DSH 暂不提供工作目录工具。本机权限必须在 Provider、工具处理层或进程隔离层强制执行，不能仅靠提示词。服务不按业务区分分析、推荐或研究，任务和输出由调用方决定。
 
 ## 8. API Key 与局域网边界
 
-Web 提供统一 `/settings` 配置页：直接生成通用 Key、复制一次性明文、生成替换 Key、撤销。不需要项目、设备、Profile 或并发配置，不依赖 Mac 在线。不使用 CLI，后续 Server 配置均扩展到该页。本机路径、模型凭据与执行权限仍留在 Mac。
+Web 提供统一 `/settings` 配置页：直接生成通用 Key、复制一次性明文、生成替换 Key、撤销。不需要项目、设备或并发配置，不依赖 Mac 在线。不使用 CLI，后续 Server 配置均扩展到该页。本机路径、模型凭据与执行权限仍留在 Mac。
 
 Key 管理使用独立 `/api/settings/ai` 接口，与配置页一起沿用 Web 现有的 Cloudflare Access 登录保护，允许登录后的浏览器通过 Tunnel 管理；不额外限制局域网来源或拒绝转发请求。保留同源校验并拒绝 AI Bearer Key 管理配置，不增加管理员账号或登录体系。Access 保护范围包含 `/settings` 和 `/api/settings/ai*`，不设置 Bypass；Server 沿用现有 Web 的入口信任方式，不另行验证 Access JWT，绕过 Access 的 Server 端口不得暴露到不可信网络。AI 调用接口的 LAN 限制与此独立。所有新 Key 具有相同 AI API 权限，不区分使用者、项目、设备或用途。
 
@@ -214,7 +206,7 @@ AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 T
 
 ## 9. `invest` 迁移与数据保留
 
-新增 `TermRelayProvider`，保留 `analyze()`、`complete_json()`、`repair_analysis()` 的业务语义。配置 Server 地址、API Key、固定设备与 profile。返回类型兼容未知用量，预算不能依赖始终可用的精确 Token 统计；同时记录调用次数、耗时和业务输入哈希。
+新增 `TermRelayProvider`，保留 `analyze()`、`complete_json()`、`repair_analysis()` 的业务语义。配置 Server 地址、API Key、固定设备与 Provider。返回类型兼容未知用量，预算不能依赖始终可用的精确 Token 统计；同时记录调用次数、耗时和业务输入哈希。
 
 1. 先验证一次性期权推荐或手动分析：发送冻结事实，查询结果，继续现有 Schema、证据和行动校验；修复由 `invest` 显式提交新请求。
 2. 接入一天内长期异常行情分析：业务持久化日期／研究主题与 conversationId 的关系，串行追加最新事实；收盘或用户结束后关闭。旧会话已关闭时，显式创建新会话并提供必要摘要，不自动恢复。
@@ -224,7 +216,7 @@ AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 T
 
 ## 10. 实施阶段与验收
 
-**阶段 1：一次性闭环。** API Key 生成与校验、固定设备／profile 能力、权限强制、一次性 JSON job、Mac 后台运行、来源元数据与项目调用栏目、状态／结果查询。同步实现持久化、最小两端幂等、容量限制、本地超时、取消和结束清理，不推迟这些基本能力。
+**阶段 1：一次性闭环。** API Key 生成与校验、固定设备／Provider 能力、权限强制、一次性 JSON job、Mac 后台运行、来源元数据与项目调用栏目、状态／结果查询。同步实现持久化、最小两端幂等、容量限制、本地超时、取消和结束清理，不推迟这些基本能力。
 
 **阶段 2：长期闭环。** 创建 conversation、逐轮串行、每轮查询／取消、显式关闭、人工审批、断线即结束。用同一交易日多次行情输入验证上下文连续性和事实更新，完成后迁移自动分析。
 
@@ -232,10 +224,10 @@ AI API 只允许受信局域网／指定 Docker 网络访问，不映射公网 T
 
 验收至少覆盖：
 
-- 无 Key／撤销 Key 无法访问，无需项目／设备／Profile 即可生成 Key；Mac 未上线也不阻止生成，本地执行权限仍有效。
+- 无 Key／撤销 Key 无法访问，无需项目／设备即可生成 Key；Mac 未上线也不阻止生成，本地执行权限仍有效。
 - 同请求并发重试只创建一个资源，Mac 重复命令不再次执行；Key 轮换不改变服务级幂等记录。
 - 一次性完成释放运行时，新推荐上下文独立；长期串行保留上下文，显式关闭后不可继续。
 - Mac 断线／退出或 Server 重启结束外部会话；恢复连接不恢复旧会话、重跑旧任务或让迟到结果覆盖终态。
 - 超时／取消确实停止当前轮，清理只影响 TermRelay 拥有的进程；结果未知时明确告知调用方。
-- 恶意输入不能绕过 profile 执行禁用工具，JSON 提取和校验失败可由调用方处理。
+- 恶意输入不能绕过本机执行权限，JSON 提取和校验失败可由调用方处理。
 - 手动与外部会话分栏、审批来源清晰；业务证据校验保留，敏感数据和本地缓存按期清理。
