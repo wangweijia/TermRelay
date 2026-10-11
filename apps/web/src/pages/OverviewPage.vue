@@ -4,11 +4,12 @@ import TerminalView from '../components/TerminalView.vue';
 import StructuredAgentView from '../components/StructuredAgentView.vue';
 import ApprovalInbox from '../components/ApprovalInbox.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
+import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
 const relay = useRelayStore();
-const originFilter = ref('local');
+const originFilter = ref<'local' | 'external'>('local');
 const listedSessions = computed(() => relay.sessions.filter(s => (s.origin ?? 'local') === originFilter.value));
 const toastMessage = ref<string>();
 const sessionPendingDelete = ref<SessionRecord>();
@@ -157,14 +158,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <select v-model="originFilter" aria-label="会话来源"><option value="local">手动会话</option><option value="external">项目调用</option></select>
+        <SessionSourceSwitch v-model="originFilter" :manual-count="relay.sessions.filter(s => s.origin !== 'external').length" :project-count="relay.sessions.filter(s => s.origin === 'external').length" />
         <div v-if="listedSessions.length" class="session-list">
           <div
             v-for="session in listedSessions"
             :key="session.id"
             class="session-row"
           >
-            <small v-if="session.origin === 'external'">{{ session.projectId }} · {{ session.lifecycle === 'longLived' ? '长期' : '一次性' }}</small>
             <button
               type="button"
               class="session-item"
@@ -177,6 +177,7 @@ onBeforeUnmount(() => {
                   {{ relay.sessionDisplayStatus(session) }}
                 </small>
               </span>
+              <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>{{ session.lifecycle === 'longLived' ? '长期会话' : '一次性任务' }}</span></span>
               <span>{{ session.workspaceId }}</span>
               <code>{{ session.id }}</code>
             </button>
@@ -191,8 +192,8 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-else class="empty-state">
-          <strong>还没有会话</strong>
-          <span>Mac 注册并上传会话后会显示在这里。</span>
+          <strong>{{ originFilter === 'external' ? '暂无项目调用' : '暂无手动会话' }}</strong>
+          <span>{{ originFilter === 'external' ? '项目通过 AI API 创建的会话会显示在这里。' : 'Mac 注册并上传会话后会显示在这里。' }}</span>
         </div>
       </aside>
 

@@ -4,12 +4,13 @@ import ApprovalInbox from '../components/ApprovalInbox.vue';
 import StructuredAgentView from '../components/StructuredAgentView.vue';
 import TerminalView from '../components/TerminalView.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
+import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
 type MobileTab = 'sessions' | 'workspace' | 'approvals' | 'shortcuts';
 const relay = useRelayStore();
-const originFilter = ref('local');
+const originFilter = ref<'local' | 'external'>('local');
 const listedSessions = computed(() => relay.sessions.filter(s => (s.origin ?? 'local') === originFilter.value));
 const activeTab = ref<MobileTab>('sessions');
 const toast = ref<string>();
@@ -66,18 +67,18 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <Transition name="toast"><div v-if="toast" class="mobile-toast">{{ toast }}</div></Transition>
 
     <section v-show="activeTab === 'sessions'" class="mobile-screen mobile-sessions">
-      <div class="mobile-section-heading"><strong>{{ relay.sessions.length }} 个会话</strong><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
+      <div class="mobile-section-heading"><strong>{{ listedSessions.length }} 个会话</strong><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
+      <SessionSourceSwitch v-model="originFilter" :manual-count="relay.sessions.filter(s => s.origin !== 'external').length" :project-count="relay.sessions.filter(s => s.origin === 'external').length" />
       <div class="mobile-session-list">
-        <select v-model="originFilter" aria-label="会话来源"><option value="local">手动会话</option><option value="external">项目调用</option></select>
         <article v-for="session in listedSessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
-          <small v-if="session.origin === 'external'">{{ session.projectId }} · {{ session.lifecycle === 'longLived' ? '长期' : '一次性' }}</small>
           <button class="mobile-session-main" @click="openSession(session)">
             <span><strong>{{ relay.sessionDisplayName(session) }}</strong><small :data-status="relay.sessionDisplayStatus(session)">{{ relay.sessionDisplayStatus(session) }}</small></span>
+            <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>{{ session.lifecycle === 'longLived' ? '长期会话' : '一次性任务' }}</span></span>
             <span>{{ session.runtimeMode.toUpperCase() }} · {{ session.workspaceId }}</span>
           </button>
           <div v-if="session.status === 'finished' || session.status === 'failed'" class="mobile-session-actions"><button @click="removeSession(session, false)">隐藏</button><button class="danger" @click="removeSession(session, true)">永久删除</button></div>
         </article>
-        <div v-if="!relay.sessions.length" class="mobile-empty">暂无会话</div>
+        <div v-if="!listedSessions.length" class="mobile-empty">{{ originFilter === 'external' ? '暂无项目调用' : '暂无手动会话' }}</div>
       </div>
     </section>
 
