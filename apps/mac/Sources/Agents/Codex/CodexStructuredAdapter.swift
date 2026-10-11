@@ -5,10 +5,12 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
     let displayName = "Codex 结构化 Agent"
     let configuredExecutableURL: URL?
     let host: CodexAppServerHost?
+    let aiSandbox: AIRuntimeSandbox?
 
-    init(configuredExecutableURL: URL? = nil, host: CodexAppServerHost? = nil) {
+    init(configuredExecutableURL: URL? = nil, host: CodexAppServerHost? = nil, aiSandbox: AIRuntimeSandbox? = nil) {
         self.configuredExecutableURL = configuredExecutableURL
         self.host = host
+        self.aiSandbox = aiSandbox
     }
 
     func detect() async throws -> AgentInstallation {
@@ -42,7 +44,8 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
             CodexAppServerProcess(
                 executableURL: installation.executableURL,
                 directory: configuration.workspaceURL,
-                environment: configuration.environment
+                environment: configuration.environment,
+                aiSandbox: aiSandbox
             )
         }
         return CodexStructuredRuntime(
@@ -50,7 +53,8 @@ struct CodexStructuredAdapter: StructuredAgentAdapter {
             workspaceURL: configuration.workspaceURL,
             providerVersion: installation.version,
             client: CodexAppServerClient(transport: transport),
-            host: host
+            host: host,
+            factsOnly: aiSandbox != nil
         )
     }
 
@@ -98,6 +102,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
     private let workspaceURL: URL
     private let client: CodexAppServerClient
     private let host: CodexAppServerHost?
+    private let factsOnly: Bool
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
     private var threadID: String?
@@ -117,12 +122,14 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         workspaceURL: URL,
         providerVersion: String,
         client: CodexAppServerClient,
-        host: CodexAppServerHost? = nil
+        host: CodexAppServerHost? = nil,
+        factsOnly: Bool = false
     ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
         self.client = client
         self.host = host
+        self.factsOnly = factsOnly
         descriptor = AgentDescriptor(
             providerID: .codex,
             providerVersion: providerVersion,
@@ -146,6 +153,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 guard !Task.isCancelled else { return }
                 await self?.receive(message)
             }
+            await self?.transportClosed()
         }
     }
 
@@ -158,7 +166,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
             "cwd": .string(workspaceURL.path),
             "approvalPolicy": .string("on-request"),
             "approvalsReviewer": .string("user"),
-            "sandbox": .string("workspace-write"),
+            "sandbox": .string(factsOnly ? "read-only" : "workspace-write"),
             "ephemeral": .bool(true),
             "serviceName": .string("termrelay"),
         ]))
@@ -169,6 +177,11 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         threadID = id
         announceSession(reference)
         return reference
+    }
+
+    private func transportClosed() {
+        guard !stopped else { return }
+        emit(.failed(code:"runtime_exited",message:"Codex App Server 已退出"))
     }
 
     func send(_ action: ToolAction) async throws {

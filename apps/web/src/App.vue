@@ -9,6 +9,8 @@ const route = useRoute();
     <header v-if="!route.meta.mobile" class="app-header">
       <strong>TermRelay</strong>
       <span>Your terminals, within reach.</span>
+      <RouterLink to="/">会话</RouterLink>
+      <RouterLink to="/settings">配置</RouterLink>
     </header>
     <RouterView />
   </div>

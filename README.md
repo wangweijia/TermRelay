@@ -47,6 +47,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 
 ## 核心能力
 
+- **统一 Web 配置**：顶部“配置”进入 `/settings`，管理项目 AI API Key（生成、一次性复制、替换、撤销）和审批通知；Key 管理仅对受信局域网开放，使用说明见 [AI 服务配置](docs/AI_SERVICE_SETUP.md)。
 - **真实远程终端**：保留 ANSI、TrueColor、中文、Emoji、终端 resize、输入、Ctrl-C 和停止操作。
 - **多 Provider 原生 ACP 体验**：结构化呈现回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
 - **ACP Markdown 展示**：Mac 和 Web 自动识别并渲染 AI 回答、思考与计划中的 Markdown；普通文本保持原样，PTY 和命令输出仍按原方式展示。
@@ -369,6 +370,9 @@ scripts/                  校验和发布脚本
 ## 开发文档
 
 - [整体架构](docs/ARCHITECTURE.md)
+- [局域网 AI 服务设计](docs/AI_SERVICE_DESIGN.md)
+- [AI 服务配置与调用](docs/AI_SERVICE_SETUP.md)
+- [invest AI 接入待办（待确认）](docs/INVEST_AI_SERVICE_TODO.md)
 - [Codex App Server 架构决策](docs/ADR-001-CODEX-APP-SERVER.md)
 - [ACP 原生 UI 重构计划与完成记录](docs/CODEX_APP_SERVER_NATIVE_UI_REFACTOR_PLAN.md)
 - [结构化 Agent 适配层](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)

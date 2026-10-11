@@ -19,6 +19,10 @@ export interface SessionRecord {
   status: SessionStatus;
   stateVersion: number;
   autoApproveEnabled: boolean;
+  origin?: 'local' | 'external';
+  projectId?: string | null;
+  aiResourceId?: string | null;
+  lifecycle?: 'oneShot' | 'longLived' | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -115,6 +119,10 @@ export class SessionRepository {
         status: 'running',
         stateVersion: '0',
         autoApproveEnabled: false,
+        origin: payload.origin ?? 'local',
+        projectId: payload.projectId ?? null,
+        aiResourceId: payload.aiResourceId ?? null,
+        lifecycle: payload.lifecycle ?? null,
         startedAt: new Date(payload.startedAt),
         finishedAt: null,
         deletedAt: null,
@@ -209,7 +217,7 @@ export class SessionRepository {
         type,
         payload: { ...payload },
         createdAt,
-        expiresAt: new Date(Date.now() + (type === 'tool.event'
+        expiresAt: new Date(Date.now() + (session.origin === 'external' ? 86400000 : type === 'tool.event'
           ? this.acpEventTtlMs : this.terminalEventTtlMs)),
       });
       if (type === 'tool.event') {
@@ -311,7 +319,7 @@ export class SessionRepository {
   async listPendingApprovals(): Promise<PendingApprovalRecord[]> {
     if (!this.dataSource) return [];
     const rows = await this.dataSource.query<Array<Record<string, unknown>>>(
-      `SELECT a.session_id, COALESCE(s.display_name, s.tool_key) AS session_name,
+      `SELECT a.session_id, COALESCE(s.display_name, s.tool_key) AS session_name, s.project_id,
               a.approval_key, a.turn_ref, a.risk, a.request, a.expires_at, a.created_at
        FROM approvals a JOIN sessions s ON s.id = a.session_id
        WHERE a.decision = 'pending' AND a.expires_at > CURRENT_TIMESTAMP(3)
@@ -319,7 +327,7 @@ export class SessionRepository {
        ORDER BY a.created_at DESC`,
     );
     return rows.map((row) => ({
-      sessionId: String(row.session_id), sessionName: String(row.session_name),
+      sessionId: String(row.session_id), sessionName: row.project_id ? `[${String(row.project_id)}] ${String(row.session_name)}` : String(row.session_name),
       approvalId: String(row.approval_key), turnId: String(row.turn_ref), risk: String(row.risk),
       request: typeof row.request === 'string' ? JSON.parse(row.request) as Record<string, unknown> : row.request as Record<string, unknown>,
       expiresAt: new Date(row.expires_at as string | Date).toISOString(),
@@ -471,6 +479,7 @@ async function purgeUnusedFinishedAcp(
     .where('session.runtimeMode = :mode', { mode: 'acp' })
     .andWhere('session.status = :status', { status: 'finished' })
     .andWhere('session.hasUserMessage = :hasUserMessage', { hasUserMessage: false })
+    .andWhere("session.origin = 'local'")
     .andWhere('session.deletedAt IS NULL');
   if (deviceId) query.andWhere('session.deviceId = :deviceId', { deviceId });
   if (sessionId) query.andWhere('session.id = :sessionId', { sessionId });
@@ -556,6 +565,10 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     status: session.status,
     stateVersion: Number(session.stateVersion),
     autoApproveEnabled: session.autoApproveEnabled,
+    origin: session.origin ?? 'local',
+    projectId: session.projectId ?? null,
+    aiResourceId: session.aiResourceId ?? null,
+    lifecycle: session.lifecycle ?? null,
     startedAt: session.startedAt?.toISOString() ?? null,
     finishedAt: session.finishedAt?.toISOString() ?? null,
     createdAt: session.createdAt.toISOString(),

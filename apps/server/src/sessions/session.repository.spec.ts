@@ -40,6 +40,15 @@ test('disconnect permanently removes only unused ACP sessions for that device', 
   ].sort());
 });
 
+test('unused external conversations survive ordinary empty-session pruning and retain provenance', async () => {
+  const store = new MemorySessions([session('external','acp',{origin:'external',projectId:'invest',aiResourceId:'external',lifecycle:'longLived'})]);
+  await store.repository.finishActiveForDevice('device-a');
+  assert.deepEqual(store.sessionIDs(),['external']);
+  const record = await store.repository.findById('external');
+  assert.equal(record?.origin,'external');
+  assert.equal(record?.projectId,'invest');
+});
+
 test('startup removes previously disconnected unused ACP sessions, not failed or used sessions', async () => {
   const store = new MemorySessions([
     session('old-empty', 'acp', { status: 'finished' }),
@@ -307,6 +316,7 @@ class MemoryQuery {
       if (sql.includes('session.runtimeMode')) return row.runtimeMode === (params.mode ?? params.runtimeMode);
       if (sql.includes('session.status')) return row.status === params.status;
       if (sql.includes('session.hasUserMessage')) return row.hasUserMessage === params.hasUserMessage;
+      if (sql.includes("session.origin = 'local'")) return (row.origin ?? 'local') === 'local';
       if (sql.includes('session.deletedAt')) return row.deletedAt === null;
       if (sql.includes('session.deviceId')) return row.deviceId === params.deviceId;
       if (sql.includes('session.updatedAt <')) {

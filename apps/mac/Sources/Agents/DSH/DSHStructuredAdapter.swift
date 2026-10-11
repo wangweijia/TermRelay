@@ -145,6 +145,7 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
                 guard !Task.isCancelled else { return }
                 await self?.receive(message)
             }
+            await self?.transportClosed()
         }
     }
 
@@ -164,6 +165,11 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
         let reference = AgentSessionReference(providerID: .dsh, opaqueID: id)
         emit(.sessionStarted(reference: reference))
         return reference
+    }
+
+    private func transportClosed() {
+        guard !stopped else { return }
+        emit(.failed(code:"runtime_exited",message:"DSH ACP 已退出"))
     }
 
     func send(_ action: ToolAction) async throws {

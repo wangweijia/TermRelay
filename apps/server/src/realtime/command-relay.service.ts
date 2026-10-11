@@ -73,6 +73,9 @@ export class CommandRelayService implements OnModuleDestroy {
         detail: `Session is ${session.status} and cannot accept commands.`,
       };
     }
+    if (session.origin === 'external' && ['tool.turn.start','tool.config.set'].includes(envelope.type)) {
+      return {ok:false,code:'conflict',detail:'External turns and configuration are controlled by the project AI API.'};
+    }
     const sessionRuntime = session.runtimeMode;
     const commandRuntime = envelope.type === 'session.stop'
       ? undefined

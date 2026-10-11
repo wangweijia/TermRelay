@@ -35,6 +35,21 @@ final class AppModel: ObservableObject {
         didSet { defaults.set(acpSendShortcut.rawValue, forKey: Keys.acpSendShortcut) }
     }
     @Published var sessionName = ""
+    @Published var aiProfilesJSON: String {
+        didSet {
+            defaults.set(aiProfilesJSON,forKey:"aiProfilesJSON")
+            Task { await publishAICapabilities() }
+        }
+    }
+    private lazy var aiRuntime = AIRuntimeManager(
+        factory: { [weak self] profile, root, directory in
+            guard let self else { throw AgentError.providerUnavailable("Mac App 已关闭") }
+            return try await self.aiLaunch(profile:profile,root:root,directory:directory)
+        },
+        announce: { [weak self] create,directory,adapter in await self?.announceAI(create,directory:directory,adapter:adapter) },
+        eventHandler: { [weak self] event in await self?.observeAI(event) },
+        updateHandler: { [weak self] update in await self?.publishAIUpdate(update) }
+    )
     @Published var proxyConfigurations: [String: ToolProxyConfiguration] {
         didSet { persistProxyConfigurations() }
     }
@@ -75,6 +90,7 @@ final class AppModel: ObservableObject {
         self.credentialStore = credentialStore
         self.pairingClient = pairingClient
         self.quickActionStore = quickActionStore
+        aiProfilesJSON = defaults.string(forKey:"aiProfilesJSON") ?? "[]"
         do {
             quickActions = try quickActionStore.load()
         } catch {
@@ -114,9 +130,16 @@ final class AppModel: ObservableObject {
                     if let message { self.errorMessage = message }
                     else if state == .connected { self.errorMessage = nil }
                     if state == .connected {
+                        Task { await self.aiRuntime.connected(); await self.publishAICapabilities() }
                         self.syncRemoteState()
                         self.publishQuickActions()
                         Task { await self.refreshCopilotHistory() }
+                    } else if state == .offline || state == .connecting {
+                        Task {
+                            let externalIDs = self.sessions.filter({$0.projectID != nil}).map(\.id)
+                            await self.aiRuntime.disconnected()
+                            for id in externalIDs { self.closeLocalTerminal(id:id) }
+                        }
                     }
                 }
             },
@@ -142,11 +165,93 @@ final class AppModel: ObservableObject {
             },
             filePreviewWorkspaceHandler: { [weak self] sessionID, workspaceID in
                 await self?.filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID)
+            },
+            aiHandler: { [weak self] type,payload in
+                guard let self else { return }
+                await self.aiRuntime.handle(type:type,payload:payload)
             }
         )
     }
 
     func beginConnecting() { connectionState = .connecting }
+
+    private func aiLaunch(profile: AIProfileConfiguration, root: URL, directory: URL) throws -> AILaunchContext {
+        guard serverURL.hasSuffix("/ws/client"), let tool = BuiltInTool(rawValue:profile.provider),
+              let executable = configuredExecutableURL(for:tool) ?? ExecutableLocator.find(named:profile.provider) else {
+            throw AgentError.providerUnavailable("AI Provider 不可用或不是局域网连接")
+        }
+        var environment = TerminalEnvironment.make(proxy:proxyConfiguration(for:tool),executableURL:executable)
+        if profile.provider == "dsh" {
+            guard let key = try credentialStore.read(account:Keys.dshAPIKeyAccount), !key.isEmpty, profile.policy == "factsOnly" else {
+                throw AgentError.unsupportedCapability("DSH factsOnly/key")
+            }
+            environment["DEEPSEEK_API_KEY"] = key
+            let adapter = DSHStructuredAdapter(configuredExecutableURL:executable,transportFactory:{ executable,directory,env in
+                DSHACPProcess(executableURL:executable,directory:directory,environment:env,
+                    aiSandbox:AIRuntimeSandbox(stateDirectory:URL(fileURLWithPath:env["DSH_HOME"]!)))
+            })
+            return AILaunchContext(adapter:adapter,environment:environment)
+        }
+        let sandbox: AIRuntimeSandbox?
+        let binary: URL
+        if profile.policy == "factsOnly" {
+            guard let native = AIRuntimeSandbox.nativeCodex(executable) else { throw AgentError.unsupportedCapability("Codex native executable") }
+            binary = native
+            let state = root.appendingPathComponent("provider-state",isDirectory:true)
+            try FileManager.default.createDirectory(at:state,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
+            let original = environment["CODEX_HOME"].map {URL(fileURLWithPath:$0)} ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+            let auth = original.appendingPathComponent("auth.json")
+            if FileManager.default.fileExists(atPath:auth.path) { try FileManager.default.copyItem(at:auth,to:state.appendingPathComponent("auth.json")) }
+            // Do not inherit MCP/plugin/tool configuration into facts-only execution.
+            environment["CODEX_HOME"] = state.path
+            environment["TMPDIR"] = state.path
+            sandbox = AIRuntimeSandbox(stateDirectory:state)
+        } else { binary = executable; sandbox = nil }
+        return AILaunchContext(adapter:CodexStructuredAdapter(configuredExecutableURL:binary,aiSandbox:sandbox),environment:environment)
+    }
+
+    private func publishAICapabilities() async {
+        guard serverURL.hasSuffix("/ws/client"), let remoteClient else { return }
+        do {
+            try await aiRuntime.configure(aiProfilesJSON)
+            var available = Set<String>()
+            if let codex = configuredExecutableURL(for:.codex) ?? ExecutableLocator.find(named:"codex"), AIRuntimeSandbox.nativeCodex(codex) != nil { available.insert("codex") }
+            if dshAPIKeyConfigured, (configuredExecutableURL(for:.dsh) ?? ExecutableLocator.find(named:"dsh")) != nil { available.insert("dsh") }
+            await remoteClient.publishAI(type:"ai.capabilities",payload:await aiRuntime.capabilities(availableProviders:available))
+        } catch {
+            errorMessage = "AI profiles：\(error.localizedDescription)"
+            await remoteClient.publishAI(type:"ai.capabilities",payload:AiCapabilities(profiles:[]))
+        }
+    }
+
+    private func announceAI(_ create: AiCreate, directory: URL, adapter: any StructuredAgentAdapter) async {
+        guard let id = UUID(uuidString:create.id), let remoteClient else { return }
+        let manager = aiRuntime
+        let session = LocalStructuredAgentSession(id:id,directory:directory,adapter:adapter,eventHandler:{_ in},
+            approvalHandler:{ [weak self] event in self?.recordApprovalEvent(event) },
+            stateHandler:{ [weak self] id,state in self?.handleStructuredSessionState(id:id,state:state) },
+            externalActionHandler:{ action in await manager.action(sessionID:id,action:action) })
+        structuredSessions[id] = session
+        sessions.append(ManagedSession(id:id,directory:directory,toolID:create.provider,displayName:create.displayName,runtimeMode:.acp,projectID:create.projectId,lifecycle:create.lifecycle))
+        let workspace = workspaceID(for:directory)
+        await remoteClient.publishWorkspace(id:workspace,directory:directory)
+        await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId,lifecycle:create.lifecycle)
+    }
+    private func observeAI(_ event: ToolEvent) async {
+        structuredSessions[event.sessionID]?.observeExternal(event)
+        await remoteClient?.publishToolEvent(event)
+    }
+    private func publishAIUpdate(_ update: AiUpdate) async {
+        await remoteClient?.publishAI(type:"ai.update",payload:update)
+        guard let id = UUID(uuidString:update.id) else { return }
+        if update.status == "closed" || (["succeeded","failed","cancelled"].contains(update.status) && sessions.first(where:{$0.id == id})?.lifecycle == "oneShot") {
+            pendingApprovals.clear(sessionID:id)
+            await structuredSessions[id]?.stop()
+            structuredSessions[id] = nil
+            sessions.removeAll(where:{$0.id == id})
+            await remoteClient?.publishSessionEnded(id:id,status:.finished,finishedAt:RelayDate.now())
+        }
+    }
     func markConnected() { connectionState = .connected }
     func markOffline() { connectionState = .offline }
 
@@ -746,6 +851,9 @@ final class AppModel: ObservableObject {
     }
 
     func closeLocalTerminal(id: UUID) {
+        if sessions.contains(where: {$0.id == id && $0.projectID != nil}) {
+            Task { await aiRuntime.close(id.uuidString.lowercased()) }
+        }
         pendingApprovals.clear(sessionID: id)
         terminalSessions[id]?.terminate()
         terminalSessions[id] = nil
@@ -757,6 +865,7 @@ final class AppModel: ObservableObject {
     }
 
     func terminateAllSessions() async {
+        await aiRuntime.disconnected()
         let hadQuickRuns = quickActionRunner.hasRunningProcesses
         quickActionRunner.terminateAll()
         for _ in 0..<20 where quickActionRunner.hasRunningProcesses {
@@ -774,7 +883,7 @@ final class AppModel: ObservableObject {
         let activeSessions = terminalSessions.values.filter {
             $0.state.isActive && structuredSessions[$0.id] == nil
         }
-        let activeStructured = structuredSessions.values.filter { $0.state.isActive }
+        let activeStructured = structuredSessions.values.filter { $0.state.isActive && !$0.isExternal }
         let managedSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)

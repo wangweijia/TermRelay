@@ -7,6 +7,7 @@ final class DSHACPProcess: @unchecked Sendable, ACPTransport {
     private let executableURL: URL
     private let directory: URL
     private let environment: [String: String]
+    private let aiSandbox: AIRuntimeSandbox?
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let stateLock = NSLock()
     private let lineBuffer: JSONLineBuffer
@@ -15,10 +16,11 @@ final class DSHACPProcess: @unchecked Sendable, ACPTransport {
     private var inputHandle: FileHandle?
     private var stderrTail = Data()
 
-    init(executableURL: URL, directory: URL, environment: [String: String]) {
+    init(executableURL: URL, directory: URL, environment: [String: String], aiSandbox: AIRuntimeSandbox? = nil) {
         self.executableURL = executableURL
         self.directory = directory
         self.environment = environment
+        self.aiSandbox = aiSandbox
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         lines = stream.stream
         continuation = stream.continuation
@@ -34,6 +36,11 @@ final class DSHACPProcess: @unchecked Sendable, ACPTransport {
             let error = Pipe()
             process.executableURL = executableURL
             process.arguments = ["--profile", "acp"]
+            if let aiSandbox {
+                guard let node = ExecutableLocator.find(named: "node") else { throw AgentError.providerUnavailable("找不到 node") }
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+                process.arguments = ["-p", try aiSandbox.profile(executable:node), node.path, executableURL.resolvingSymlinksInPath().path, "--profile", "acp"]
+            }
             process.currentDirectoryURL = directory
             process.environment = environment
             process.standardInput = input

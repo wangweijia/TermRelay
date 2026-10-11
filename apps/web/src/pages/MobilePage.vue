@@ -9,6 +9,8 @@ import type { SessionRecord } from '../types';
 
 type MobileTab = 'sessions' | 'workspace' | 'approvals' | 'shortcuts';
 const relay = useRelayStore();
+const originFilter = ref('local');
+const listedSessions = computed(() => relay.sessions.filter(s => (s.origin ?? 'local') === originFilter.value));
 const activeTab = ref<MobileTab>('sessions');
 const toast = ref<string>();
 let toastTimer: number | undefined;
@@ -58,6 +60,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <header class="mobile-topbar">
       <div><strong>TermRelay</strong><small>{{ activeTab === 'sessions' ? '会话' : activeTab === 'workspace' ? '工作区' : activeTab === 'approvals' ? '审批中心' : '快捷任务' }}</small></div>
       <span class="mobile-connection" :data-state="relay.connectionState">{{ connectionText }}</span>
+      <RouterLink to="/settings">配置</RouterLink>
     </header>
 
     <Transition name="toast"><div v-if="toast" class="mobile-toast">{{ toast }}</div></Transition>
@@ -65,7 +68,9 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <section v-show="activeTab === 'sessions'" class="mobile-screen mobile-sessions">
       <div class="mobile-section-heading"><strong>{{ relay.sessions.length }} 个会话</strong><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
       <div class="mobile-session-list">
-        <article v-for="session in relay.sessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
+        <select v-model="originFilter" aria-label="会话来源"><option value="local">手动会话</option><option value="external">项目调用</option></select>
+        <article v-for="session in listedSessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
+          <small v-if="session.origin === 'external'">{{ session.projectId }} · {{ session.lifecycle === 'longLived' ? '长期' : '一次性' }}</small>
           <button class="mobile-session-main" @click="openSession(session)">
             <span><strong>{{ relay.sessionDisplayName(session) }}</strong><small :data-status="relay.sessionDisplayStatus(session)">{{ relay.sessionDisplayStatus(session) }}</small></span>
             <span>{{ session.runtimeMode.toUpperCase() }} · {{ session.workspaceId }}</span>
@@ -85,7 +90,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
         <div v-if="relay.loadingHistory" class="mobile-empty">加载历史中…</div>
         <TerminalView v-if="!relay.loadingHistory && relay.selectedSession.runtimeMode === 'pty'" :key="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :scroll-revision="relay.scrollToLatestRevision" mobile-composer @input="relay.sendTerminalInput" @resize="relay.resizeTerminal" />
         <KeepAlive :max="12">
-          <StructuredAgentView v-if="!relay.loadingHistory && relay.selectedSession.runtimeMode === 'acp'" :key="relay.selectedSession.id" :session-id="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :scroll-revision="relay.scrollToLatestRevision" :shortcut-enabled="false" :has-older="relay.hasOlderBySession[relay.selectedSession.id] ?? false" :loading-older="relay.loadingOlderHistory" :auto-approve-enabled="relay.selectedSession.autoApproveEnabled" :auto-approve-updating="relay.updatingAutoApprove[relay.selectedSession.id] ?? false" @load-older="relay.loadOlderHistory" @start-turn="relay.startToolTurn" @set-configuration="relay.setToolConfiguration" @interrupt="relay.interruptToolTurn" @resolve-approval="relay.resolveApproval" @resolve-user-input="relay.resolveUserInput" @set-auto-approve="(enabled) => relay.setSessionAutoApprove(relay.selectedSession!.id, enabled)" />
+          <StructuredAgentView v-if="!relay.loadingHistory && relay.selectedSession.runtimeMode === 'acp'" :key="relay.selectedSession.id" :session-id="relay.selectedSession.id" :events="relay.selectedEvents" :interactive="relay.selectedSessionInteractive" :external="relay.selectedSession.origin === 'external'" :scroll-revision="relay.scrollToLatestRevision" :shortcut-enabled="false" :has-older="relay.hasOlderBySession[relay.selectedSession.id] ?? false" :loading-older="relay.loadingOlderHistory" :auto-approve-enabled="relay.selectedSession.autoApproveEnabled" :auto-approve-updating="relay.updatingAutoApprove[relay.selectedSession.id] ?? false" @load-older="relay.loadOlderHistory" @start-turn="relay.startToolTurn" @set-configuration="relay.setToolConfiguration" @interrupt="relay.interruptToolTurn" @resolve-approval="relay.resolveApproval" @resolve-user-input="relay.resolveUserInput" @set-auto-approve="(enabled) => relay.setSessionAutoApprove(relay.selectedSession!.id, enabled)" />
         </KeepAlive>
       </template>
       <div v-else class="mobile-empty"><button @click="activeTab = 'sessions'">选择会话</button></div>

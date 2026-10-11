@@ -33,6 +33,14 @@ struct ServerSettingsView: View {
 
             DSHCredentialSettingsSection()
 
+            Section("局域网 AI 服务 Profiles") {
+                TextEditor(text:$appModel.aiProfilesJSON)
+                    .font(.system(.caption,design:.monospaced))
+                    .frame(height:120)
+                Text("默认不开放。配置说明见 docs/AI_SERVICE_SETUP.md；真实目录只保存在本机。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             ForEach(BuiltInTool.allCases) { tool in
                 ToolExecutableSettingsSection(tool: tool)
                 ToolProxySettingsSection(tool: tool)

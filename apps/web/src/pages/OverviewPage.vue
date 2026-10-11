@@ -8,6 +8,8 @@ import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
 const relay = useRelayStore();
+const originFilter = ref('local');
+const listedSessions = computed(() => relay.sessions.filter(s => (s.origin ?? 'local') === originFilter.value));
 const toastMessage = ref<string>();
 const sessionPendingDelete = ref<SessionRecord>();
 const purgeAssociatedData = ref(false);
@@ -148,19 +150,21 @@ onBeforeUnmount(() => {
         <div class="panel-heading">
           <div>
             <small>SESSIONS</small>
-            <strong>{{ relay.sessions.length }} 个会话</strong>
+            <strong>{{ listedSessions.length }} 个会话</strong>
           </div>
           <button type="button" :disabled="relay.loadingSessions" @click="relay.refreshSessions">
             {{ relay.loadingSessions ? '刷新中' : '刷新' }}
           </button>
         </div>
 
-        <div v-if="relay.sessions.length" class="session-list">
+        <select v-model="originFilter" aria-label="会话来源"><option value="local">手动会话</option><option value="external">项目调用</option></select>
+        <div v-if="listedSessions.length" class="session-list">
           <div
-            v-for="session in relay.sessions"
+            v-for="session in listedSessions"
             :key="session.id"
             class="session-row"
           >
+            <small v-if="session.origin === 'external'">{{ session.projectId }} · {{ session.lifecycle === 'longLived' ? '长期' : '一次性' }}</small>
             <button
               type="button"
               class="session-item"
@@ -241,6 +245,7 @@ onBeforeUnmount(() => {
             :session-id="relay.selectedSession.id"
             :events="relay.selectedEvents"
             :interactive="relay.selectedSessionInteractive"
+            :external="relay.selectedSession.origin === 'external'"
             :scroll-revision="relay.scrollToLatestRevision"
             :has-older="relay.hasOlderBySession[relay.selectedSession.id] ?? false"
             :loading-older="relay.loadingOlderHistory"

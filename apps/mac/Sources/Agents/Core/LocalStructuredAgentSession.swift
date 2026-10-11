@@ -30,6 +30,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private let approvalHandler: @MainActor (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
     private let runtimeReadyHandler: @MainActor @Sendable () throws -> Void
+    let isExternal: Bool
+    private let externalActionHandler: (@Sendable (ToolAction) async -> RemoteCommandResult)?
     private var coordinator: StructuredSessionCoordinator?
     private var eventTask: Task<Void, Never>?
     private var timelineFlushTask: Task<Void, Never>?
@@ -46,7 +48,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         approvalHandler: @escaping @MainActor (ToolEvent) -> Void = { _ in },
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
-        runtimeReadyHandler: @escaping @MainActor @Sendable () throws -> Void = {}
+        runtimeReadyHandler: @escaping @MainActor @Sendable () throws -> Void = {},
+        externalActionHandler: (@Sendable (ToolAction) async -> RemoteCommandResult)? = nil
     ) {
         self.id = id
         self.directory = directory
@@ -58,6 +61,8 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.approvalHandler = approvalHandler
         self.stateHandler = stateHandler
         self.runtimeReadyHandler = runtimeReadyHandler
+        self.externalActionHandler = externalActionHandler
+        isExternal = externalActionHandler != nil
         startedAt = RelayDate.now()
     }
 
@@ -162,12 +167,14 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     }
 
     func setAutoApproveEnabled(_ enabled: Bool) {
+        guard !isExternal else { return }
         guard autoApproveEnabled != enabled else { return }
         autoApproveEnabled = enabled
         if enabled { schedulePendingAutoApprovals() }
     }
 
     func setConfiguration(id: String, value: String) async -> RemoteCommandResult {
+        guard !isExternal else { return .rejected("external_session", "外部会话配置在创建时固定") }
         guard let coordinator else {
             return .rejected("agent_not_ready", "The structured Agent is not ready.")
         }
@@ -198,6 +205,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     }
 
     private func send(_ action: ToolAction) async -> RemoteCommandResult {
+        if let externalActionHandler { return await externalActionHandler(action) }
         guard let coordinator else {
             return .rejected("agent_not_ready", "The structured Agent is not ready.")
         }
@@ -219,6 +227,22 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
 
     private var configurationKey: String {
         "agentConfiguration.\(adapter.providerID.rawValue)"
+    }
+
+    func observeExternal(_ event: ToolEvent) {
+        events.append(event)
+        if events.count > Self.eventTrimThreshold { events.removeFirst(events.count - Self.maximumRetainedEvents) }
+        approvalHandler(event)
+        enqueueTimelineEvent(event)
+        switch event.payload {
+        case .sessionStarted: setState(.ready)
+        case .turnStarted: setState(.running)
+        case .approvalRequested: setState(.awaitingApproval)
+        case .userInputRequested: setState(.awaitingUserInput)
+        case .turnCompleted: setState(.ready)
+        case .failed: setState(.failed)
+        default: break
+        }
     }
 
     private func persistConfiguration(_ options: [AgentConfigOption]) {

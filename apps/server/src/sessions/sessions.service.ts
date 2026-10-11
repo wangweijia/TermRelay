@@ -210,7 +210,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     expectedDeviceId?: string,
   ): Promise<SessionRecord | undefined> {
     const current = await this.findById(sessionId);
-    if (!current || (expectedDeviceId && current.deviceId !== expectedDeviceId)) {
+    if (!current || (expectedDeviceId && current.deviceId !== expectedDeviceId) || (current.origin === 'external' && enabled)) {
       return undefined;
     }
     const updated = await this.serialize(current.deviceId, () =>

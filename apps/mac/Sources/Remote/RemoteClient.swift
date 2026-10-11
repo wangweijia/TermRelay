@@ -8,6 +8,7 @@ actor RemoteClient {
     typealias QuickActionHandler = @Sendable (QuickActionCommand) async -> Void
     typealias QuickActionInputHandler = @Sendable (QuickActionInputRequest) async -> QuickActionInputResult
     typealias FilePreviewWorkspaceHandler = @Sendable (UUID, String) async -> URL?
+    typealias AIHandler = @Sendable (String, JSONValue) async -> Void
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
@@ -17,6 +18,8 @@ actor RemoteClient {
     private let quickActionHandler: QuickActionHandler
     private let quickActionInputHandler: QuickActionInputHandler
     private let filePreviewWorkspaceHandler: FilePreviewWorkspaceHandler
+    private let aiHandler: AIHandler
+    private var externalSessions = Set<UUID>()
     private var serverURL: URL?
     private var credential: String?
     private var socket: URLSessionWebSocketTask?
@@ -54,6 +57,7 @@ actor RemoteClient {
         quickActionHandler: @escaping QuickActionHandler = { _ in },
         quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
         filePreviewWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
+        aiHandler: @escaping AIHandler = { _, _ in },
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
@@ -64,6 +68,7 @@ actor RemoteClient {
         self.quickActionHandler = quickActionHandler
         self.quickActionInputHandler = quickActionInputHandler
         self.filePreviewWorkspaceHandler = filePreviewWorkspaceHandler
+        self.aiHandler = aiHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -92,6 +97,7 @@ actor RemoteClient {
     }
 
     func disconnect() {
+        discardExternalEvents()
         failHistoryRequests(URLError(.networkConnectionLost))
         shouldRun = false
         generation += 1
@@ -128,6 +134,11 @@ actor RemoteClient {
             }),
         ]
         _ = await send(type: "shortcut.catalog", payload: payload)
+    }
+
+    func publishAI<Payload: Encodable & Sendable>(type: String, payload: Payload) async {
+        guard serverURL?.path == "/ws/client" else { return }
+        _ = await send(type:type,payload:payload)
     }
 
     func publishQuickActionRun(_ run: QuickActionRun) async {
@@ -276,9 +287,12 @@ actor RemoteClient {
         toolKey: String,
         displayName: String,
         runtimeMode: SessionRuntimeMode = .pty,
-        startedAt: String
+        startedAt: String,
+        projectID: String? = nil,
+        lifecycle: String? = nil
     ) async {
         if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
+        if projectID != nil { externalSessions.insert(id) }
         sessionsAwaitingSync.insert(id)
         let sent = await send(
             type: "session.started",
@@ -289,7 +303,11 @@ actor RemoteClient {
                 toolKey: toolKey,
                 displayName: displayName,
                 runtimeMode: runtimeMode.rawValue,
-                startedAt: startedAt
+                startedAt: startedAt,
+                origin: projectID == nil ? nil : "external",
+                projectId: projectID,
+                aiResourceId: projectID == nil ? nil : id.uuidString.lowercased(),
+                lifecycle: lifecycle
             )
         )
         guard sent else { return }
@@ -326,6 +344,7 @@ actor RemoteClient {
     }
 
     func publishToolEvent(_ event: ToolEvent) async {
+        guard !endedSessions.contains(event.sessionID) else { return }
         // Provider session startup is represented by session.started. All other
         // providers share one relay sequence with terminal output for this session.
         if case .sessionStarted = event.payload { return }
@@ -379,6 +398,7 @@ actor RemoteClient {
             }
 
             registered = false
+            discardExternalEvents()
             heartbeatTask?.cancel()
             heartbeatTask = nil
             task.cancel(with: .goingAway, reason: nil)
@@ -407,6 +427,10 @@ actor RemoteClient {
 
     private func handle(_ envelope: IncomingRelayEnvelope) async {
         guard envelope.deviceId.caseInsensitiveCompare(deviceID.uuidString) == .orderedSame else { return }
+        if registered, envelope.type.hasPrefix("ai."), serverURL?.path == "/ws/client" {
+            Task { await aiHandler(envelope.type,envelope.payload) }
+            return
+        }
         if let related = envelope.payload.object?["relatedMessageId"]?.string,
            let id = UUID(uuidString: related),
            let pending = historyRequests.removeValue(forKey: id) {
@@ -690,6 +714,7 @@ actor RemoteClient {
     }
 
     private func sendHeartbeat() async {
+        await aiHandler("ai.retry",.object([:]))
         await send(
             type: "device.heartbeat",
             payload: RelayHeartbeat(
@@ -697,6 +722,16 @@ actor RemoteClient {
                 activeSessionCount: activeSessionCount
             )
         )
+    }
+
+    private func discardExternalEvents() {
+        for id in externalSessions {
+            endedSessions.insert(id)
+            pendingEvents[id] = nil; pendingSessionEnds[id] = nil
+            nextSequenceBySession[id] = nil; relaySequenceBySource[id] = nil
+            sessionsAwaitingSync.remove(id); sessionsFinalizingSync.remove(id)
+        }
+        externalSessions.removeAll()
     }
 
     @discardableResult
@@ -729,7 +764,7 @@ actor RemoteClient {
         var sessionEvents = pendingEvents[event.sessionID] ?? []
         if sessionEvents.contains(where: { $0.sequence == event.sequence }) { return true }
         do {
-            try outbox.save(event)
+            if !externalSessions.contains(event.sessionID) { try outbox.save(event) }
         } catch {
             stateHandler(.degraded, "无法保存待同步事件：\(error.localizedDescription)")
             return false

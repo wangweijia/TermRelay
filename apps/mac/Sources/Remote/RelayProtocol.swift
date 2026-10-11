@@ -42,6 +42,10 @@ struct RelaySessionStarted: Encodable, Sendable {
     let displayName: String
     let runtimeMode: String
     let startedAt: String
+    var origin: String? = nil
+    var projectId: String? = nil
+    var aiResourceId: String? = nil
+    var lifecycle: String? = nil
 }
 
 struct RelayToolEvent: Codable, Sendable {

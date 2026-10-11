@@ -3,6 +3,7 @@ import SwiftUI
 
 enum SessionSidebarTab: String, CaseIterable {
     case active = "当前"
+    case projects = "项目调用"
     case history = "历史"
 }
 
@@ -18,6 +19,9 @@ struct SessionSidebar: View {
     let shortcutAction: () -> Void
     let closeAction: (UUID) -> Void
     let deleteHistoryAction: (CopilotHistorySession) -> Void
+    private var listedSessions: [ManagedSession] {
+        sessions.filter { tab == .projects ? $0.projectID != nil : $0.projectID == nil }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,16 +58,16 @@ struct SessionSidebar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .onChange(of: tab) { _, value in
-                if value == .active {
-                    if !sessions.contains(where: { $0.id == selection }) {
-                        selection = sessions.last?.id
+                if value != .history {
+                    if !listedSessions.contains(where: { $0.id == selection }) {
+                        selection = listedSessions.last?.id
                     }
                 } else if !copilotHistory.contains(where: { $0.id == selection }) {
                     selection = copilotHistory.first?.id
                 }
             }
 
-            if tab == .active && sessions.isEmpty {
+            if tab != .history && listedSessions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "rectangle.stack.badge.plus")
                         .font(.title2)
@@ -71,8 +75,9 @@ struct SessionSidebar: View {
                     Text("暂无会话")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Button("创建会话", action: addAction)
+                    if tab == .active { Button("创建会话", action: addAction)
                         .buttonStyle(.link)
+                    } else { Text("由项目 API 创建").font(.caption).foregroundStyle(.secondary) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if tab == .history && copilotHistory.isEmpty {
@@ -84,8 +89,8 @@ struct SessionSidebar: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(selection: $selection) {
-                    if tab == .active {
-                        ForEach(sessions) { session in
+                    if tab != .history {
+                        ForEach(listedSessions.sorted { ($0.projectID ?? "") < ($1.projectID ?? "") }) { session in
                             ClosableSessionSidebarRow(
                                 session: session,
                                 terminalSession: terminalSessions[session.id],
@@ -238,7 +243,8 @@ private struct StructuredSessionSidebarRow: View {
         SessionSidebarRowContent(
             session: session,
             title: session.displayName,
-            state: activeSession.state.sidebarState
+            state: activeSession.state.sidebarState,
+            stateLabel: session.lifecycle == "longLived" && activeSession.state == .ready ? "等待下一轮":nil
         )
     }
 }
@@ -271,6 +277,7 @@ private struct SessionSidebarRowContent: View {
     let session: ManagedSession
     let title: String
     let state: SessionState
+    var stateLabel: String? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -285,13 +292,17 @@ private struct SessionSidebarRowContent: View {
                 Text(title)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
+                if let project = session.projectID {
+                    Text("\(project) · \(session.lifecycle == "longLived" ? "长期" : "一次性")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack(spacing: 5) {
                     Circle()
                         .fill(stateColor)
                         .frame(width: 6, height: 6)
                     Text(toolName)
                     Text("·")
-                    Text(state.rawValue)
+                    Text(stateLabel ?? state.rawValue)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

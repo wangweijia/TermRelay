@@ -5,6 +5,7 @@ let source = await readFile(indexURL, 'utf8');
 for (const [name, path, next] of [
   ['toolEventSchema', './events/tool-event.schema.json', 'toolTurnStartSchema'],
   ['toolConfigSetSchema', './commands/tool-config-set.schema.json', 'toolTurnStartSchema'],
+  ['sessionStartedSchema', './events/session-started.schema.json', 'sessionEndedSchema'],
 ]) {
   const schema = JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
   const declaration = `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
@@ -151,6 +152,17 @@ const historyDeclarations = await Promise.all(historySchemas.map(async ([name, f
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
 const marker = 'export interface SessionHistoryListPayload';
+source = source.replace(/export interface SessionStartedPayload \{[\s\S]*?\n\}/, `export interface SessionStartedPayload {
+  workspaceId: string;
+  toolKey: string;
+  displayName?: string;
+  runtimeMode: SessionRuntimeMode;
+  startedAt: string;
+  origin?: 'local' | 'external';
+  projectId?: string;
+  aiResourceId?: string;
+  lifecycle?: 'oneShot' | 'longLived';
+}`);
 const start = source.indexOf(marker);
 if (start >= 0) source = source.slice(0, start);
 const shortcutDeclarations = await Promise.all(shortcutSchemas.map(async ([name, file]) => {
@@ -161,4 +173,5 @@ const filePreviewDeclarations = await Promise.all(filePreviewSchemas.map(async (
   const schema = JSON.parse(await readFile(new URL(`./${file}.schema.json`, import.meta.url), 'utf8'));
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
-await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('') + filePreviewTypes + filePreviewDeclarations.join('').trimEnd() + '\n');
+await import('./generate-ai.mjs');
+await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('') + filePreviewTypes + filePreviewDeclarations.join('').trimEnd() + '\nexport * from "./ai.js";\n');

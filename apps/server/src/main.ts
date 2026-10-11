@@ -11,7 +11,7 @@ import { ClientAuthWsAdapter } from './client-auth/client-auth-ws.adapter';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: true }),
+    new FastifyAdapter({ logger: { redact: ['req.headers.authorization'] } }),
   );
 
   app.useWebSocketAdapter(new ClientAuthWsAdapter(app));
@@ -29,6 +29,8 @@ async function bootstrap(): Promise<void> {
     fastify.get('/mobile/', mobilePage);
     fastify.get('/client/authorize', mobilePage);
     fastify.get('/client/authorize/', mobilePage);
+    fastify.get('/settings', mobilePage);
+    fastify.get('/settings/', mobilePage);
   }
 
   const port = Number.parseInt(process.env.PORT ?? '3007', 10);

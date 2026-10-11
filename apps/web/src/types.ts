@@ -8,6 +8,10 @@ export interface SessionRecord {
   status: 'starting' | 'running' | 'stopping' | 'finished' | 'failed';
   stateVersion: number;
   autoApproveEnabled: boolean;
+  origin?: 'local' | 'external';
+  projectId?: string | null;
+  aiResourceId?: string | null;
+  lifecycle?: 'oneShot' | 'longLived' | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;

@@ -46,6 +46,10 @@ export interface SessionStartedPayload {
   displayName?: string;
   runtimeMode: SessionRuntimeMode;
   startedAt: string;
+  origin?: 'local' | 'external';
+  projectId?: string;
+  aiResourceId?: string;
+  lifecycle?: 'oneShot' | 'longLived';
 }
 
 export interface SessionEndedPayload {
@@ -144,19 +148,65 @@ export const workspaceRegisteredSchema = {
 } as const;
 
 export const sessionStartedSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://termrelay.local/contracts/events/session-started.schema.json',
-  title: 'session.started payload',
-  type: 'object',
-  required: ['workspaceId', 'toolKey', 'runtimeMode', 'startedAt'],
-  properties: {
-    workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
-    toolKey: { type: 'string', minLength: 1, maxLength: 64 },
-    displayName: { type: 'string', minLength: 1, maxLength: 128 },
-    runtimeMode: { enum: ['pty', 'acp'] },
-    startedAt: { type: 'string', format: 'date-time' },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/session-started.schema.json",
+  "title": "session.started payload",
+  "type": "object",
+  "required": [
+    "workspaceId",
+    "toolKey",
+    "runtimeMode",
+    "startedAt"
+  ],
+  "properties": {
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "toolKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "runtimeMode": {
+      "enum": [
+        "pty",
+        "acp"
+      ]
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "origin": {
+      "enum": [
+        "local",
+        "external"
+      ]
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "aiResourceId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "lifecycle": {
+      "enum": [
+        "oneShot",
+        "longLived"
+      ]
+    }
   },
-  additionalProperties: false,
+  "additionalProperties": false
 } as const;
 
 export const sessionEndedSchema = {
@@ -1585,3 +1635,4 @@ export const filePreviewResultSchema = {
   },
   "additionalProperties": false
 } as const;
+export * from "./ai.js";

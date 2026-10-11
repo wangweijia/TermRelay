@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/ai-AiConversationRequest.schema.json",
+  "type": "object",
+  "required": [
+    "target",
+    "profile",
+    "provider"
+  ],
+  "properties": {
+    "target": {
+      "type": "object",
+      "required": [
+        "deviceId"
+      ],
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "provider": {
+      "enum": [
+        "codex",
+        "dsh"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "effort": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "AiInput": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "maxLength": 100000
+        },
+        "facts": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiOutput": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "text",
+            "json"
+          ]
+        },
+        "schema": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiProfile": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "provider",
+        "capacity",
+        "policy"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provider": {
+          "enum": [
+            "codex",
+            "dsh"
+          ]
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "policy": {
+          "enum": [
+            "factsOnly",
+            "workspace"
+          ]
+        },
+        "models": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string"
+          }
+        },
+        "efforts": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiCapabilities": {
+      "type": "object",
+      "required": [
+        "profiles"
+      ],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/AiProfile"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiCreate": {
+      "type": "object",
+      "required": [
+        "id",
+        "projectId",
+        "profile",
+        "profileVersion",
+        "provider",
+        "lifecycle",
+        "displayName"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "profileVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provider": {
+          "enum": [
+            "codex",
+            "dsh"
+          ]
+        },
+        "lifecycle": {
+          "enum": [
+            "oneShot",
+            "longLived"
+          ]
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "effort": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "turn": {
+          "$ref": "#/$defs/AiTurn"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiTurn": {
+      "type": "object",
+      "required": [
+        "id",
+        "sessionId",
+        "input",
+        "output",
+        "deadlineAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "input": {
+          "$ref": "#/$defs/AiInput"
+        },
+        "output": {
+          "$ref": "#/$defs/AiOutput"
+        },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiControl": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turnId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AiUpdate": {
+      "type": "object",
+      "required": [
+        "id",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "turnId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "closed",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 262144
+        },
+        "errorCode": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "waitingFor": {
+          "enum": [
+            "approval",
+            "input",
+            "none"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "effort": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

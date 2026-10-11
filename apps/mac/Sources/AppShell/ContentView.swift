@@ -116,7 +116,7 @@ struct ContentView: View {
             }
         } message: {
             if let sessionPendingClose {
-                Text("关闭“\(sessionPendingClose.displayName)”将终止其中正在运行的终端进程。")
+                Text(sessionPendingClose.projectID != nil ? "关闭“\(sessionPendingClose.displayName)”将结束项目会话，调用项目无法再使用该 conversationId。" : "关闭“\(sessionPendingClose.displayName)”将终止其中正在运行的终端进程。")
             }
         }
         .onAppear {
@@ -446,6 +446,7 @@ private struct StructuredAgentSessionView: View {
                     Text(configurationError).font(.caption).foregroundStyle(.red)
                 }
                 TextEditor(text: $session.promptDraft)
+                    .disabled(session.isExternal)
                     .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
@@ -468,7 +469,7 @@ private struct StructuredAgentSessionView: View {
                     ))
                         .toggleStyle(.checkbox)
                         .font(.caption)
-                        .disabled(appModel.connectionState != .connected)
+                        .disabled(session.isExternal || appModel.connectionState != .connected)
                         .help("开关由 Server 按会话保存，审批只在此 Mac 执行一次")
                     Button("中断当前任务") { Task { _ = await session.interrupt() } }
                         .buttonStyle(.bordered)
@@ -487,7 +488,7 @@ private struct StructuredAgentSessionView: View {
     }
 
     private var canSend: Bool {
-        !session.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !session.isExternal && !session.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && session.state == .ready
     }
 

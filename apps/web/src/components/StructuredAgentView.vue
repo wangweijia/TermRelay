@@ -27,6 +27,7 @@ const props = withDefaults(defineProps<{
   sessionId: string;
   events: SessionEventRecord[];
   interactive: boolean;
+  external?: boolean;
   shortcutEnabled?: boolean;
   scrollRevision?: number;
   hasOlder?: boolean;
@@ -437,7 +438,10 @@ function submitAnswers(item: TimelineItem): void {
         <span>任务已完成</span>
       </div>
     </div>
-    <form class="agent-composer" @submit.prevent="submitTurn">
+    <p v-if="external">项目调用：新一轮由项目 API 提交，审批可在上方处理。
+      <button type="button" :disabled="!interactive || !turnActive" @click="emit('interrupt')">中断当前任务</button>
+    </p>
+    <form v-if="!external" class="agent-composer" @submit.prevent="submitTurn">
       <div v-if="configOptions.length" class="agent-config" aria-label="会话配置">
         <template v-for="option in configOptions" :key="option.id">
           <label v-if="option.choices.length" class="shortcut-picker">

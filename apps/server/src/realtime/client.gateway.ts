@@ -23,6 +23,7 @@ import { ClientConnectionAuthorizations } from '../client-auth/client-connection
 import { SessionsService } from '../sessions/sessions.service';
 import { ShortcutsService } from '../shortcuts/shortcuts.service';
 import { FilePreviewService } from '../sessions/file-preview.service';
+import { AIService } from '../ai/ai.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
 import {
@@ -65,6 +66,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly authorizations?: ClientConnectionAuthorizations,
     @Optional() private readonly shortcuts?: ShortcutsService,
     @Optional() private readonly previews?: FilePreviewService,
+    @Optional() private readonly ai?: AIService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -158,6 +160,12 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    if (result.message.type === 'ai.capabilities' || result.message.type === 'ai.update') {
+      if (this.isPublicGateway()) return;
+      if (result.message.type === 'ai.capabilities') this.ai?.publishCapabilities(client,result.message.envelope.deviceId,result.message.envelope.payload);
+      else await this.ai?.update(client,result.message.envelope.deviceId,result.message.envelope.payload);
+      return;
+    }
     if (result.message.type === 'command.ack') {
       const acknowledged = await this.commands?.acknowledge(
         client,
@@ -378,7 +386,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
+      { type: 'ai.capabilities' | 'ai.update' | 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
     >,
   ): Promise<void> {
     const { envelope } = message;

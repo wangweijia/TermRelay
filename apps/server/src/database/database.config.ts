@@ -19,6 +19,8 @@ import { AcpUserMessage1790553600000 } from './migrations/1790553600000-acp-user
 import { Shortcuts1790640000000 } from './migrations/1790640000000-shortcuts';
 import { ShortcutEntity } from '../shortcuts/shortcut.entity';
 import { ShortcutRunEntity } from '../shortcuts/shortcut-run.entity';
+import { AIProjectKeyEntity, AIResourceEntity } from '../ai/ai.entity';
+import { AIService1791590400000 } from './migrations/1791590400000-ai-service';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -47,6 +49,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       SessionAutoApprove1789783200000,
       AcpUserMessage1790553600000,
       Shortcuts1790640000000,
+      AIService1791590400000,
     ],
     entities: [
       DeviceEntity,
@@ -57,6 +60,8 @@ export function databaseOptions(): MysqlConnectionOptions {
       DeviceCredentialEntity,
       ShortcutEntity,
       ShortcutRunEntity,
+      AIProjectKeyEntity,
+      AIResourceEntity,
     ],
   };
 }

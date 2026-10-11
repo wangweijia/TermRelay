@@ -38,8 +38,11 @@ import {
   filePreviewResultSchema,
 } from '@termrelay/contracts';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
+import { aiCapabilitiesSchema, aiUpdateSchema, type AiCapabilities, type AiUpdate } from '@termrelay/contracts';
 
 export type ValidClientMessage =
+  | { type: 'ai.capabilities'; envelope: Envelope<AiCapabilities> }
+  | { type: 'ai.update'; envelope: Envelope<AiUpdate> }
   | { type: 'device.register'; envelope: Envelope<DeviceRegisterPayload> }
   | { type: 'device.heartbeat'; envelope: Envelope<DeviceHeartbeatPayload> }
   | {
@@ -82,6 +85,8 @@ export class ProtocolValidator {
     });
     this.envelopeValidator = ajv.compile(envelopeSchema);
     this.payloadValidators = new Map([
+      ['ai.capabilities', ajv.compile(aiCapabilitiesSchema)],
+      ['ai.update', ajv.compile(aiUpdateSchema)],
       ['device.register', ajv.compile(deviceRegisterSchema)],
       ['device.heartbeat', ajv.compile(deviceHeartbeatSchema)],
       ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
@@ -147,7 +152,13 @@ export class ProtocolValidator {
       };
     }
 
-    if (envelope.type === 'file.preview.result') {
+    if (envelope.type === 'ai.capabilities' || envelope.type === 'ai.update') {
+      if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) return invalidContext(envelope,'AI messages must not include sessionId, seq or commandId.');
+      if (envelope.type === 'ai.capabilities') {
+        const profiles = (envelope.payload as unknown as AiCapabilities).profiles;
+        if (new Set(profiles.map(p => p.id)).size !== profiles.length) return invalidContext(envelope,'AI profile IDs must be unique.');
+      }
+    } else if (envelope.type === 'file.preview.result') {
       if (!envelope.sessionId || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, 'file.preview.result requires sessionId and must not include seq or commandId.');
       }
@@ -223,6 +234,8 @@ function invalidContext(
 
 function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
   switch (envelope.type) {
+    case 'ai.capabilities': return {ok:true,message:{type:envelope.type,envelope:envelope as unknown as Envelope<AiCapabilities>}};
+    case 'ai.update': return {ok:true,message:{type:envelope.type,envelope:envelope as unknown as Envelope<AiUpdate>}};
     case 'device.register':
       return {
         ok: true,

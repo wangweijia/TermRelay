@@ -12,6 +12,7 @@ import { PublicClientGateway } from './realtime/public-client.gateway';
 import { SessionsModule } from './sessions/sessions.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ShortcutsModule } from './shortcuts/shortcuts.module';
+import { AIModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { ShortcutsModule } from './shortcuts/shortcuts.module';
     NotificationsModule,
     ClientAuthModule,
     ShortcutsModule,
+    AIModule,
   ],
   controllers: [HealthController],
   providers: [

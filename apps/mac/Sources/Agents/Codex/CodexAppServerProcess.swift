@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Darwin
 
 protocol CodexAppServerTransport: Sendable {
     var lines: AsyncThrowingStream<Data, Error> { get }
@@ -15,6 +16,7 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
     private let directory: URL
     private let environment: [String: String]
     private let socketPath: String?
+    private let aiSandbox: AIRuntimeSandbox?
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let stateLock = NSLock()
     private let lineBuffer: JSONLineBuffer
@@ -27,12 +29,14 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
         executableURL: URL,
         directory: URL,
         environment: [String: String] = TerminalEnvironment.make(),
-        socketPath: String? = nil
+        socketPath: String? = nil,
+        aiSandbox: AIRuntimeSandbox? = nil
     ) {
         self.executableURL = executableURL
         self.directory = directory
         self.environment = environment
         self.socketPath = socketPath
+        self.aiSandbox = aiSandbox
         let stream = AsyncThrowingStream<Data, Error>.makeStream()
         lines = stream.stream
         continuation = stream.continuation
@@ -54,6 +58,14 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
                 process.arguments = ["app-server", "proxy", "--sock", socketPath]
             } else {
                 process.arguments = ["app-server", "--listen", "stdio://"]
+            }
+            if let aiSandbox {
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+                process.arguments = ["-p", try aiSandbox.profile(executable:executableURL), executableURL.path] + (process.arguments ?? []) + [
+                    "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
+                    "-c", "web_search=\"disabled\"", "-c", "apps._default.enabled=false",
+                    "-c", "features.multi_agent=false"
+                ]
             }
             process.currentDirectoryURL = directory
             process.environment = sanitizedEnvironment()
@@ -128,7 +140,12 @@ final class CodexAppServerProcess: @unchecked Sendable, CodexAppServerTransport 
             continuation.finish()
             return
         }
-        if running.isRunning { running.terminate() }
+        if running.isRunning {
+            running.terminate()
+            for _ in 0..<20 where running.isRunning { Thread.sleep(forTimeInterval: 0.05) }
+            if running.isRunning { Darwin.kill(running.processIdentifier, SIGKILL) }
+            running.waitUntilExit()
+        }
     }
 
     func diagnosticTail() -> String {
