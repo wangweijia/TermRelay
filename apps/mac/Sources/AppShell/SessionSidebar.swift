@@ -1,12 +1,6 @@
 import AppKit
 import SwiftUI
 
-enum SessionSidebarTab: String, CaseIterable {
-    case active = "当前"
-    case projects = "项目调用"
-    case history = "历史"
-}
-
 struct SessionSidebar: View {
     @Environment(\.displayScale) private var displayScale
     let sessions: [ManagedSession]
@@ -20,7 +14,7 @@ struct SessionSidebar: View {
     let closeAction: (UUID) -> Void
     let deleteHistoryAction: (CopilotHistorySession) -> Void
     private var listedSessions: [ManagedSession] {
-        sessions.filter { tab == .projects ? $0.projectID != nil : $0.projectID == nil }
+        sessions.filter(tab.contains)
     }
 
     var body: some View {
@@ -57,15 +51,6 @@ struct SessionSidebar: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .onChange(of: tab) { _, value in
-                if value != .history {
-                    if !listedSessions.contains(where: { $0.id == selection }) {
-                        selection = listedSessions.last?.id
-                    }
-                } else if !copilotHistory.contains(where: { $0.id == selection }) {
-                    selection = copilotHistory.first?.id
-                }
-            }
 
             if tab != .history && listedSessions.isEmpty {
                 VStack(spacing: 8) {

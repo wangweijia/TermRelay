@@ -121,21 +121,16 @@ struct ContentView: View {
         }
         .onAppear {
             selectedSessionID = appModel.sessions.last?.id ?? appModel.copilotHistory.first?.id
+            synchronizeSidebarTab()
         }
-        .onChange(of: visibleSessions.map(\.id) + appModel.copilotHistory.map(\.id)) { _, sessionIDs in
-            guard let selectedSessionID, sessionIDs.contains(selectedSessionID) else {
-                self.selectedSessionID = sidebarTab == .history
-                    ? appModel.copilotHistory.first?.id
-                    : visibleSessions.last?.id
-                return
-            }
+        .onChange(of: sidebarTab) { _, _ in
+            reconcileSidebarSelection()
         }
-        .onChange(of: selectedSessionID) { _, id in
-            if appModel.copilotHistory.contains(where: { $0.id == id }) {
-                sidebarTab = .history
-            } else if visibleSessions.contains(where: { $0.id == id }) {
-                sidebarTab = .active
-            }
+        .onChange(of: visibleSessions.map(\.id) + appModel.copilotHistory.map(\.id)) { _, _ in
+            reconcileSidebarSelection()
+        }
+        .onChange(of: selectedSessionID) { _, _ in
+            synchronizeSidebarTab()
         }
     }
 
@@ -189,6 +184,16 @@ struct ContentView: View {
         appModel.sessions
     }
 
+    private func synchronizeSidebarTab() {
+        if let tab = SessionSidebarTab.containing(selection: selectedSessionID, sessions: visibleSessions, historyIDs: appModel.copilotHistory.map(\.id)) {
+            sidebarTab = tab
+        }
+    }
+
+    private func reconcileSidebarSelection() {
+        selectedSessionID = sidebarTab.selection(current: selectedSessionID, sessions: visibleSessions, historyIDs: appModel.copilotHistory.map(\.id))
+    }
+
     private func requestCloseSession(_ sessionID: UUID) {
         sessionPendingClose = visibleSessions.first { $0.id == sessionID }
     }
@@ -197,7 +202,7 @@ struct ContentView: View {
         guard let sessionID = sessionPendingClose?.id else { return }
         sessionPendingClose = nil
         appModel.closeLocalTerminal(id: sessionID)
-        selectedSessionID = visibleSessions.last?.id
+        reconcileSidebarSelection()
     }
 }
 

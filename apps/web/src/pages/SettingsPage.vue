@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import type { NotificationSettings } from '../types';
 import type { AiProviderCapability } from '@termrelay/contracts';
+import { copyText, selectCopyText } from '../clipboard';
 
 interface ProjectKey { id: string; revoked: boolean; legacy: boolean }
 interface AITarget { deviceId: string; name: string; online: boolean; providers: AiProviderCapability[] }
@@ -20,6 +21,9 @@ const message = ref('');
 const generated = ref<{apiKey: string}>();
 const saved = ref(false);
 const secretField = ref<HTMLTextAreaElement>();
+const keyCopyMessage = ref('');
+const keyCopyState = ref<'idle' | 'copied' | 'manual'>('idle');
+const copyingKey = ref(false);
 const notifications = ref<NotificationSettings>();
 const notificationBusy = ref(false);
 const visibleKeys = computed(() => [...keys.value].sort((a,b) => Number(a.revoked)-Number(b.revoked)));
@@ -35,12 +39,9 @@ async function refreshTargets() {
 }
 async function copyDeviceId(id: string) {
   copiedDeviceId.value = id;
-  try { await navigator.clipboard.writeText(id); message.value = '设备 ID 已复制，可填入调用方的 device_id 或请求的 target.deviceId。'; }
-  catch {
-    await nextTick();
-    deviceIdField.value?.focus(); deviceIdField.value?.select();
-    message.value = '当前浏览器不支持自动复制，请复制已选中的设备 ID。';
-  }
+  await nextTick();
+  const copied = await copyText(id, deviceIdField.value);
+  message.value = copied ? '设备 ID 已复制，可填入调用方的 device_id 或请求的 target.deviceId。' : '自动复制失败，设备 ID 已全选，请按 ⌘C / Ctrl+C 或长按复制。';
 }
 
 async function request<T>(url: string, body?: unknown): Promise<T> {
@@ -66,17 +67,26 @@ async function generate(existing?: ProjectKey) {
   try {
     const result = await request<ProjectKey & {apiKey:string}>(existing ? `/api/settings/ai/keys/${existing.id}/rotate`:'/api/settings/ai/keys',{});
     generated.value = {apiKey:result.apiKey}; saved.value = false;
+    keyCopyMessage.value = ''; keyCopyState.value = 'idle';
     // Keep the secret only in the temporary reveal panel, not the key list or browser storage.
     keys.value.push({id:result.id,revoked:result.revoked,legacy:result.legacy});
   } catch (reason) { error.value = reason instanceof Error ? reason.message : '生成失败'; }
   finally { busy.value = false; }
 }
 async function copyKey() {
-  if (!generated.value) return;
+  if (!generated.value || copyingKey.value) return;
+  copyingKey.value = true;
   try {
-    await navigator.clipboard.writeText(generated.value.apiKey);
-    message.value = '已复制，请保存到项目后端的环境配置中。';
-  } catch { secretField.value?.focus(); secretField.value?.select(); message.value = '当前浏览器不支持自动复制，已选中文本，请手动复制。'; }
+    const copied = await copyText(generated.value.apiKey, secretField.value);
+    keyCopyState.value = copied ? 'copied' : 'manual';
+    keyCopyMessage.value = copied ? '完整 Key 已复制，请粘贴到 Invest 的 API Key 配置并保存。' : '自动复制失败，完整 Key 已全选。请按 ⌘C / Ctrl+C，或在手机上长按复制。';
+  } finally { copyingKey.value = false; }
+}
+function selectKey() {
+  if (!generated.value || !secretField.value) return;
+  selectCopyText(generated.value.apiKey, secretField.value);
+  keyCopyState.value = 'manual';
+  keyCopyMessage.value = '完整 Key 已全选，请按 ⌘C / Ctrl+C，或长按复制，然后粘贴到调用方配置。';
 }
 async function revoke(key: ProjectKey) {
   if (busy.value || !window.confirm('撤销这把 Key？使用它的新请求将立即失效，已有任务不会被取消。')) return;
@@ -136,13 +146,16 @@ onBeforeUnmount(() => { generated.value = undefined; window.removeEventListener(
       <div class="settings-actions"><button type="button" :disabled="busy || !!generated" @click="generate()">{{ busy ? '处理中…' : '生成 Key' }}</button></div>
       <div v-if="generated" class="settings-secret" role="region" aria-label="新生成的 API Key">
         <strong>新 API Key（只显示这一次）</strong>
-        <textarea ref="secretField" :value="generated.apiKey" readonly aria-label="API Key" spellcheck="false" />
-        <button @click="copyKey">复制 Key</button>
+        <textarea ref="secretField" :value="generated.apiKey" readonly aria-label="完整 API Key" spellcheck="false" autocomplete="off" autocapitalize="off" rows="2" @click="selectKey" />
+        <div class="settings-actions"><button type="button" :disabled="copyingKey" @click="copyKey">{{ copyingKey ? '复制中…' : keyCopyState === 'copied' ? '已复制 · 再次复制' : '复制完整 Key' }}</button><button type="button" @click="selectKey">全选手动复制</button></div>
+        <p v-if="keyCopyMessage" class="key-copy-result" :class="{ 'copy-warning': keyCopyState === 'manual' }" role="status" aria-live="polite">{{ keyCopyMessage }}</p>
+        <small>请复制上方以 trai_ 开头的完整 {{ generated.apiKey.length }} 位 Key；下方列表中的“标识”不是 API Key。</small>
         <p>保存到项目后端的 TERMRELAY_API_KEY，不要放在前端、URL 或提交到 Git。替换 Key 时先更新项目配置，再撤销旧 Key。</p>
         <label class="settings-check"><input v-model="saved" type="checkbox">我已保存 Key</label>
         <button :disabled="!saved" @click="generated = undefined; message = ''">关闭显示</button>
       </div>
       <h3>已生成的 Key</h3>
+      <small>这里仅显示管理标识，不能用来调用 API；完整 Key 只在生成时显示。</small>
       <p v-if="!keys.length && !loading">还没有 API Key。</p>
       <article v-for="key in visibleKeys" :key="key.id" class="settings-key">
         <div><strong>Key {{ key.id.slice(0,8) }}</strong> · {{ key.revoked ? '已撤销' : '有效' }}<small>标识：{{ key.id }}</small><small v-if="key.legacy">旧版受限 Key，可生成替换 Key 改用通用鉴权。</small></div>
@@ -164,6 +177,8 @@ p { line-height: 1.6; color: #a9b4c4; }
 textarea { width: 100%; box-sizing: border-box; padding: 10px; color: inherit; background: #172337; border: 1px solid #475569; border-radius: 6px; }
 .settings-check { display: flex; align-items: center; gap: 8px; padding: 6px 0; overflow-wrap: anywhere; }
 .settings-secret { background: #182d36; border: 1px solid #4b9e86; padding: 16px; border-radius: 8px; margin-top: 20px; }
+.key-copy-result { color: #8ed9b9; }
+.key-copy-result.copy-warning { color: #ffd18a; }
 textarea { margin: 12px 0; font-family: monospace; resize: vertical; }
 .settings-key { border-top: 1px solid #334155; padding: 16px 0; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; overflow-wrap: anywhere; }
 small { display: block; margin-top: 6px; color: #a9b4c4; }
