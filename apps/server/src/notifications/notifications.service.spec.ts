@@ -16,6 +16,24 @@ test('does not push approval notifications for auto-approved sessions', async ()
   });
 });
 
+test('does not push approval notifications for project API sessions', async () => {
+  await withNotificationsService(false, async ({ publish, requests }) => {
+    publish(approvalNotification());
+    await settle();
+
+    assert.equal(requests.length, 0);
+  }, 'external');
+});
+
+test('does not push approval notifications when the session is gone', async () => {
+  await withNotificationsService(false, async ({ publish, requests }) => {
+    publish(approvalNotification());
+    await settle();
+
+    assert.equal(requests.length, 0);
+  }, 'missing');
+});
+
 test('pushes approval notifications when auto-approve is disabled', async () => {
   await withNotificationsService(false, async ({ publish, requests }) => {
     publish(approvalNotification());
@@ -33,6 +51,7 @@ async function withNotificationsService(
     publish: (notification: ReturnType<typeof approvalNotification>) => void;
     requests: Array<{ url: string; body: string }>;
   }) => Promise<void>,
+  origin: 'local' | 'external' | 'missing' = 'local',
 ): Promise<void> {
   const originalURL = process.env.BARK_PUSH_URL;
   const originalFetch = globalThis.fetch;
@@ -44,7 +63,7 @@ async function withNotificationsService(
   };
 
   let listener: SessionEventListener | undefined;
-  const session = sessionRecord(autoApproveEnabled);
+  const session = origin === 'missing' ? undefined : sessionRecord(autoApproveEnabled, origin);
   const sessions = {
     subscribe: (value: SessionEventListener) => {
       listener = value;
@@ -93,7 +112,7 @@ function approvalNotification() {
   };
 }
 
-function sessionRecord(autoApproveEnabled: boolean): SessionRecord {
+function sessionRecord(autoApproveEnabled: boolean, origin: 'local' | 'external'): SessionRecord {
   const timestamp = new Date(1_000).toISOString();
   return {
     id: 'session-a',
@@ -105,6 +124,7 @@ function sessionRecord(autoApproveEnabled: boolean): SessionRecord {
     status: 'running',
     stateVersion: 1,
     autoApproveEnabled,
+    origin,
     startedAt: timestamp,
     finishedAt: null,
     createdAt: timestamp,

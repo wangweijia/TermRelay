@@ -76,6 +76,7 @@ final class AppModel: ObservableObject {
     private let credentialStore: any CredentialStoring
     private let pairingClient: ClientPairingClient
     private var remoteClient: RemoteClient?
+    private var pendingAutoApproveSync: [UUID: Bool] = [:]
     private var connectionStarted = false
     private var pairingTask: Task<Void, Never>?
     private let quickActionStore: QuickActionStore
@@ -152,6 +153,10 @@ final class AppModel: ObservableObject {
             autoApproveStateHandler: { [weak self] sessionID, enabled in
                 Task { @MainActor [weak self] in
                     guard let self, let session = self.structuredSessions[sessionID] else { return }
+                    if let pending = self.pendingAutoApproveSync[sessionID] {
+                        guard pending == enabled else { return }
+                        self.pendingAutoApproveSync[sessionID] = nil
+                    }
                     session.setAutoApproveEnabled(enabled)
                     if enabled { self.pendingApprovals.clear(sessionID: sessionID) }
                 }
@@ -249,7 +254,6 @@ final class AppModel: ObservableObject {
         let workspace = workspaceID(for:directory)
         await remoteClient.publishWorkspace(id:workspace,directory:directory)
         await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId,lifecycle:create.lifecycle)
-        await remoteClient.publishAutoApprove(sessionID: id, enabled: true)
     }
     private func observeAI(_ event: ToolEvent) async {
         structuredSessions[event.sessionID]?.observeExternal(event)
@@ -878,10 +882,13 @@ final class AppModel: ObservableObject {
     }
 
     func setAutoApprove(sessionID: UUID, enabled: Bool) {
-        guard connectionState == .connected,
-              structuredSessions[sessionID] != nil,
-              let remoteClient else { return }
-        Task { await remoteClient.publishAutoApprove(sessionID: sessionID, enabled: enabled) }
+        guard let session = structuredSessions[sessionID], !session.isExternal else { return }
+        session.setAutoApproveEnabled(enabled)
+        if enabled { pendingApprovals.clear(sessionID: sessionID) }
+        pendingAutoApproveSync[sessionID] = enabled
+        if connectionState == .connected, let remoteClient {
+            Task { await remoteClient.publishAutoApprove(sessionID: sessionID, enabled: enabled) }
+        }
     }
 
     func stopLocalTerminal(id: UUID) {
@@ -894,6 +901,7 @@ final class AppModel: ObservableObject {
     }
 
     func closeLocalTerminal(id: UUID) {
+        pendingAutoApproveSync[id] = nil
         if sessions.contains(where: {$0.id == id && $0.projectID != nil}) {
             Task { await aiRuntime.close(id.uuidString.lowercased()) }
         }
@@ -954,6 +962,9 @@ final class AppModel: ObservableObject {
                     runtimeMode: .acp,
                     startedAt: session.startedAt
                 )
+                if let enabled = pendingAutoApproveSync[session.id] {
+                    await remoteClient.publishAutoApprove(sessionID: session.id, enabled: enabled)
+                }
                 for event in session.events { await remoteClient.publishToolEvent(event) }
             }
         }

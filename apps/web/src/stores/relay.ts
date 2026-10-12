@@ -643,7 +643,7 @@ export const useRelayStore = defineStore('relay', {
       const index = this.sessions.findIndex((item) => item.id === session.id);
       if (index === -1) this.sessions.unshift(session);
       else this.sessions[index] = session;
-      if (session.autoApproveEnabled) {
+      if (session.autoApproveEnabled || session.origin === 'external') {
         this.pendingApprovals = this.pendingApprovals.filter((item) => item.sessionId !== session.id);
       }
     },

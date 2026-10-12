@@ -325,7 +325,7 @@ export class SessionRepository {
               a.approval_key, a.turn_ref, a.risk, a.request, a.expires_at, a.created_at
        FROM approvals a JOIN sessions s ON s.id = a.session_id
        WHERE a.decision = 'pending' AND a.expires_at > CURRENT_TIMESTAMP(3)
-         AND s.deleted_at IS NULL AND s.auto_approve_enabled = 0
+         AND s.deleted_at IS NULL AND s.auto_approve_enabled = 0 AND s.origin = 'local'
        ORDER BY a.created_at DESC`,
     );
     return rows.map((row) => ({

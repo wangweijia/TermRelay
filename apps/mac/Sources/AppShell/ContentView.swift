@@ -499,8 +499,8 @@ private struct StructuredAgentSessionView: View {
                     ))
                         .toggleStyle(.checkbox)
                         .font(.caption)
-                        .disabled(session.isExternal || appModel.connectionState != .connected)
-                        .help("开关由 Server 按会话保存，审批只在此 Mac 执行一次")
+                        .disabled(session.isExternal)
+                        .help("本地立即生效；连接 Server 后按会话同步，审批只在此 Mac 执行一次")
                     Button("中断当前任务") { Task { _ = await session.interrupt() } }
                         .buttonStyle(.bordered)
                         .tint(.orange)

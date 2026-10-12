@@ -16,6 +16,7 @@ test('pending approval query excludes auto-approved sessions', async () => {
 
   assert.deepEqual(await repository.listPendingApprovals(), []);
   assert.match(query, /s\.auto_approve_enabled = 0/u);
+  assert.match(query, /s\.origin = 'local'/u);
 });
 
 test('disconnect permanently removes only unused ACP sessions for that device', async () => {

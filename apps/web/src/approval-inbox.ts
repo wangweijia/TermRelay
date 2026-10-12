@@ -4,7 +4,8 @@ export function visiblePendingApprovals(
   approvals: PendingApprovalRecord[],
   sessions: SessionRecord[],
 ): PendingApprovalRecord[] {
-  const autoApproved = new Set(sessions.filter((session) => session.autoApproveEnabled)
+  const autoApproved = new Set(sessions.filter((session) =>
+    session.autoApproveEnabled || session.origin === 'external')
     .map((session) => session.id));
   return approvals.filter((approval) => !autoApproved.has(approval.sessionId));
 }
