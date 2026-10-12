@@ -61,7 +61,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <header class="mobile-topbar">
       <div><strong>TermRelay</strong><small>{{ activeTab === 'sessions' ? '会话' : activeTab === 'workspace' ? '工作区' : activeTab === 'approvals' ? '审批中心' : '快捷任务' }}</small></div>
       <span class="mobile-connection" :data-state="relay.connectionState">{{ connectionText }}</span>
-      <RouterLink to="/settings">配置</RouterLink>
+      <RouterLink class="mobile-settings-link" to="/settings?from=mobile">配置</RouterLink>
     </header>
 
     <Transition name="toast"><div v-if="toast" class="mobile-toast">{{ toast }}</div></Transition>
