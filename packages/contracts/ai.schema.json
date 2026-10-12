@@ -56,7 +56,6 @@
         "id",
         "projectId",
         "provider",
-        "lifecycle",
         "displayName"
       ],
       "properties": {
@@ -75,12 +74,6 @@
             "dsh"
           ]
         },
-        "lifecycle": {
-          "enum": [
-            "oneShot",
-            "longLived"
-          ]
-        },
         "displayName": {
           "type": "string",
           "minLength": 1,
@@ -93,9 +86,6 @@
         "effort": {
           "type": "string",
           "maxLength": 32
-        },
-        "turn": {
-          "$ref": "#/$defs/AiTurn"
         }
       },
       "additionalProperties": false
@@ -106,8 +96,7 @@
         "id",
         "sessionId",
         "input",
-        "output",
-        "deadlineAt"
+        "output"
       ],
       "properties": {
         "id": {
@@ -123,10 +112,6 @@
         },
         "output": {
           "$ref": "#/$defs/AiOutput"
-        },
-        "deadlineAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false

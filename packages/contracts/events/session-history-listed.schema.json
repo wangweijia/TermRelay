@@ -76,13 +76,6 @@
               "null"
             ],
             "maxLength": 128
-          },
-          "lifecycle": {
-            "enum": [
-              "oneShot",
-              "longLived",
-              null
-            ]
           }
         },
         "additionalProperties": false

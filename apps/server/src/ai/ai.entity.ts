@@ -19,7 +19,7 @@ export class AIResourceEntity {
 
 export interface AIResource {
   id: string;
-  kind: 'job' | 'conversation' | 'turn';
+  kind: 'conversation' | 'turn';
   projectId: string;
   deviceId: string;
   sessionId: string;
@@ -28,7 +28,7 @@ export interface AIResource {
   model?: string;
   effort?: string;
   fingerprint: string;
-  status: 'starting' | 'ready' | 'closed' | 'accepted' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  status: 'starting' | 'ready' | 'closing' | 'closed' | 'accepted' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   activeTurnId: string | null;
   waitingFor: 'approval' | 'input' | null;
   cancelRequested: boolean;
@@ -37,13 +37,15 @@ export interface AIResource {
   input?: import('@termrelay/contracts').AiInput;
   output?: import('@termrelay/contracts').AiOutput;
   schemaHash?: string;
-  contextId?: string;
   error: { code: string; message: string; executionOutcome: 'unknown' | 'confirmed' | 'not_started' } | null;
   actualModel: string | null;
   actualEffort: string | null;
   usage: null;
   createdAt: string;
   finishedAt: string | null;
-  deadlineAt: string;
+  expiresAt: string | null;
+  closeReason?: string;
+  startupDeadlineAt?: string;
+  closeDeadlineAt?: string;
   cancelDeadlineAt?: string;
 }

@@ -12,8 +12,7 @@
     "startedAt": { "type": "string", "format": "date-time" },
     "origin": { "enum": ["local", "external"] },
     "projectId": { "type": "string", "minLength": 1, "maxLength": 64 },
-    "aiResourceId": { "type": "string", "format": "uuid" },
-    "lifecycle": { "enum": ["oneShot", "longLived"] }
+    "aiResourceId": { "type": "string", "format": "uuid" }
   },
   "additionalProperties": false
 }

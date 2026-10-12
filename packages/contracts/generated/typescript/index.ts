@@ -49,7 +49,6 @@ export interface SessionStartedPayload {
   origin?: 'local' | 'external';
   projectId?: string;
   aiResourceId?: string;
-  lifecycle?: 'oneShot' | 'longLived';
 }
 
 export interface SessionEndedPayload {
@@ -198,12 +197,6 @@ export const sessionStartedSchema = {
     "aiResourceId": {
       "type": "string",
       "format": "uuid"
-    },
-    "lifecycle": {
-      "enum": [
-        "oneShot",
-        "longLived"
-      ]
     }
   },
   "additionalProperties": false
@@ -1011,7 +1004,6 @@ export interface SessionHistoryListPayload {
 
 export interface SessionHistoryEntry {
   projectId?: string | null;
-  lifecycle?: 'oneShot' | 'longLived' | null;
   id: string;
   workspaceId: string;
   toolKey: string;
@@ -1156,13 +1148,6 @@ export const sessionHistoryListedSchema = {
               "null"
             ],
             "maxLength": 128
-          },
-          "lifecycle": {
-            "enum": [
-              "oneShot",
-              "longLived",
-              null
-            ]
           }
         },
         "additionalProperties": false

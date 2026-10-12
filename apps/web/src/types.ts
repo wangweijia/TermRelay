@@ -11,7 +11,6 @@ export interface SessionRecord {
   origin?: 'local' | 'external';
   projectId?: string | null;
   aiResourceId?: string | null;
-  lifecycle?: 'oneShot' | 'longLived' | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;

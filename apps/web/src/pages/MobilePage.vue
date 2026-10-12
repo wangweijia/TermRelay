@@ -73,7 +73,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
         <article v-for="session in listedSessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
           <button class="mobile-session-main" @click="openSession(session)">
             <span><strong>{{ relay.sessionDisplayName(session) }}</strong><small :data-status="relay.sessionDisplayStatus(session)">{{ relay.sessionDisplayStatus(session) }}</small></span>
-            <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>{{ session.lifecycle === 'longLived' ? '长期会话' : '一次性任务' }}</span></span>
+            <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>API 对话</span></span>
             <span>{{ session.runtimeMode.toUpperCase() }} · {{ session.workspaceId }}</span>
           </button>
           <div v-if="session.status === 'finished' || session.status === 'failed'" class="mobile-session-actions"><button @click="removeSession(session, false)">隐藏</button><button class="danger" @click="removeSession(session, true)">永久删除</button></div>

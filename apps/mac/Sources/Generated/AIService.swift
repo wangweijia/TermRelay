@@ -30,20 +30,16 @@ struct AiCreate: Codable, Sendable {
     let id: String
     let projectId: String
     let provider: String
-    let lifecycle: String
     let displayName: String
     let model: String?
     let effort: String?
-    let turn: AiTurn?
-    init(id: String, projectId: String, provider: String, lifecycle: String, displayName: String, model: String? = nil, effort: String? = nil, turn: AiTurn? = nil) {
+    init(id: String, projectId: String, provider: String, displayName: String, model: String? = nil, effort: String? = nil) {
         self.id = id
         self.projectId = projectId
         self.provider = provider
-        self.lifecycle = lifecycle
         self.displayName = displayName
         self.model = model
         self.effort = effort
-        self.turn = turn
     }
 }
 
@@ -52,13 +48,11 @@ struct AiTurn: Codable, Sendable {
     let sessionId: String
     let input: AiInput
     let output: AiOutput
-    let deadlineAt: String
-    init(id: String, sessionId: String, input: AiInput, output: AiOutput, deadlineAt: String) {
+    init(id: String, sessionId: String, input: AiInput, output: AiOutput) {
         self.id = id
         self.sessionId = sessionId
         self.input = input
         self.output = output
-        self.deadlineAt = deadlineAt
     }
 }
 
@@ -103,40 +97,19 @@ struct AiProviderCapability: Codable, Sendable {
     }
 }
 
-struct AiJobRequest: Codable, Sendable {
-    let target: [String: JSONValue]
-    let provider: String
-    let model: String?
-    let effort: String?
-    let displayName: String?
-    let input: AiInput
-    let output: AiOutput
-    let deadlineSeconds: Int?
-    let contextId: String?
-    init(target: [String: JSONValue], provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil, input: AiInput, output: AiOutput, deadlineSeconds: Int? = nil, contextId: String? = nil) {
-        self.target = target
-        self.provider = provider
-        self.model = model
-        self.effort = effort
-        self.displayName = displayName
-        self.input = input
-        self.output = output
-        self.deadlineSeconds = deadlineSeconds
-        self.contextId = contextId
-    }
-}
-
 struct AiConversationRequest: Codable, Sendable {
     let target: [String: JSONValue]
     let provider: String
     let model: String?
     let effort: String?
+    let timeoutSeconds: Int?
     let displayName: String?
-    init(target: [String: JSONValue], provider: String, model: String? = nil, effort: String? = nil, displayName: String? = nil) {
+    init(target: [String: JSONValue], provider: String, model: String? = nil, effort: String? = nil, timeoutSeconds: Int? = nil, displayName: String? = nil) {
         self.target = target
         self.provider = provider
         self.model = model
         self.effort = effort
+        self.timeoutSeconds = timeoutSeconds
         self.displayName = displayName
     }
 }
@@ -144,11 +117,9 @@ struct AiConversationRequest: Codable, Sendable {
 struct AiTurnRequest: Codable, Sendable {
     let input: AiInput
     let output: AiOutput
-    let deadlineSeconds: Int?
-    init(input: AiInput, output: AiOutput, deadlineSeconds: Int? = nil) {
+    init(input: AiInput, output: AiOutput) {
         self.input = input
         self.output = output
-        self.deadlineSeconds = deadlineSeconds
     }
 }
 

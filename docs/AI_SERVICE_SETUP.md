@@ -1,10 +1,12 @@
 # 局域网 AI 服务使用说明
 
-设计见 [AI_SERVICE_DESIGN.md](AI_SERVICE_DESIGN.md)。TermRelay 侧已加入API Key、一次性 job、长期 conversation、逐轮结果查询和 Mac 项目调用栏目。`invest` 的代码尚未修改，待办见 [INVEST_AI_SERVICE_TODO.md](INVEST_AI_SERVICE_TODO.md)。
+使用方开发者／编码 AI 的完整参数、响应、错误和调用示例见 [第三方 AI 接入手册](AI_API_INTEGRATION.md)。本文侧重 Server 与 Mac 的配置、部署和升级。
+
+设计见 [AI_SERVICE_DESIGN.md](AI_SERVICE_DESIGN.md)。TermRelay 只提供一种 AI 对话：调用方创建 conversation、串行提交 turn、主动关闭，并可在创建时设置可选的优雅关闭超时。`invest` 的代码尚未修改，待办见 [INVEST_AI_SERVICE_TODO.md](INVEST_AI_SERVICE_TODO.md)。
 
 ## 1. Server 准备
 
-使用 Node 22+ 和仓库声明的 pnpm。先构建 Server，在开发数据库上执行 migration；新增的 `AIService1791590400000` 创建 AI 数据表和会话来源字段。不要将生产凭据用于本地开发。AI API 要求数据库启用，数据库关闭时返回 `503 ai_requires_database`。
+使用 Node 22+ 和仓库声明的 pnpm。先构建 Server，在开发数据库上执行 migration；`AIService1791590400000` 创建 AI 数据表和会话来源字段，`UnifiedAIConversations1791820800000` 移除生命周期分类并规范化旧记录。不要将生产凭据用于本地开发。AI API 要求数据库启用，数据库关闭时返回 `503 ai_requires_database`。
 
 ```bash
 pnpm --filter @termrelay/server build
@@ -29,7 +31,7 @@ Mac 设置分为“连接与交互”“AI 服务”“工具与凭据”三个�
 
 调用方决定任务内容、模型、推理强度、事实和输出格式；省略模型／强度时使用 Provider 默认值，指定值由 Provider 验证实际支持情况，DSH 当前不支持任意模型／强度设置。权限和工作目录仍需本机授权，不受调用方提示词覆盖。
 
-每台 Mac 最多保留四个外部会话；Codex 与 DSH 共用设备总容量，空闲长期会话仍占容量。改变目录只影响新会话，已有会话保留创建时的权限；需要先关闭旧会话才能采用新权限。
+每台 Mac 最多保留四个外部会话；Codex 与 DSH 共用设备总容量，空闲及正在关闭的对话仍占容量，Mac 确认运行时已停止后释放。改变目录只影响新对话，已有对话保留创建时的权限；需要先关闭旧对话才能采用新权限。
 
 此改动同时更新 Mac／Server／Web 协议，必须一起更新。旧 Profile 请求不再接受，客户端删除 profile 字段；旧 JSON 配置不再使用。旧版受限 Key 可查询原有资源，但不能创建／继续新执行，需在 Web 生成通用替换 Key，不自动扩大旧凭据权限。
 
@@ -61,11 +63,31 @@ API Key 管理接口位于 `/api/settings/ai`，与配置页一起沿用现有 W
 
 所有端点位于 `/api/ai/v1`，带 `Authorization: Bearer <API_KEY>`。先调用 `GET /targets`，确认设备在线且 providers 包含所需 Provider。请求正文不要传 profile、projectId 或 Mac 路径。
 
-- 一次性推荐：`POST /jobs`，带 Idempotency-Key、target、provider、input、output 和可选 deadlineSeconds。轮询 `GET /jobs/{id}`，在 succeeded 时读取 result；终态后释放运行时。下一次推荐使用新幂等键，创建新 job。
-- 一天内分析：`POST /conversations`，等待状态 ready。随后 `POST /conversations/{id}/turns`，每轮使用独立幂等键并提交新快照。轮询 `/conversations/{id}/turns/{turnId}` 获取结果；一天结束后 `DELETE /conversations/{id}`。
-- 中断：job 使用 `/jobs/{id}/cancel`，长期会话使用 `/conversations/{id}/turns/{turnId}/cancel`。202 表示已请求，查询确认 cancelled 或其他终态。Mac／Web 也能中断、审批及关闭。
+1. `POST /conversations`，带 `Idempotency-Key`、target、provider 和可选 model、effort、displayName、timeoutSeconds。只启动对话，不执行任务。
+2. 轮询 `GET /conversations/{id}`，等待状态 `ready`。
+3. `POST /conversations/{id}/turns`，带新的 `Idempotency-Key`、input 和 output；轮询 `GET /conversations/{id}/turns/{turnId}` 取得该轮结果。后续轮次复用同一对话上下文。
+4. 业务完成后 `DELETE /conversations/{id}`。返回 `202` 和 `closing`；不再接收新轮次，已有轮次完成后停止运行时，再查询到 `closed`。
 
-长期会话只能串行，忙碌返回 409；离线返回 503，不排队。Mac 断线、运行时退出或 Server 重启时结束外部会话，旧 ID 不恢复；已经运行但无法确认结果时 error.executionOutcome 为 unknown，调用方不要据此认定“没有执行”。
+创建示例：
+
+```json
+{
+  "target": { "deviceId": "<mac-device-uuid>" },
+  "provider": "codex",
+  "displayName": "调用方控制的分析对话",
+  "timeoutSeconds": 3600
+}
+```
+
+`timeoutSeconds` 可省略，省略时没有自动过期时间；提供时必须是 1 至 2147483647 的整数秒，从 Server 接受创建请求时起算，查询返回绝对 `expiresAt`。到期后立即拒绝新轮次，返回 `409 conversation_closing`；空闲对话直接请求关闭，正在执行或等待用户回答的轮次不被取消，完成、失败或确认取消后才关闭。这个超时是“停止接收新任务”的时间，不是强制终止运行时间；到期后不保证立即释放容量。
+
+单轮没有默认 180 秒限制，也不再接受 `deadlineSeconds`。调用方如需主动停止某轮，使用 `POST /conversations/{id}/turns/{turnId}/cancel`；`202` 仅表示请求已提交，需查询确认 `cancelled` 或其他终态。关闭对话本身不会取消当前轮；需要立即结束业务时，先取消当前轮，再关闭对话。Mac／Web 的停止操作仍可以停止所属运行时。
+
+每个对话只能串行执行一轮，忙碌返回 `409 conversation_busy`，启动中返回 `409 conversation_not_ready`，已关闭返回 `409 conversation_closed`；离线返回 503，不排队。固定 30 秒启动保护、取消确认和运行时关闭确认保护不属于业务时长限制。Mac 断线、运行时退出或 Server 重启时结束外部会话，旧 ID 不恢复；已经运行但无法确认结果时 error.executionOutcome 为 unknown，调用方不要据此认定“没有执行”。
+
+### 从旧版升级
+
+`/jobs` 及其查询／取消接口已移除；原单次调用改为“创建对话 → 提交一轮 → 查询结果 → 关闭对话”。Mac、Server 和 Web 必须一起更新，停止旧版本后执行新 migration。旧 job 记录规范化为已关闭对话，保留原结果和错误，可通过 `GET /conversations/{原 jobId}` 查询；升级前未结束的 job 标记结果未知。旧会话分类与截止时间不会再用于调度，已结束的数据按原保留规则清理。迁移回滚只恢复数据库列，不恢复原分类或旧运行时。
 
 JSON 支持受限内联 Schema；不支持 `$ref`、正则表达式和 format 校验，复杂业务校验由调用方完成。最终回答解析失败返回 invalid_json，不符 Schema 返回 schema_mismatch，可读取受限 rawText 由调用方决定如何修复。精确用量未知为 null。
 

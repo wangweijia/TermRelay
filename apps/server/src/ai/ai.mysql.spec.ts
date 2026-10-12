@@ -35,13 +35,18 @@ test('MySQL serializes idempotency and preserves results across service instance
     const b = new AIService(new AIRepository(db),registry);
     for (const service of [a,b]) service.publishCapabilities(client,deviceId,{providers:[{provider:'codex',capacity:2,workspaceEnabled:false}]});
     const key = await a.authenticate(`Bearer ${token}`);
-    const body = {target:{deviceId},provider:'codex' as const,input:{facts:{snapshot:1}},output:{kind:'json' as const,schema:{type:'object'}}};
-    const [first,second] = await Promise.all([a.create(key,'job',body,'probe-idempotency'),b.create(key,'job',body,'probe-idempotency')]);
+    const body = {target:{deviceId},provider:'codex' as const};
+    const [first,second] = await Promise.all([a.create(key,body,'probe-idempotency'),b.create(key,body,'probe-idempotency')]);
     resourceIDs.add(first.id); resourceIDs.add(second.id);
     assert.equal(first.id,second.id);
-    assert.equal(first.status,'accepted');
-    await a.update(client,deviceId,{id:first.id,turnId:first.id,status:'succeeded',text:'{"answer":"persisted"}'});
-    const restored = await b.get(key,first.id);
+    assert.equal(first.status,'starting');
+    await a.update(client,deviceId,{id:first.id,status:'ready'});
+    const turnBody = {input:{facts:{snapshot:1}},output:{kind:'json' as const,schema:{type:'object'}}};
+    const [turn,repeat] = await Promise.all([a.turn(key,first.id,turnBody,'probe-turn-idempotency'),b.turn(key,first.id,turnBody,'probe-turn-idempotency')]);
+    resourceIDs.add(turn.id); resourceIDs.add(repeat.id);
+    assert.equal(turn.id,repeat.id);
+    await a.update(client,deviceId,{id:first.id,turnId:turn.id,status:'succeeded',text:'{"answer":"persisted"}'});
+    const restored = await b.get(key,turn.id);
     assert.equal(restored.status,'succeeded');
     assert.deepEqual(restored.result,{answer:'persisted'});
     assert.equal(restored.schemaHash?.length,64);
@@ -57,7 +62,7 @@ test('MySQL serializes idempotency and preserves results across service instance
     await assert.rejects(a.authenticate(`Bearer ${created.apiKey}`),{status:401});
     const generalKey = await a.authenticate(`Bearer ${replacement.apiKey}`);
     assert.equal(generalKey.grants.unrestricted,true);
-    assert.equal((await a.get(generalKey,first.id)).status,'succeeded');
+    assert.equal((await a.get(generalKey,turn.id)).status,'succeeded');
     assert.ok((await settings.list()).every(key => !('keyHash' in key) && !('apiKey' in key)));
   } finally {
     // Remove only records created by this probe, not development/user resources.

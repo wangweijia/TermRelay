@@ -231,7 +231,7 @@ private struct StructuredSessionSidebarRow: View {
             session: session,
             title: session.displayName,
             state: activeSession.state.sidebarState,
-            stateLabel: session.lifecycle == "longLived" && activeSession.state == .ready ? "等待下一轮":nil
+            stateLabel: session.projectID != nil && activeSession.state == .ready ? "等待下一轮":nil
         )
     }
 }
@@ -280,7 +280,7 @@ private struct SessionSidebarRowContent: View {
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
                 if let project = session.projectID {
-                    Text("\(project) · \(session.lifecycle == "longLived" ? "长期" : "一次性")")
+                    Text("\(project) · 对话")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 5) {

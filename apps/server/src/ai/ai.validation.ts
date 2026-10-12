@@ -1,10 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
-import { aiJobRequestSchema, aiConversationRequestSchema, aiTurnRequestSchema } from '@termrelay/contracts';
+import { aiConversationRequestSchema, aiTurnRequestSchema } from '@termrelay/contracts';
 import { createHash } from 'node:crypto';
 
 const ajv = new Ajv2020({ strict: false, allErrors: false, validateFormats: false });
-const validators = { job: ajv.compile(aiJobRequestSchema), conversation: ajv.compile(aiConversationRequestSchema), turn: ajv.compile(aiTurnRequestSchema) };
+const validators = { conversation: ajv.compile(aiConversationRequestSchema), turn: ajv.compile(aiTurnRequestSchema) };
 export function validateRequest(kind: keyof typeof validators, body: unknown): void {
   if (Buffer.byteLength(JSON.stringify(body) ?? '') > 262144 || !validators[kind](body)) throw new BadRequestException('invalid_request');
   const b = body as Record<string, unknown>;

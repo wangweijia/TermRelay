@@ -36,6 +36,12 @@
       "minLength": 1,
       "maxLength": 32
     },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "description": "Optional conversation lifetime from acceptance. Expiry rejects new turns and closes after the active turn completes."
+    },
     "displayName": {
       "type": "string",
       "minLength": 1,
@@ -97,7 +103,6 @@
         "id",
         "projectId",
         "provider",
-        "lifecycle",
         "displayName"
       ],
       "properties": {
@@ -116,12 +121,6 @@
             "dsh"
           ]
         },
-        "lifecycle": {
-          "enum": [
-            "oneShot",
-            "longLived"
-          ]
-        },
         "displayName": {
           "type": "string",
           "minLength": 1,
@@ -134,9 +133,6 @@
         "effort": {
           "type": "string",
           "maxLength": 32
-        },
-        "turn": {
-          "$ref": "#/$defs/AiTurn"
         }
       },
       "additionalProperties": false
@@ -147,8 +143,7 @@
         "id",
         "sessionId",
         "input",
-        "output",
-        "deadlineAt"
+        "output"
       ],
       "properties": {
         "id": {
@@ -164,10 +159,6 @@
         },
         "output": {
           "$ref": "#/$defs/AiOutput"
-        },
-        "deadlineAt": {
-          "type": "string",
-          "format": "date-time"
         }
       },
       "additionalProperties": false

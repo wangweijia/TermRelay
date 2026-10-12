@@ -104,7 +104,6 @@ const historyTypes = `export interface SessionHistoryListPayload {
 
 export interface SessionHistoryEntry {
   projectId?: string | null;
-  lifecycle?: 'oneShot' | 'longLived' | null;
   id: string;
   workspaceId: string;
   toolKey: string;
@@ -164,7 +163,6 @@ source = source.replace(/export interface SessionStartedPayload \{[\s\S]*?\n\}/,
   origin?: 'local' | 'external';
   projectId?: string;
   aiResourceId?: string;
-  lifecycle?: 'oneShot' | 'longLived';
 }`);
 const start = source.indexOf(marker);
 if (start >= 0) source = source.slice(0, start);

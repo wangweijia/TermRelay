@@ -45,7 +45,6 @@ struct RelaySessionStarted: Encodable, Sendable {
     var origin: String? = nil
     var projectId: String? = nil
     var aiResourceId: String? = nil
-    var lifecycle: String? = nil
 }
 
 struct RelayToolEvent: Codable, Sendable {

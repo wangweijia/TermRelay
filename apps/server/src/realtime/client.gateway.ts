@@ -282,7 +282,6 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
             startedAt: session.startedAt,
             updatedAt: session.updatedAt,
             projectId: session.projectId,
-            lifecycle: session.lifecycle,
           })),
           hasMore,
           relatedMessageId: envelope.messageId,

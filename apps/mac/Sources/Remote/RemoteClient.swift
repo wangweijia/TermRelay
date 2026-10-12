@@ -289,8 +289,7 @@ actor RemoteClient {
         displayName: String,
         runtimeMode: SessionRuntimeMode = .pty,
         startedAt: String,
-        projectID: String? = nil,
-        lifecycle: String? = nil
+        projectID: String? = nil
     ) async {
         if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
         if projectID != nil { externalSessions.insert(id) }
@@ -307,8 +306,7 @@ actor RemoteClient {
                 startedAt: startedAt,
                 origin: projectID == nil ? nil : "external",
                 projectId: projectID,
-                aiResourceId: projectID == nil ? nil : id.uuidString.lowercased(),
-                lifecycle: lifecycle
+                aiResourceId: projectID == nil ? nil : id.uuidString.lowercased()
             )
         )
         guard sent else { return }

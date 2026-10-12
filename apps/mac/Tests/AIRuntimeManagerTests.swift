@@ -4,7 +4,7 @@ import XCTest
 
 final class AIRuntimeManagerTests: XCTestCase {
     func testCapabilitiesAreProviderBasedAndServiceCanBeDisabled() async throws {
-        let f = await fixture(lifecycle:"longLived")
+        let f = await fixture()
         let capabilities = await f.manager.capabilities(availableProviders:["codex"])
         XCTAssertEqual(capabilities.providers.map(\.provider),["codex"])
         XCTAssertEqual(capabilities.providers.first?.workspaceEnabled,false)
@@ -18,10 +18,14 @@ final class AIRuntimeManagerTests: XCTestCase {
         XCTAssertTrue(updates.contains(where:{$0.status == "failed"}))
     }
 
-    func testOneShotReturnsOnlyFinalAnswerAndDeduplicatesExecution() async throws {
-        let f = await fixture(lifecycle:"oneShot")
+    func testConversationReturnsFinalAnswerAndStaysOpenUntilExplicitlyClosed() async throws {
+        let f = await fixture()
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
+        let initially = await f.runtime.turns.count
+        XCTAssertEqual(initially,0)
+        await f.manager.handle(type:"ai.turn.start",payload:try payload(f.turn))
+        await f.manager.handle(type:"ai.turn.start",payload:try payload(f.turn))
         let count = await f.runtime.turns.count
         XCTAssertEqual(count,1)
         await f.runtime.complete(text:"{\"answer\":\"final\"}")
@@ -29,18 +33,23 @@ final class AIRuntimeManagerTests: XCTestCase {
         let updates = await f.sink.updates
         XCTAssertEqual(updates.first(where:{$0.status == "succeeded"})?.text,"{\"answer\":\"final\"}")
         let stopped = await f.runtime.stopCount
-        XCTAssertEqual(stopped,1)
+        XCTAssertEqual(stopped,0)
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
         let after = await f.runtime.turns.count
         XCTAssertEqual(after,1)
+        await f.manager.handle(type:"ai.session.close",payload:try payload(AiControl(id:f.create.id)))
+        let closedUpdates = await f.sink.updates
+        XCTAssertTrue(closedUpdates.contains(where:{$0.status == "closed" && $0.errorCode == nil}))
+        let finallyStopped = await f.runtime.stopCount
+        XCTAssertEqual(finallyStopped,1)
         await f.manager.disconnected()
     }
 
-    func testLongConversationReusesRuntimeAndDisconnectClosesIt() async throws {
-        let f = await fixture(lifecycle:"longLived")
+    func testConversationReusesRuntimeAndDisconnectClosesIt() async throws {
+        let f = await fixture()
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
         for snapshot in ["first","second"] {
-            let turn = AiTurn(id:UUID().uuidString.lowercased(),sessionId:f.create.id,input:AiInput(facts:["snapshot":.string(snapshot)]),output:AiOutput(kind:"text"),deadlineAt:deadline())
+            let turn = AiTurn(id:UUID().uuidString.lowercased(),sessionId:f.create.id,input:AiInput(facts:["snapshot":.string(snapshot)]),output:AiOutput(kind:"text"))
             await f.manager.handle(type:"ai.turn.start",payload:try payload(turn))
             await f.manager.handle(type:"ai.turn.start",payload:try payload(turn))
             await f.runtime.complete(text:snapshot)
@@ -59,18 +68,58 @@ final class AIRuntimeManagerTests: XCTestCase {
     }
 
     func testRejectedTurnReportsParentConversationAndTurnIDs() async throws {
-        let f = await fixture(lifecycle:"longLived")
+        let f = await fixture()
         await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
-        let turn = AiTurn(id:UUID().uuidString.lowercased(),sessionId:f.create.id,input:AiInput(instructions:"expired"),output:AiOutput(kind:"text"),deadlineAt:"1970-01-01T00:00:00Z")
+        let turn = AiTurn(id:"invalid-turn-id",sessionId:f.create.id,input:AiInput(instructions:"invalid"),output:AiOutput(kind:"text"))
         await f.manager.handle(type:"ai.turn.start",payload:try payload(turn))
         let updates = await f.sink.updates
         XCTAssertTrue(updates.contains(where:{$0.id == f.create.id && $0.turnId == turn.id && $0.status == "failed"}))
     }
 
+    func testCloseBeforeCreateIsAcknowledgedAndDoesNotStartRuntime() async throws {
+        let f = await fixture()
+        let control = AiControl(id:f.create.id)
+        await f.manager.handle(type:"ai.session.close",payload:try payload(control))
+        await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
+        let updates = await f.sink.updates
+        XCTAssertTrue(updates.contains(where:{$0.id == f.create.id && $0.status == "closed" && $0.errorCode == nil}))
+        XCTAssertFalse(updates.contains(where:{$0.status == "ready"}))
+        let turns = await f.runtime.turns
+        XCTAssertTrue(turns.isEmpty)
+        await f.manager.disconnected()
+    }
+
+    func testStoppingRuntimeKeepsCapacityAndDuplicateCloseCannotAcknowledgeEarly() async throws {
+        let f = await fixture()
+        try await f.manager.configure([AIExecutionConfiguration(provider:"codex",capacity:1,directory:nil)])
+        await f.manager.handle(type:"ai.session.create",payload:try payload(f.create))
+        await f.runtime.holdStop()
+        let controlPayload = try payload(AiControl(id:f.create.id))
+        let close = Task { await f.manager.handle(type:"ai.session.close",payload:controlPayload) }
+        for _ in 0..<100 {
+            if await f.runtime.stopCount > 0 { break }
+            try await Task.sleep(for:.milliseconds(5))
+        }
+        let stopping = await f.runtime.stopCount
+        XCTAssertEqual(stopping,1)
+        await f.manager.handle(type:"ai.session.close",payload:controlPayload)
+        let replacement = AiCreate(id:UUID().uuidString.lowercased(),projectId:"api",provider:"codex",displayName:"replacement")
+        await f.manager.handle(type:"ai.session.create",payload:try payload(replacement))
+        let before = await f.sink.updates
+        XCTAssertFalse(before.contains(where:{$0.id == f.create.id && $0.status == "closed"}))
+        XCTAssertTrue(before.contains(where:{$0.id == replacement.id && $0.status == "failed"}))
+        await f.runtime.releaseStop()
+        await close.value
+        let after = await f.sink.updates
+        XCTAssertTrue(after.contains(where:{$0.id == f.create.id && $0.status == "closed" && $0.errorCode == nil}))
+        await f.manager.disconnected()
+    }
+
     func testProjectApprovalsAutomaticallyAllowAndContinueWithAndWithoutWorkspace() async throws {
         for directory in [String?.none, FileManager.default.temporaryDirectory.path] {
-            let f = await fixture(lifecycle: "oneShot", directory: directory)
+            let f = await fixture(directory: directory)
             await f.manager.handle(type: "ai.session.create", payload: try payload(f.create))
+            await f.manager.handle(type: "ai.turn.start", payload: try payload(f.turn))
             await f.runtime.requestApproval(id: "first")
             try await Task.sleep(for: .milliseconds(50))
             await f.runtime.requestApproval(id: "second", decisions: [.allowSession, .deny])
@@ -88,14 +137,15 @@ final class AIRuntimeManagerTests: XCTestCase {
     }
 
     func testAutomaticApprovalFailureEndsTurnInsteadOfLeavingItWaiting() async throws {
-        let f = await fixture(lifecycle: "oneShot")
+        let f = await fixture()
         await f.manager.handle(type: "ai.session.create", payload: try payload(f.create))
+        await f.manager.handle(type: "ai.turn.start", payload: try payload(f.turn))
         await f.runtime.setApprovalFailure()
         await f.runtime.requestApproval(id: "failed")
         try await Task.sleep(for: .milliseconds(50))
         let updates = await f.sink.updates
         XCTAssertTrue(updates.contains(where: {
-            $0.turnId == f.create.turn?.id && $0.status == "failed" && $0.errorCode == "automatic_approval_failed"
+            $0.turnId == f.turn.id && $0.status == "failed" && $0.errorCode == "automatic_approval_failed"
         }))
         let stopped = await f.runtime.stopCount
         XCTAssertEqual(stopped, 1)
@@ -199,21 +249,20 @@ final class AIRuntimeManagerTests: XCTestCase {
         } catch { await coordinator.stop(); throw error }
     }
 
-    private func fixture(lifecycle: String, directory: String? = nil) async -> AIFixture {
+    private func fixture(directory: String? = nil) async -> AIFixture {
         let id = UUID()
         let runtime = TestAIRuntime(id:id)
         let sink = AISink()
         let manager = AIRuntimeManager(factory:{_,_,_ in AILaunchContext(adapter:TestAIAdapter(runtime:runtime),environment:[:])},announce:{_,_,_ in},eventHandler:{_ in},updateHandler:{u in await sink.record(u)})
         try! await manager.configure([AIExecutionConfiguration(provider:"codex",capacity:4,directory:directory)])
         await manager.connected()
-        let turn = AiTurn(id:id.uuidString.lowercased(),sessionId:id.uuidString.lowercased(),input:AiInput(instructions:"Analyze"),output:AiOutput(kind:"json"),deadlineAt:deadline())
-        let create = AiCreate(id:id.uuidString.lowercased(),projectId:"invest",provider:"codex",lifecycle:lifecycle,displayName:"test",turn:lifecycle == "oneShot" ? turn:nil)
-        return AIFixture(manager:manager,runtime:runtime,sink:sink,create:create)
+        let turn = AiTurn(id:UUID().uuidString.lowercased(),sessionId:id.uuidString.lowercased(),input:AiInput(instructions:"Analyze"),output:AiOutput(kind:"json"))
+        let create = AiCreate(id:id.uuidString.lowercased(),projectId:"invest",provider:"codex",displayName:"test")
+        return AIFixture(manager:manager,runtime:runtime,sink:sink,create:create,turn:turn)
     }
     private func payload<T:Encodable>(_ value:T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self,from:JSONEncoder().encode(value)) }
-    private func deadline() -> String { ISO8601DateFormatter().string(from:Date().addingTimeInterval(60)) }
 }
-private struct AIFixture: Sendable { let manager:AIRuntimeManager; let runtime:TestAIRuntime; let sink:AISink; let create:AiCreate }
+private struct AIFixture: Sendable { let manager:AIRuntimeManager; let runtime:TestAIRuntime; let sink:AISink; let create:AiCreate; let turn:AiTurn }
 private actor AISink { var updates:[AiUpdate] = []; func record(_ u:AiUpdate) { updates.append(u) } }
 private struct TestAIAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.codex
@@ -233,6 +282,8 @@ private actor TestAIRuntime: StructuredAgentRuntime {
     var stopCount = 0
     var resolutions: [ApprovalResolution] = []
     private var approvalFailure = false
+    private var stopHeld = false
+    private var stopContinuation: CheckedContinuation<Void,Never>?
     init(id:UUID) { self.id = id; let s = AsyncStream<ToolEvent>.makeStream(); events = s.stream; continuation = s.continuation }
     func start() async throws {}
     func createSession(_ request:AgentSessionRequest) async throws -> AgentSessionReference { AgentSessionReference(providerID:.codex,opaqueID:id.uuidString) }
@@ -252,6 +303,12 @@ private actor TestAIRuntime: StructuredAgentRuntime {
             availableDecisions: decisions, expiresAt: Date().addingTimeInterval(60))))
     }
     func complete(text:String) { emit(.reasoningDelta(text:"not a final answer")); emit(.assistantMessageCompleted(text:text)); emit(.turnCompleted(turnID:active,status:.completed)) }
-    func stop() async { stopCount += 1; continuation.finish() }
+    func holdStop() { stopHeld = true }
+    func releaseStop() { stopHeld = false; stopContinuation?.resume(); stopContinuation = nil }
+    func stop() async {
+        stopCount += 1
+        if stopHeld { await withCheckedContinuation { stopContinuation = $0 } }
+        continuation.finish()
+    }
     private func emit(_ payload:ToolEventPayload) { continuation.yield(ToolEvent(sessionID:id,sequence:sequence,occurredAt:Date(),correlation:AgentCorrelation(turnID:active,itemID:nil,approvalID:nil),payload:payload)); sequence += 1 }
 }

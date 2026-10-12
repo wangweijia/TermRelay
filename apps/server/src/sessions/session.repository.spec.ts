@@ -42,7 +42,7 @@ test('disconnect permanently removes only unused ACP sessions for that device', 
 });
 
 test('unused external conversations survive ordinary empty-session pruning and retain provenance', async () => {
-  const store = new MemorySessions([session('external','acp',{origin:'external',projectId:'invest',aiResourceId:'external',lifecycle:'longLived'})]);
+  const store = new MemorySessions([session('external','acp',{origin:'external',projectId:'invest',aiResourceId:'external'})]);
   await store.repository.finishActiveForDevice('device-a');
   assert.deepEqual(store.sessionIDs(),['external']);
   const record = await store.repository.findById('external');

@@ -23,7 +23,6 @@ struct RelayHistorySession: Decodable, Sendable {
     let runtimeMode: String
     let status: String
     let projectId: String?
-    let lifecycle: String?
     let updatedAt: String
 }
 

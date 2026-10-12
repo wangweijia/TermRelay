@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, ForbiddenException, NotFoundException, ConflictException, ServiceUnavailableException, BadRequestException, Logger, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
-import type { AiCapabilities, AiProviderCapability, AiUpdate, AiCreate, AiTurn, AiJobRequest, AiConversationRequest, AiTurnRequest } from '@termrelay/contracts';
+import type { AiCapabilities, AiProviderCapability, AiUpdate, AiCreate, AiTurn, AiConversationRequest, AiTurnRequest } from '@termrelay/contracts';
 import type WebSocket from 'ws';
 import { DeviceConnectionRegistry } from '../realtime/device-connection.registry';
 import { AIRepository } from './ai.repository';
@@ -8,6 +8,7 @@ import { AIProjectKeyEntity, AIResourceEntity, type AIResource } from './ai.enti
 import { extractResult, fingerprint, validateRequest } from './ai.validation';
 
 export const isTerminal = (r: AIResource): boolean => ['closed','succeeded','failed','cancelled'].includes(r.status);
+interface AICommand { deviceId: string; type: string; payload: unknown }
 
 @Injectable()
 export class AIService implements OnModuleInit, OnModuleDestroy {
@@ -58,57 +59,62 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     return c && this.registry.getClient(deviceId) === c.client ? c.providers : [];
   }
 
-  async create(key: AIProjectKeyEntity, kind: 'job' | 'conversation', body: AiJobRequest | AiConversationRequest, idem: string): Promise<AIResource> {
-    validateRequest(kind, body);
+  async create(key: AIProjectKeyEntity, body: AiConversationRequest, idem: string): Promise<AIResource> {
+    validateRequest('conversation', body);
     return this.repo.transaction(rows => {
-      const scope = this.scope(key,kind,idem);
+      const scope = this.scope(key,'conversation',idem);
       const old = [...rows.values()].find(r => r.idempotencyScope === scope);
       if (old) return this.repeat(old.data,body);
       const deviceId = body.target.deviceId.toLowerCase();
       const p = this.admit(key,deviceId,body.provider);
-      const active = [...rows.values()].map(r => r.data).filter(r => r.kind !== 'turn' && !isTerminal(r));
+      const active = [...rows.values()].map(r => r.data).filter(r => r.kind === 'conversation' && !isTerminal(r));
       if (active.filter(r => r.deviceId === deviceId).length >= 4
         || active.filter(r => r.deviceId === deviceId && r.provider === p.provider).length >= p.capacity) throw new ConflictException('device_busy');
       const id = randomUUID();
       const now = new Date().toISOString();
-      const job = body as AiJobRequest;
-      const r: AIResource = { id,kind,projectId:key.projectId,deviceId,sessionId:id,provider:body.provider,
-        displayName:body.displayName ?? body.provider,fingerprint:fingerprint(body),status:kind === 'job' ? 'accepted':'starting',
-        activeTurnId:kind === 'job' ? id:null,waitingFor:null,cancelRequested:false,result:null,error:null,actualModel:null,actualEffort:null,usage:null,
-        createdAt:now,finishedAt:null,deadlineAt:new Date(Date.now()+(kind === 'job' ? job.deadlineSeconds ?? 180:30)*1000).toISOString(),
+      const r: AIResource = { id,kind:'conversation',projectId:key.projectId,deviceId,sessionId:id,provider:body.provider,
+        displayName:body.displayName ?? body.provider,fingerprint:fingerprint(body),status:'starting',
+        activeTurnId:null,waitingFor:null,cancelRequested:false,result:null,error:null,actualModel:null,actualEffort:null,usage:null,
+        createdAt:now,finishedAt:null,startupDeadlineAt:new Date(Date.parse(now)+30000).toISOString(),
+        expiresAt:body.timeoutSeconds === undefined ? null : new Date(Date.parse(now)+body.timeoutSeconds*1000).toISOString(),
         ...(body.model ? {model:body.model}:{}),...(body.effort ? {effort:body.effort}:{}),
-        ...(kind === 'job' ? {input:job.input,output:job.output,...(job.output.schema ? {schemaHash:fingerprint(job.output.schema)}:{}),...(job.contextId ? {contextId:job.contextId}:{})}:{}),
       };
       rows.set(id,{id,idempotencyScope:scope,data:r});
       return r;
     }).then(async r => { await this.dispatchCreate(r); return r; });
   }
   private async dispatchCreate(r: AIResource): Promise<void> {
-    if (isTerminal(r) || r.status === 'ready' || r.status === 'running') return;
+    if (r.status !== 'starting') return;
     const payload: AiCreate = {id:r.id,projectId:r.projectId,provider:r.provider,
-      lifecycle:r.kind === 'job' ? 'oneShot':'longLived',displayName:r.displayName,
-      ...(r.model ? {model:r.model}:{}),...(r.effort ? {effort:r.effort}:{}),...(r.kind === 'job' ? {turn:this.turnPayload(r)}:{})};
+      displayName:r.displayName,...(r.model ? {model:r.model}:{}),...(r.effort ? {effort:r.effort}:{})};
     if (!this.send(r.deviceId,'ai.session.create',payload)) await this.disconnected(r.deviceId);
   }
   async turn(key: AIProjectKeyEntity, sessionId: string, body: AiTurnRequest, idem: string): Promise<AIResource> {
     validateRequest('turn',body);
-    const r = await this.repo.transaction(rows => {
+    const outcome = await this.mutate<{resource:AIResource} | {error:string}>((rows,commands) => {
       const scope = this.scope(key,`turn:${sessionId}`,idem);
       const old = [...rows.values()].find(r => r.idempotencyScope === scope);
-      if (old) return this.repeat(old.data,body);
+      if (old) return {resource:this.repeat(old.data,body)};
       const c = this.owned(rows,key,sessionId,'conversation');
-      this.admit(key,c.deviceId,c.provider);
       if (c.status === 'closed') throw new ConflictException('conversation_closed');
+      if (c.expiresAt && Date.now() >= Date.parse(c.expiresAt)) this.requestClose(c,'timeout',commands);
+      if (c.status === 'closing') return {error:'conversation_closing'};
       if (c.status !== 'ready') throw new ConflictException('conversation_not_ready');
       if (c.activeTurnId) throw new ConflictException('conversation_busy');
+      this.admit(key,c.deviceId,c.provider);
       const id = randomUUID();
-      const r: AIResource = {...c,id,kind:'turn',sessionId:c.id,fingerprint:fingerprint(body),status:'accepted',activeTurnId:id,
+      const r: AIResource = {id,kind:'turn',projectId:c.projectId,deviceId:c.deviceId,sessionId:c.id,provider:c.provider,
+        displayName:c.displayName,...(c.model ? {model:c.model}:{}),...(c.effort ? {effort:c.effort}:{}),
+        actualModel:c.actualModel,actualEffort:c.actualEffort,usage:null,
+        fingerprint:fingerprint(body),status:'accepted',activeTurnId:id,
         input:body.input,output:body.output,schemaHash:body.output.schema ? fingerprint(body.output.schema):undefined,result:null,error:null,cancelRequested:false,waitingFor:null,finishedAt:null,
-        createdAt:new Date().toISOString(),deadlineAt:new Date(Date.now()+(body.deadlineSeconds ?? 180)*1000).toISOString()};
+        createdAt:new Date().toISOString(),expiresAt:null};
       c.activeTurnId = id;
       rows.set(id,{id,idempotencyScope:scope,data:r});
-      return r;
+      return {resource:r};
     });
+    if ('error' in outcome) throw new ConflictException(outcome.error);
+    const r = outcome.resource;
     if (r.status === 'accepted' && !this.send(r.deviceId,'ai.turn.start',this.turnPayload(r))) await this.disconnected(r.deviceId);
     return r;
   }
@@ -119,39 +125,43 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       return {...r};
     });
   }
-  async cancel(key: AIProjectKeyEntity, id: string, kind: 'job' | 'turn', parent?: string): Promise<AIResource> {
-    return this.repo.transaction(rows => {
-      const r = this.owned(rows,key,id,kind);
+  async cancel(key: AIProjectKeyEntity, id: string, parent: string): Promise<AIResource> {
+    return this.mutate((rows,commands) => {
+      const r = this.owned(rows,key,id,'turn');
       if (parent && r.sessionId !== parent) throw new NotFoundException();
-      if (!isTerminal(r)) this.requestCancel(r);
+      if (!isTerminal(r)) this.requestCancel(r,commands);
       return {...r};
     });
   }
   async close(key: AIProjectKeyEntity, id: string): Promise<AIResource> {
-    return this.repo.transaction(rows => {
+    return this.mutate((rows,commands) => {
       const c = this.owned(rows,key,id,'conversation');
-      if (c.status !== 'closed') {
-        this.finish(c,'explicit_close');
-        if (c.activeTurnId) { const turn = rows.get(c.activeTurnId)?.data; if (turn && !isTerminal(turn)) this.finish(turn,'explicit_close'); }
-        this.send(c.deviceId,'ai.session.close',{id:c.id});
-      }
+      if (c.status !== 'closed') this.requestClose(c,'explicit_close',commands);
       return {...c};
     });
   }
   async update(client: WebSocket, deviceId: string, u: AiUpdate): Promise<boolean> {
     if (!this.registry.isRegisteredClient(client,deviceId)) return false;
-    const accepted = await this.repo.transaction(rows => {
+    const accepted = await this.mutate((rows,commands) => {
       const session = rows.get(u.id)?.data;
       if (!session || session.deviceId !== deviceId || session.kind === 'turn' || isTerminal(session)) return false;
-      if (u.status === 'ready' && session.kind === 'conversation') { session.status = 'ready'; session.actualModel = u.model ?? null; session.actualEffort = u.effort ?? null; return true; }
+      if (u.status === 'ready') {
+        if (session.status !== 'starting' && session.status !== 'ready') return false;
+        session.status = 'ready'; session.actualModel = u.model ?? null; session.actualEffort = u.effort ?? null;
+        if (session.expiresAt && Date.now() >= Date.parse(session.expiresAt)) this.requestClose(session,'timeout',commands);
+        return true;
+      }
       if (u.status === 'closed') {
         if (session.activeTurnId) { const t = rows.get(session.activeTurnId)?.data; if (t && !isTerminal(t)) this.finish(t,u.errorCode ?? 'runtime_exited'); }
-        this.finish(session,u.errorCode ?? 'runtime_exited'); return true;
+        if (session.status === 'closing' && !u.errorCode) {
+          session.status = 'closed'; session.finishedAt = new Date().toISOString(); session.activeTurnId = null; session.waitingFor = null;
+        } else this.finish(session,u.errorCode ?? 'runtime_exited');
+        return true;
       }
-      if (u.status === 'failed' && session.kind === 'conversation' && !u.turnId && session.status === 'starting') {
+      if (u.status === 'failed' && !u.turnId && session.status === 'starting') {
         this.finish(session,u.errorCode ?? 'startup_failed','not_started'); return true;
       }
-      const r = session.kind === 'job' ? session : rows.get(u.turnId ?? '')?.data;
+      const r = rows.get(u.turnId ?? '')?.data;
       if (!r || r.sessionId !== session.id || r.id !== (session.activeTurnId ?? session.id) || isTerminal(r)) return false;
       if ((u.turnId && u.turnId !== r.id) || (['running','succeeded','cancelled'].includes(u.status) && u.turnId !== r.id)) return false;
       r.actualModel = u.model ?? r.actualModel; r.actualEffort = u.effort ?? r.actualEffort;
@@ -163,7 +173,9 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
       } else if (u.status === 'cancelled') r.status = 'cancelled';
       else this.finish(r,u.errorCode ?? 'agent_failed','confirmed');
       r.finishedAt = new Date().toISOString(); r.waitingFor = null; r.activeTurnId = null;
-      if (session.kind === 'conversation') session.activeTurnId = null;
+      session.activeTurnId = null;
+      if (session.status === 'closing' || (session.expiresAt && Date.now() >= Date.parse(session.expiresAt)))
+        this.requestClose(session,session.closeReason ?? 'timeout',commands);
       return true;
     });
     if (['succeeded','failed','cancelled','closed'].includes(u.status))
@@ -175,7 +187,7 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
   }
   async tick(now = Date.now()): Promise<void> {
     if (now - this.lastPruneAt > 3600000) { await this.repo.pruneSessionData(); this.lastPruneAt = now; }
-    await this.repo.transaction(rows => {
+    await this.mutate((rows,commands) => {
       for (const [id,{data:r}] of rows) {
         if (isTerminal(r)) {
           const age = now - Date.parse(r.finishedAt!);
@@ -184,18 +196,45 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
         if (r.kind === 'conversation') {
-          if (r.status === 'starting' && now >= Date.parse(r.deadlineAt)) { this.finish(r,'startup_timeout','not_started'); this.send(r.deviceId,'ai.session.close',{id:r.id}); }
+          if (r.status === 'closing') {
+            if (r.closeDeadlineAt && now >= Date.parse(r.closeDeadlineAt)) this.finish(r,'close_timeout');
+            else this.requestClose(r,r.closeReason ?? 'explicit_close',commands,now);
+          } else if (r.expiresAt && now >= Date.parse(r.expiresAt)) {
+            this.requestClose(r,'timeout',commands,now);
+          } else if (r.status === 'starting' && now >= Date.parse(r.startupDeadlineAt!)) {
+            this.finish(r,'startup_timeout','not_started');
+            commands.push({deviceId:r.deviceId,type:'ai.session.close',payload:{id:r.id}});
+          }
         } else if (r.cancelRequested && now >= Date.parse(r.cancelDeadlineAt!)) {
-          this.finish(r,'cancel_timeout'); this.send(r.deviceId,'ai.session.close',{id:r.sessionId});
-          const c = rows.get(r.sessionId)?.data; if (c && c.kind === 'conversation') this.finish(c,'cancel_timeout');
-        } else if (!r.cancelRequested && now >= Date.parse(r.deadlineAt)) this.requestCancel(r);
+          this.finish(r,'cancel_timeout');
+          const c = rows.get(r.sessionId)?.data;
+          if (c && !isTerminal(c)) {
+            c.activeTurnId = null; c.error = r.error;
+            this.requestClose(c,'cancel_timeout',commands,now);
+          }
+        }
       }
     });
   }
-  private requestCancel(r: AIResource): void {
+  private requestCancel(r: AIResource, commands: AICommand[]): void {
+    if (r.cancelRequested) return;
     r.cancelRequested = true;
     r.cancelDeadlineAt ??= new Date(Date.now()+10000).toISOString();
-    if (!this.send(r.deviceId,'ai.turn.cancel',{id:r.sessionId,turnId:r.id})) this.finish(r,'connection_lost');
+    commands.push({deviceId:r.deviceId,type:'ai.turn.cancel',payload:{id:r.sessionId,turnId:r.id}});
+  }
+  private requestClose(c: AIResource, reason: string, commands: AICommand[], now = Date.now()): void {
+    c.status = 'closing'; c.closeReason ??= reason;
+    if (c.activeTurnId || c.closeDeadlineAt) return;
+    c.closeDeadlineAt = new Date(now+10000).toISOString();
+    commands.push({deviceId:c.deviceId,type:'ai.session.close',payload:{id:c.id}});
+  }
+  private async mutate<T>(fn: (rows: Map<string,AIResourceEntity>, commands: AICommand[]) => T): Promise<T> {
+    const commands: AICommand[] = [];
+    const result = await this.repo.transaction(rows => fn(rows,commands));
+    for (const command of commands) {
+      if (!this.send(command.deviceId,command.type,command.payload)) await this.disconnected(command.deviceId);
+    }
+    return result;
   }
   private admit(key: AIProjectKeyEntity, deviceId: string, provider: string): AiProviderCapability {
     // Old profile-scoped credentials cannot silently gain broader execution access.
@@ -215,14 +254,14 @@ export class AIService implements OnModuleInit, OnModuleDestroy {
     return `${key.projectId}:${operation}:${idem}`;
   }
   private repeat(r: AIResource, body: unknown): AIResource { if (r.fingerprint !== fingerprint(body)) throw new ConflictException('idempotency_conflict'); return r; }
-  private turnPayload(r: AIResource): AiTurn { return {id:r.id,sessionId:r.sessionId,input:r.input!,output:r.output!,deadlineAt:r.deadlineAt}; }
+  private turnPayload(r: AIResource): AiTurn { return {id:r.id,sessionId:r.sessionId,input:r.input!,output:r.output!}; }
   private finish(r: AIResource, code: string, outcome: 'unknown' | 'confirmed' | 'not_started' = 'unknown'): void {
     r.status = r.kind === 'conversation' ? 'closed':'failed'; r.finishedAt = new Date().toISOString();
-    r.waitingFor = null; r.error = {code,message:code,executionOutcome:outcome};
+    r.waitingFor = null; r.activeTurnId = null; r.error = {code,message:code,executionOutcome:outcome};
   }
   private send(deviceId: string, type: string, payload: unknown): boolean {
     try { const client = this.registry.getClient(deviceId); if (!client || client.readyState !== 1) return false;
       client.send(JSON.stringify({event:'message',data:{type,protocolVersion:'2',messageId:randomUUID(),deviceId,sentAt:new Date().toISOString(),payload}})); return true;
-    } catch { return false; }
+    } catch (reason) { this.logger.error(`AI command ${type} failed for device ${deviceId}: ${String(reason)}`); return false; }
   }
 }

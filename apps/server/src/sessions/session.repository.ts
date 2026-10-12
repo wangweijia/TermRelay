@@ -22,7 +22,6 @@ export interface SessionRecord {
   origin?: 'local' | 'external';
   projectId?: string | null;
   aiResourceId?: string | null;
-  lifecycle?: 'oneShot' | 'longLived' | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -122,7 +121,6 @@ export class SessionRepository {
         origin: payload.origin ?? 'local',
         projectId: payload.projectId ?? null,
         aiResourceId: payload.aiResourceId ?? null,
-        lifecycle: payload.lifecycle ?? null,
         startedAt: new Date(payload.startedAt),
         finishedAt: null,
         deletedAt: null,
@@ -570,7 +568,6 @@ function toSessionRecord(session: SessionEntity): SessionRecord {
     origin: session.origin ?? 'local',
     projectId: session.projectId ?? null,
     aiResourceId: session.aiResourceId ?? null,
-    lifecycle: session.lifecycle ?? null,
     startedAt: session.startedAt?.toISOString() ?? null,
     finishedAt: session.finishedAt?.toISOString() ?? null,
     createdAt: session.createdAt.toISOString(),

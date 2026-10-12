@@ -2,8 +2,11 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
 const root = new URL('./', import.meta.url);
 const schema = JSON.parse(await readFile(new URL('ai.schema.json', root), 'utf8'));
-for (const name of ['AiJobRequest','AiConversationRequest','AiTurnRequest']) {
-  const { $schema, $id, $defs, ...definition } = JSON.parse(await readFile(new URL(`ai-${name}.schema.json`,root),'utf8'));
+const sharedDefinitions = structuredClone(schema.$defs);
+for (const name of ['AiConversationRequest','AiTurnRequest']) {
+  const requestURL = new URL(`ai-${name}.schema.json`,root);
+  const { $schema, $id, $defs, ...definition } = JSON.parse(await readFile(requestURL,'utf8'));
+  await writeFile(requestURL, JSON.stringify({ $schema, $id, ...definition, $defs: sharedDefinitions }, null, 2) + '\n');
   schema.$defs[name] = definition;
 }
 function ts(s) {

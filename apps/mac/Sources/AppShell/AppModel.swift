@@ -250,10 +250,10 @@ final class AppModel: ObservableObject {
             stateHandler:{ [weak self] id,state in self?.handleStructuredSessionState(id:id,state:state) },
             externalActionHandler:{ action in await manager.action(sessionID:id,action:action) })
         structuredSessions[id] = session
-        sessions.append(ManagedSession(id:id,directory:directory,toolID:create.provider,displayName:create.displayName,runtimeMode:.acp,projectID:create.projectId,lifecycle:create.lifecycle))
+        sessions.append(ManagedSession(id:id,directory:directory,toolID:create.provider,displayName:create.displayName,runtimeMode:.acp,projectID:create.projectId))
         let workspace = workspaceID(for:directory)
         await remoteClient.publishWorkspace(id:workspace,directory:directory)
-        await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId,lifecycle:create.lifecycle)
+        await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId)
     }
     private func observeAI(_ event: ToolEvent) async {
         structuredSessions[event.sessionID]?.observeExternal(event)
@@ -262,7 +262,7 @@ final class AppModel: ObservableObject {
     private func publishAIUpdate(_ update: AiUpdate) async {
         await remoteClient?.publishAI(type:"ai.update",payload:update)
         guard let id = UUID(uuidString:update.id) else { return }
-        if update.status == "closed" || (["succeeded","failed","cancelled"].contains(update.status) && sessions.first(where:{$0.id == id})?.lifecycle == "oneShot") {
+        if update.status == "closed" {
             pendingApprovals.clear(sessionID:id)
             await structuredSessions[id]?.stop()
             structuredSessions[id] = nil
@@ -547,7 +547,7 @@ final class AppModel: ObservableObject {
             return ManagedSession(id: id, directory: workingDirectory, toolID: record.toolKey,
                 displayName: record.displayName ?? record.toolKey, runtimeMode: .acp,
                 state: SessionState(rawValue: record.status) ?? .failed,
-                projectID: record.projectId ?? "API", lifecycle: record.lifecycle)
+                projectID: record.projectId ?? "API")
         }
     }
 

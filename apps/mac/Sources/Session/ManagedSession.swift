@@ -7,7 +7,6 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
     let displayName: String
     let runtimeMode: SessionRuntimeMode
     let projectID: String?
-    let lifecycle: String?
     private(set) var state: SessionState
 
     init(
@@ -17,8 +16,7 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
         displayName: String? = nil,
         runtimeMode: SessionRuntimeMode = .pty,
         state: SessionState = .starting,
-        projectID: String? = nil,
-        lifecycle: String? = nil
+        projectID: String? = nil
     ) {
         self.id = id
         self.directory = directory
@@ -27,7 +25,6 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
             .nilIfEmpty ?? directory.lastPathComponent
         self.runtimeMode = runtimeMode
         self.projectID = projectID
-        self.lifecycle = lifecycle
         self.state = state
     }
 

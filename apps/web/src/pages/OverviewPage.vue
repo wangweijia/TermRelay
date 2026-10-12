@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
                   {{ relay.sessionDisplayStatus(session) }}
                 </small>
               </span>
-              <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>{{ session.lifecycle === 'longLived' ? '长期会话' : '一次性任务' }}</span></span>
+              <span v-if="session.origin === 'external'" class="session-project-meta"><span class="session-project-tag">{{ session.projectId }}</span><span>API 对话</span></span>
               <span>{{ session.workspaceId }}</span>
               <code>{{ session.id }}</code>
             </button>

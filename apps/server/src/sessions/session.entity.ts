@@ -51,7 +51,6 @@ export class SessionEntity {
   @Column({ type: 'varchar', length: 16, default: 'local' }) origin!: 'local' | 'external';
   @Column({ name: 'project_id', type: 'varchar', length: 64, nullable: true }) projectId!: string | null;
   @Column({ name: 'ai_resource_id', type: 'varchar', length: 36, nullable: true }) aiResourceId!: string | null;
-  @Column({ type: 'varchar', length: 16, nullable: true }) lifecycle!: 'oneShot' | 'longLived' | null;
 
   @Column({ name: 'started_at', type: 'datetime', precision: 3, nullable: true })
   startedAt!: Date | null;

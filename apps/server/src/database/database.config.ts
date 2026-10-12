@@ -21,6 +21,7 @@ import { ShortcutEntity } from '../shortcuts/shortcut.entity';
 import { ShortcutRunEntity } from '../shortcuts/shortcut-run.entity';
 import { AIProjectKeyEntity, AIResourceEntity } from '../ai/ai.entity';
 import { AIService1791590400000 } from './migrations/1791590400000-ai-service';
+import { UnifiedAIConversations1791820800000 } from './migrations/1791820800000-unified-ai-conversations';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -50,6 +51,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       AcpUserMessage1790553600000,
       Shortcuts1790640000000,
       AIService1791590400000,
+      UnifiedAIConversations1791820800000,
     ],
     entities: [
       DeviceEntity,
