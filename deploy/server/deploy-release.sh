@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-for command in docker gzip curl; do
+for command in docker curl; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Required command is missing: $command" >&2
     exit 1
@@ -51,7 +51,10 @@ docker compose version >/dev/null 2>&1 || {
 }
 
 manifest="$release_dir/manifest.env"
-image_archive="$release_dir/image.tar.gz"
+image_archive="$release_dir/image.tar"
+if [ ! -f "$image_archive" ]; then
+  image_archive="$release_dir/image.tar.gz"
+fi
 compose_file="$release_dir/compose.yaml"
 [ -f "$manifest" ] || { echo "Missing release manifest: $manifest" >&2; exit 1; }
 [ -f "$image_archive" ] || { echo "Missing image archive: $image_archive" >&2; exit 1; }
@@ -108,8 +111,20 @@ if [ -n "$docker_port_conflict" ]; then
   exit 1
 fi
 
-echo "Loading $TERMRELAY_IMAGE ..."
-gzip -dc "$image_archive" | docker load
+installed_image_id="$(docker image inspect --format '{{.Id}}' "$TERMRELAY_IMAGE" 2>/dev/null || true)"
+if [ -n "${TERMRELAY_IMAGE_ID:-}" ] && [ "$installed_image_id" = "$TERMRELAY_IMAGE_ID" ]; then
+  echo "Image $TERMRELAY_IMAGE is already loaded; skipping import."
+else
+  echo "Loading $TERMRELAY_IMAGE ..."
+  docker load --input "$image_archive"
+  if [ -n "${TERMRELAY_IMAGE_ID:-}" ]; then
+    loaded_image_id="$(docker image inspect --format '{{.Id}}' "$TERMRELAY_IMAGE")"
+    if [ "$loaded_image_id" != "$TERMRELAY_IMAGE_ID" ]; then
+      echo "Loaded image does not match the release manifest." >&2
+      exit 1
+    fi
+  fi
+fi
 
 compose() {
   TERMRELAY_IMAGE="$TERMRELAY_IMAGE" docker compose \

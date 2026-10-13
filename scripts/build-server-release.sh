@@ -6,6 +6,7 @@ version="$(git -C "$repo_root" rev-parse --short HEAD)"
 platform="linux/arm64"
 output_dir="$repo_root/dist/termrelay-server"
 run_checks=true
+full_check=false
 allow_dirty=false
 
 usage() {
@@ -16,7 +17,8 @@ Options:
   --version VERSION     Image/release version (default: current Git SHA)
   --platform PLATFORM   Docker platform (default: linux/arm64 for Jetson)
   --output-dir PATH     Artifact directory (default: dist/termrelay-server)
-  --skip-check          Skip pnpm check before building
+  --full-check          Also run full repository checks, including Mac tests
+  --skip-check          Skip release checks (build-time type checks still run)
   --allow-dirty         Allow packaging uncommitted workspace changes
   -h, --help            Show this help
 
@@ -44,6 +46,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --skip-check)
       run_checks=false
+      shift
+      ;;
+    --full-check)
+      full_check=true
       shift
       ;;
     --allow-dirty)
@@ -91,8 +97,13 @@ fi
 
 if [ "$run_checks" = true ]; then
   command -v pnpm >/dev/null 2>&1 || { echo "pnpm is required for checks." >&2; exit 1; }
-  (cd "$repo_root" && pnpm check)
+  if [ "$full_check" = true ]; then
+    (cd "$repo_root" && pnpm check)
+  else
+    (cd "$repo_root" && pnpm contracts:check)
+  fi
   (cd "$repo_root" && pnpm --filter @termrelay/server test)
+  (cd "$repo_root" && node --test apps/web/tests/*.test.mjs)
 fi
 
 platform_slug="$(printf '%s' "$platform" | tr '/' '-')"
@@ -114,7 +125,12 @@ docker buildx build \
   "$repo_root"
 
 echo "Exporting Docker image ..."
-docker save "$image" | gzip -9 > "$payload_dir/image.tar.gz"
+docker save --output "$payload_dir/image.tar" "$image"
+image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+if [[ ! "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  echo "Invalid Docker image ID: $image_id" >&2
+  exit 1
+fi
 cp "$repo_root/deploy/server/compose.release.yaml" "$payload_dir/compose.yaml"
 cp "$repo_root/deploy/server/release.env.example" "$payload_dir/.env.production.example"
 cp "$repo_root/deploy/server/deploy-release.sh" "$payload_dir/deploy.sh"
@@ -122,6 +138,7 @@ chmod 755 "$payload_dir/deploy.sh"
 
 cat > "$payload_dir/manifest.env" <<EOF
 TERMRELAY_IMAGE=$image
+TERMRELAY_IMAGE_ID=$image_id
 TERMRELAY_VERSION=$version
 TERMRELAY_PLATFORM=$platform
 TERMRELAY_GIT_COMMIT=$(git -C "$repo_root" rev-parse HEAD)
@@ -131,7 +148,12 @@ EOF
 # macOS files can carry provenance and other extended attributes. Do not write
 # them into the portable Linux release archive: GNU tar on the Jetson cannot
 # interpret libarchive's LIBARCHIVE.xattr.* PAX headers.
-(cd "$release_tmp" && tar --no-xattrs -czf "$output_dir/$archive_name" "termrelay-server-$version")
+compressor=(gzip -1)
+if command -v pigz >/dev/null 2>&1; then
+  compressor=(pigz -1)
+fi
+(cd "$release_tmp" && tar --no-xattrs -cf - "termrelay-server-$version") \
+  | "${compressor[@]}" > "$output_dir/$archive_name"
 checksum="$(shasum -a 256 "$output_dir/$archive_name" | awk '{print $1}')"
 printf '%s  %s\n' "$checksum" "$archive_name" > "$output_dir/$archive_name.sha256"
 

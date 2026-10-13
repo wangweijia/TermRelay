@@ -2,6 +2,7 @@
   "name": "@termrelay/server",
   "version": "0.1.0",
   "private": true,
+  "files": ["dist"],
   "scripts": {
     "prebuild": "pnpm --filter @termrelay/contracts build",
     "build": "nest build",
