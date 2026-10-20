@@ -31,6 +31,12 @@ struct AgentTranscriptScrollObserver: NSViewRepresentable {
 
 @MainActor
 final class AgentTranscriptScrollAnchor: NSView {
+    private struct FollowLayout: Equatable {
+        let documentBounds: NSRect
+        let end: NSRect
+        let viewportSize: NSSize
+    }
+
     private weak var scrollView: NSScrollView?
     private weak var observedDocument: NSView?
     private weak var interaction: AgentTextInteraction?
@@ -39,6 +45,8 @@ final class AgentTranscriptScrollAnchor: NSView {
     private var isUserScrolling = false
     private var scrollToEnd: (() -> Void)?
     private var isStopped = false
+    private var viewportSize: NSSize?
+    private var lastFollowLayout: FollowLayout?
     private(set) var followsEnd = true
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -62,6 +70,7 @@ final class AgentTranscriptScrollAnchor: NSView {
         if self.sessionID != sessionID {
             self.sessionID = sessionID
             followsEnd = true
+            lastFollowLayout = nil
         }
         self.interaction = interaction
         self.scrollToEnd = scrollToEnd
@@ -74,11 +83,15 @@ final class AgentTranscriptScrollAnchor: NSView {
         detach()
         self.scrollView = scrollView
         observedDocument = document
+        viewportSize = scrollView.contentView.bounds.size
         document.postsFrameChangedNotifications = true
+        scrollView.contentView.postsFrameChangedNotifications = true
         scrollView.contentView.postsBoundsChangedNotifications = true
         let center = NotificationCenter.default
         center.addObserver(self, selector: #selector(layoutChanged), name: NSView.frameDidChangeNotification,
                            object: document)
+        center.addObserver(self, selector: #selector(layoutChanged), name: NSView.frameDidChangeNotification,
+                           object: scrollView.contentView)
         center.addObserver(self, selector: #selector(boundsChanged), name: NSView.boundsDidChangeNotification,
                            object: scrollView.contentView)
         center.addObserver(self, selector: #selector(userScrollStarted), name: NSScrollView.willStartLiveScrollNotification,
@@ -94,6 +107,8 @@ final class AgentTranscriptScrollAnchor: NSView {
         scrollView = nil
         observedDocument = nil
         isUserScrolling = false
+        viewportSize = nil
+        lastFollowLayout = nil
     }
 
     func stopObserving() {
@@ -107,7 +122,9 @@ final class AgentTranscriptScrollAnchor: NSView {
     }
 
     @objc private func boundsChanged(_ notification: Notification) {
-        if !isUserScrolling { scheduleFollow() }
+        guard let size = scrollView?.contentView.bounds.size, size != viewportSize else { return }
+        viewportSize = size
+        scheduleFollow()
     }
 
     @objc private func userScrollStarted(_ notification: Notification) {
@@ -121,6 +138,7 @@ final class AgentTranscriptScrollAnchor: NSView {
     @objc private func userScrollEnded(_ notification: Notification) {
         recordUserScroll()
         isUserScrolling = false
+        scheduleFollow()
     }
 
     func recordUserScroll() {
@@ -158,6 +176,10 @@ final class AgentTranscriptScrollAnchor: NSView {
         scrollView.layoutSubtreeIfNeeded()
         let clip = scrollView.contentView
         let end = endRect(in: document, scrollView: scrollView)
+        let layout = FollowLayout(documentBounds: document.bounds, end: end, viewportSize: clip.bounds.size)
+        // A changed scroll origin alone is not new content; leave native rebound scrolling alone.
+        guard layout != lastFollowLayout else { return }
+        lastFollowLayout = layout
         let y = document.isFlipped
             ? max(document.bounds.minY, end.maxY - clip.bounds.height)
             : max(document.bounds.minY, end.minY)

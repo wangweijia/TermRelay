@@ -186,6 +186,65 @@ final class AgentChatScrollingTests: XCTestCase {
     }
 
     @MainActor
+    func testTranscriptDoesNotCorrectElasticScrollingOrUnchangedLayout() async {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        scroll.documentView = FlippedTranscriptDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 4_000))
+        let interaction = AgentTextInteraction()
+        let anchor = AgentTranscriptScrollAnchor(frame: .zero)
+        let sessionID = UUID()
+        var corrections = 0
+        let follow = {
+            corrections += 1
+            scroll.contentView.scroll(to: CGPoint(x: 0, y: 3_600))
+        }
+        anchor.configure(sessionID: sessionID, interaction: interaction, scrollToEnd: follow)
+        anchor.attach(to: scroll)
+        await settle(scroll)
+        XCTAssertEqual(corrections, 1)
+
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.setBoundsOrigin(CGPoint(x: 0, y: 3_640))
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        XCTAssertTrue(anchor.followsEnd)
+        await settle(scroll)
+        XCTAssertEqual(corrections, 1, "Native rubber-banding must not trigger another scrollTo.")
+
+        scroll.contentView.setBoundsOrigin(CGPoint(x: 0, y: 3_580))
+        anchor.configure(sessionID: sessionID, interaction: interaction, scrollToEnd: follow)
+        NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: scroll.documentView)
+        await settle(scroll)
+        XCTAssertEqual(corrections, 1, "An unchanged layout must not snap a near-bottom reader back.")
+        XCTAssertEqual(scroll.contentView.bounds.minY, 3_580, accuracy: 1)
+        anchor.stopObserving()
+    }
+
+    @MainActor
+    func testTranscriptFollowsGrowthAfterLiveScrollEndsAndViewportResizes() async {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        let document = FlippedTranscriptDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 4_000))
+        scroll.documentView = document
+        let anchor = AgentTranscriptScrollAnchor(frame: .zero)
+        let interaction = AgentTextInteraction()
+        configure(anchor, scroll: scroll, interaction: interaction)
+        anchor.attach(to: scroll)
+        await settle(scroll)
+
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        document.setFrameSize(CGSize(width: 400, height: 4_020))
+        await settle(scroll)
+        XCTAssertEqual(scroll.contentView.bounds.minY, 3_600, accuracy: 1)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        await settle(scroll)
+        XCTAssertEqual(scroll.documentVisibleRect.maxY, 4_020, accuracy: 1)
+
+        scroll.setFrameSize(CGSize(width: 400, height: 300))
+        await settle(scroll)
+        XCTAssertEqual(scroll.documentVisibleRect.maxY, 4_020, accuracy: 1)
+        anchor.stopObserving()
+    }
+
+    @MainActor
     func testLazyTranscriptRemainsAtRealBottomDuringLongCommandUpdatesAndReordering() async throws {
         let sessionID = UUID()
         let interaction = AgentTextInteraction()
