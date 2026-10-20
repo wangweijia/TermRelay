@@ -341,7 +341,7 @@ private struct CopilotHistoryView: View {
                             if isProject && [archive.toolKey, "思考", "计划"].contains(message.role) {
                                 AgentMarkdownView(text: message.text)
                             } else {
-                                Text(message.text).textSelection(.enabled)
+                                AgentMarkdownView(text: message.text, markdown: false)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -364,6 +364,16 @@ private struct CopilotHistoryView: View {
     }
 }
 
+private struct TranscriptBottomPreference: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct TranscriptHeightPreference: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 private struct StructuredAgentSessionView: View {
     private static let timelineBottomID = "structured-agent-timeline-bottom"
 
@@ -371,6 +381,13 @@ private struct StructuredAgentSessionView: View {
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
     @State private var configurationError: String?
+    @State private var textInteraction = AgentTextInteraction()
+    @State private var transcriptBottom: CGFloat = 0
+    @State private var transcriptHeight: CGFloat = 0
+
+    private var shouldFollowTranscript: Bool {
+        transcriptBottom <= transcriptHeight + 32 && !textInteraction.preventsAutomaticScroll
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -414,26 +431,45 @@ private struct StructuredAgentSessionView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: TranscriptBottomPreference.self,
+                                value: geometry.frame(in: .named("agent-transcript")).maxY
+                            )
+                        }
+                    }
                 }
+                .coordinateSpace(name: "agent-transcript")
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: TranscriptHeightPreference.self, value: geometry.size.height)
+                    }
+                }
+                .onPreferenceChange(TranscriptBottomPreference.self) { transcriptBottom = $0 }
+                .onPreferenceChange(TranscriptHeightPreference.self) { transcriptHeight = $0 }
+                .environment(\.agentTextInteraction, textInteraction)
                 .onAppear {
                     DispatchQueue.main.async {
+                        guard !textInteraction.preventsAutomaticScroll else { return }
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
                 }
                 .onChange(of: appModel.connectionState) { _, state in
-                    guard state == .connected else { return }
+                    guard state == .connected, shouldFollowTranscript else { return }
                     DispatchQueue.main.async {
+                        guard shouldFollowTranscript else { return }
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
                 }
                 .onChange(of: visibleTimeline.last?.id) { _, id in
-                    guard id != nil else { return }
+                    guard id != nil, shouldFollowTranscript else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
                 }
                 .onChange(of: session.state) { _, state in
-                    guard state == .running else { return }
+                    guard state == .running, shouldFollowTranscript else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
                     }
@@ -586,7 +622,7 @@ private struct AgentTimelineRow: View {
                     if message.role == .assistant {
                         AgentMarkdownView(text: message.text)
                     } else {
-                        Text(message.text).textSelection(.enabled)
+                        AgentMarkdownView(text: message.text, markdown: false)
                     }
                 }
                 .padding(12)
@@ -596,7 +632,7 @@ private struct AgentTimelineRow: View {
             }
         case .reasoning(_, let text):
             DisclosureGroup("思考过程") {
-                AgentMarkdownView(text: text).font(.callout).foregroundStyle(.secondary)
+                AgentMarkdownView(text: text, style: .reasoning)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
             }
             .padding(10)
@@ -610,14 +646,14 @@ private struct AgentTimelineRow: View {
                 title: command.isRunning ? "命令执行中" : "命令已完成",
                 icon: command.isRunning ? "gearshape.2" : "terminal"
             ) {
-                Text(command.command.isEmpty ? "等待命令详情…" : command.command)
-                    .font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                AgentMarkdownView(
+                    text: command.command.isEmpty ? "等待命令详情…" : command.command,
+                    markdown: false, style: .command
+                )
                 if !command.output.isEmpty {
                     ScrollView {
-                        Text(command.output)
-                            .font(.system(.caption, design: .monospaced))
+                        AgentMarkdownView(text: command.output, markdown: false, style: .output)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
                     }
                     .frame(maxHeight: 220)
                 }
@@ -625,7 +661,7 @@ private struct AgentTimelineRow: View {
             }
         case .fileChange(let file):
             AgentCard(title: "文件变更", icon: "doc.badge.gearshape") {
-                Text(file.summary).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                AgentMarkdownView(text: file.summary, markdown: false, style: .output)
             }
         case .approval:
             EmptyView()
