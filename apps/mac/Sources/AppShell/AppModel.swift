@@ -443,7 +443,7 @@ final class AppModel: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.directoryURL = workingDirectory
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
         panel.prompt = "选择目录"
         if panel.runModal() == .OK, let url = panel.url {
             workingDirectory = url
