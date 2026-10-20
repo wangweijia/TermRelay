@@ -4,7 +4,7 @@ import SwiftUI
 enum AgentMarkdown {
     static func containsMarkup(_ text: String) -> Bool {
         let block = #"^ {0,3}(#{1,6}\s+\S|[`~]{3,}|>\s+\S|[-*+]\s+\S|\d+[.)]\s+\S|([-*_]\s*){3,}$)"#
-        let inline = #"\[[^\]\n]+\]\((https?://|/)[^)\n]+\)|\*\*[^*\n]+\*\*|~~[^~\n]+~~|`[^`\n]+`|(?<!\w)\*[^*\n]+\*(?!\w)|(?<!\w)_{1,2}[^_\n]+_{1,2}(?!\w)"#
+        let inline = #"\[[^\]\n]+\]\([^)\n]+\)|\*\*[^*\n]+\*\*|~~[^~\n]+~~|`[^`\n]+`|(?<!\w)\*[^*\n]+\*(?!\w)|(?<!\w)_{1,2}[^_\n]+_{1,2}(?!\w)"#
         let lines = text.components(separatedBy: "\n")
         return lines.contains { $0.range(of: block, options: .regularExpression) != nil }
             || text.range(of: inline, options: .regularExpression) != nil
@@ -17,6 +17,52 @@ enum AgentMarkdown {
                 (!lines[index].isEmpty &&
                  lines[index + 1].range(of: #"^ {0,3}={3,}\s*$"#, options: .regularExpression) != nil)
             }
+    }
+}
+
+enum AgentLink {
+    enum OpenError: LocalizedError {
+        case unsupported, missingDirectory, invalidFile, missingFile, openFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupported: "仅支持打开 HTTP / HTTPS 网页和本地文件。"
+            case .missingDirectory: "无法解析相对路径：当前会话的工作目录未知。"
+            case .invalidFile: "本地文件链接无效。"
+            case .missingFile: "文件不存在或无法访问。"
+            case .openFailed: "系统无法打开此链接，请检查默认浏览器或文件关联应用。"
+            }
+        }
+    }
+
+    static func resolve(_ link: URL, directory: URL?) throws -> URL {
+        if let scheme = link.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            guard let host = link.host, !host.isEmpty else { throw OpenError.unsupported }
+            return link
+        }
+        guard link.scheme == nil || link.isFileURL else { throw OpenError.unsupported }
+        guard let components = URLComponents(url: link, resolvingAgainstBaseURL: false),
+              components.host == nil || components.host == "" || components.host?.lowercased() == "localhost",
+              components.user == nil, components.password == nil, components.port == nil,
+              components.query == nil else { throw OpenError.invalidFile }
+        guard link.isFileURL || components.host == nil else { throw OpenError.invalidFile }
+        let path = components.path
+        guard !path.isEmpty, !path.contains("\0") else { throw OpenError.invalidFile }
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path).standardizedFileURL
+        }
+        guard !link.isFileURL else { throw OpenError.invalidFile }
+        guard let directory else { throw OpenError.missingDirectory }
+        return directory.appendingPathComponent(path).standardizedFileURL
+    }
+
+    @MainActor
+    static func open(_ link: URL, directory: URL?, using opener: (URL) -> Bool) throws {
+        let url = try resolve(link, directory: directory)
+        if url.isFileURL, !FileManager.default.fileExists(atPath: url.path) {
+            throw OpenError.missingFile
+        }
+        guard opener(url) else { throw OpenError.openFailed }
     }
 }
 
@@ -258,7 +304,16 @@ private struct AgentTextInteractionKey: EnvironmentKey {
     static let defaultValue: AgentTextInteraction? = nil
 }
 
+private struct AgentLinkDirectoryKey: EnvironmentKey {
+    static let defaultValue: URL? = nil
+}
+
 extension EnvironmentValues {
+    var agentLinkDirectory: URL? {
+        get { self[AgentLinkDirectoryKey.self] }
+        set { self[AgentLinkDirectoryKey.self] = newValue }
+    }
+
     var agentTextInteraction: AgentTextInteraction? {
         get { self[AgentTextInteractionKey.self] }
         set { self[AgentTextInteractionKey.self] = newValue }
@@ -270,6 +325,7 @@ struct AgentMarkdownView: NSViewRepresentable {
     var markdown = true
     var style: AgentTextStyle = .body
     @Environment(\.agentTextInteraction) private var interaction
+    @Environment(\.agentLinkDirectory) private var linkDirectory
 
     func makeNSView(context: Context) -> AgentSelectableTextView {
         AgentSelectableTextView(frame: .zero)
@@ -277,6 +333,7 @@ struct AgentMarkdownView: NSViewRepresentable {
 
     func updateNSView(_ view: AgentSelectableTextView, context: Context) {
         view.interaction = interaction
+        view.linkDirectory = linkDirectory
         view.update(text: text, markdown: markdown, style: style)
     }
 
@@ -286,8 +343,9 @@ struct AgentMarkdownView: NSViewRepresentable {
 }
 
 @MainActor
-final class AgentSelectableTextView: NSTextView {
+final class AgentSelectableTextView: NSTextView, NSTextViewDelegate {
     weak var interaction: AgentTextInteraction?
+    var linkDirectory: URL?
     private(set) var isSelecting = false
     private var source: String?
     private var markdown = true
@@ -320,6 +378,7 @@ final class AgentSelectableTextView: NSTextView {
     }
 
     private func configure() {
+        delegate = self
         isEditable = false
         isSelectable = true
         isRichText = true
@@ -338,6 +397,31 @@ final class AgentSelectableTextView: NSTextView {
         measurementContainer.heightTracksTextView = false
         measurementLayout.addTextContainer(measurementContainer)
         textStorage?.addLayoutManager(measurementLayout)
+    }
+
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        do {
+            let url: URL
+            if let value = link as? URL {
+                url = value
+            } else if let value = link as? String, let parsed = URL(string: value) {
+                url = parsed
+            } else {
+                throw AgentLink.OpenError.unsupported
+            }
+            try AgentLink.open(url, directory: linkDirectory, using: { NSWorkspace.shared.open($0) })
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法打开链接"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            if let window {
+                alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
+        return true
     }
 
     override func mouseDown(with event: NSEvent) {

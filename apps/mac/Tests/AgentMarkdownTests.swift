@@ -7,12 +7,92 @@ final class AgentMarkdownTests: XCTestCase {
     func testDetectsStructuredMarkdownButNotPlainOutput() {
         for value in [
             "# Heading", "Heading\n===", "- first\n- second", "```swift\nlet x = 1\n```",
-            "| A | B |\n| --- | --- |", "**bold**", "*italic*", "_italic_", "[site](https://example.com)"
+            "| A | B |\n| --- | --- |", "**bold**", "*italic*", "_italic_", "[site](https://example.com)",
+            "[file](docs/guide.md)", "[file](./guide.md)", "[file](../guide.md)",
+            "[file](file:///Users/test/guide.md)", "[file](/Users/test/guide.md)"
         ] {
             XCTAssertTrue(AgentMarkdown.containsMarkup(value), value)
         }
         for value in ["普通回答", "result: 42\nnext line", "a * b = c", "https://example.com"] {
             XCTAssertFalse(AgentMarkdown.containsMarkup(value), value)
+        }
+    }
+
+    @MainActor
+    func testFileLinksRenderAsClickableLinks() async throws {
+        for target in [
+            "docs/guide.md", "./guide.md", "../guide.md", "/Users/test/guide.md",
+            "file:///Users/test/guide.md", "docs/%E4%B8%AD%E6%96%87%20guide.md#L12"
+        ] {
+            let rendered = AgentRichText.render("[document](\(target))")
+            XCTAssertEqual(rendered.string, "document")
+            let link = try XCTUnwrap(rendered.attribute(.link, at: 0, effectiveRange: nil) as? URL)
+            XCTAssertEqual(link, URL(string: target))
+        }
+    }
+
+    func testResolvesWebAndLocalFileLinks() throws {
+        let directory = URL(fileURLWithPath: "/Users/test/project", isDirectory: true)
+        for value in ["https://example.com/docs?q=hello#section", "http://localhost:3000/"] {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertEqual(try AgentLink.resolve(url, directory: nil), url)
+        }
+        for (value, path) in [
+            ("/Users/test/guide.md#L12", "/Users/test/guide.md"),
+            ("file:///Users/test/guide.md", "/Users/test/guide.md"),
+            ("file://localhost/Users/test/guide.md", "/Users/test/guide.md"),
+            ("docs/guide.md", "/Users/test/project/docs/guide.md"),
+            ("./docs/../guide.md", "/Users/test/project/guide.md"),
+            ("../guide.md", "/Users/test/guide.md"),
+            ("docs/%E4%B8%AD%E6%96%87%20guide.md#section", "/Users/test/project/docs/中文 guide.md"),
+            ("docs/percent%2520.md", "/Users/test/project/docs/percent%20.md")
+        ] {
+            let resolved = try AgentLink.resolve(XCTUnwrap(URL(string: value)), directory: directory)
+            XCTAssertTrue(resolved.isFileURL)
+            XCTAssertEqual(resolved.path, path)
+            XCTAssertNil(resolved.fragment)
+        }
+    }
+
+    func testRejectsUnsupportedAndMalformedLinks() throws {
+        for value in [
+            "javascript:alert(1)", "data:text/plain,hello", "mailto:test@example.com",
+            "ftp://example.com/file", "vscode://file/Users/test/file",
+            "file://remote-server/share/file.md", "//example.com/file.md",
+            "//localhost/file.md", "file://user@localhost/file.md",
+            "docs/file.md?download=1", "docs/%00file.md", "#section", "https:/missing-host"
+        ] {
+            XCTAssertThrowsError(
+                try AgentLink.resolve(XCTUnwrap(URL(string: value)), directory: URL(fileURLWithPath: "/tmp")),
+                value
+            )
+        }
+        XCTAssertThrowsError(try AgentLink.resolve(XCTUnwrap(URL(string: "docs/file.md")), directory: nil)) {
+            XCTAssertEqual($0 as? AgentLink.OpenError, .missingDirectory)
+        }
+    }
+
+    @MainActor
+    func testOpeningUsesResolvedURLAndReportsFailuresWithoutLaunchingApplications() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("guide.md")
+        try Data("# Guide".utf8).write(to: file)
+        var opened: [URL] = []
+        let opener: (URL) -> Bool = { opened.append($0); return true }
+        try AgentLink.open(XCTUnwrap(URL(string: "guide.md#L1")), directory: directory, using: opener)
+        let web = try XCTUnwrap(URL(string: "https://example.com"))
+        try AgentLink.open(web, directory: nil, using: opener)
+        XCTAssertEqual(opened, [file, web])
+        XCTAssertThrowsError(try AgentLink.open(
+            XCTUnwrap(URL(string: "missing.md")), directory: directory, using: opener
+        )) {
+            XCTAssertEqual($0 as? AgentLink.OpenError, .missingFile)
+        }
+        XCTAssertEqual(opened.count, 2)
+        XCTAssertThrowsError(try AgentLink.open(file, directory: nil, using: { _ in false })) {
+            XCTAssertEqual($0 as? AgentLink.OpenError, .openFailed)
         }
     }
 
@@ -155,7 +235,9 @@ final class AgentMarkdownTests: XCTestCase {
 
     @MainActor
     func testSwiftUIHostSizesAndUpdatesTheSameNativeTextView() async throws {
-        let host = NSHostingView(rootView: AgentMarkdownView(text: "- first\n- second").frame(width: 280))
+        let directory = URL(fileURLWithPath: "/Users/test/project")
+        let host = NSHostingView(rootView: AgentMarkdownView(text: "- first\n- second")
+            .environment(\.agentLinkDirectory, directory).frame(width: 280))
         host.setFrameSize(host.fittingSize)
         host.layoutSubtreeIfNeeded()
         func textView(in view: NSView) -> AgentSelectableTextView? {
@@ -165,11 +247,14 @@ final class AgentMarkdownTests: XCTestCase {
         let native = try XCTUnwrap(textView(in: host))
         XCTAssertFalse(native.isEditable)
         XCTAssertTrue(native.isSelectable)
+        XCTAssertTrue(native.delegate === native)
+        XCTAssertEqual(native.linkDirectory, directory)
         XCTAssertGreaterThan(native.frame.height, 0)
         XCTAssertEqual(native.textContainer?.containerSize.width, 280)
         let selected = (native.string as NSString).range(of: "first\n•\tsecond")
         native.setSelectedRange(selected)
-        host.rootView = AgentMarkdownView(text: "- first\n- second\n- third").frame(width: 280)
+        host.rootView = AgentMarkdownView(text: "- first\n- second\n- third")
+            .environment(\.agentLinkDirectory, directory).frame(width: 280)
         host.setFrameSize(host.fittingSize)
         host.layoutSubtreeIfNeeded()
         XCTAssertTrue(textView(in: host) === native)

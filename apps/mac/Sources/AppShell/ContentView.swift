@@ -350,6 +350,7 @@ private struct CopilotHistoryView: View {
                 .padding()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .environment(\.agentLinkDirectory, archive.directory)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -424,6 +425,7 @@ private struct StructuredAgentSessionView: View {
                     }
                 }
                 .environment(\.agentTextInteraction, textInteraction)
+                .environment(\.agentLinkDirectory, session.directory)
                 .id(session.id)
             }
             .background(Color(nsColor: .textBackgroundColor))
