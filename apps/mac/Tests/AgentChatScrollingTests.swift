@@ -21,12 +21,14 @@ private struct ScrollTestTranscript: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(messages) { message in
-                        if message.isCommand {
-                            AgentCommandOutputView(text: message.text)
-                        } else {
-                            AgentMarkdownView(text: message.text)
+                VStack(alignment: .leading, spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(messages) { message in
+                            if message.isCommand {
+                                AgentCommandOutputView(text: message.text)
+                            } else {
+                                AgentMarkdownView(text: message.text)
+                            }
                         }
                     }
                     AgentTranscriptBottomMarker().frame(height: 1).id("bottom")
@@ -39,6 +41,7 @@ private struct ScrollTestTranscript: View {
                     }
                 }
             }
+            .id(sessionID)
         }
         .environment(\.agentTextInteraction, interaction)
     }
@@ -245,6 +248,83 @@ final class AgentChatScrollingTests: XCTestCase {
     }
 
     @MainActor
+    func testLazyTranscriptSwitchesSessionsAndStreamsTallMessagesWithoutBlankViewport() async throws {
+        let interaction = AgentTextInteraction()
+        var sessionID = UUID()
+        var messages: [ScrollTestMessage] = []
+        let host = NSHostingView(rootView: ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction))
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 600, height: 500),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        await settle(host)
+        for round in 0..<3 {
+            sessionID = UUID()
+            messages = (0..<80).map {
+                ScrollTestMessage(id: $0, text: "Message \($0)\n" + String(repeating: "- wrapped line of text\n", count: $0 % 10 + 1))
+            }
+            host.rootView = ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction)
+            await settle(host)
+            let anchor = try XCTUnwrap(descendants(host).compactMap { $0 as? AgentTranscriptScrollAnchor }.first)
+            let scroll = try XCTUnwrap(anchor.enclosingScrollView)
+            assertAtBottom(scroll, interaction: interaction)
+            XCTAssertLessThan(descendants(host).compactMap { $0 as? AgentSelectableTextView }.count, messages.count,
+                              "Keeping the bottom marker attached must not eagerly render the whole transcript.")
+            messages.append(ScrollTestMessage(id: 100, text: "Starting answer"))
+            for lines in [1, 100, 1_000, 3_000, 30] {
+                messages[messages.count - 1].text = "Round \(round)\n" + String(repeating: "- a very long streaming answer with wrapped words 中文😀\n", count: lines)
+                host.rootView = ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction)
+                await settle(host)
+                assertAtBottom(scroll, interaction: interaction)
+                let answer = try XCTUnwrap(descendants(host).compactMap { $0 as? AgentSelectableTextView }.first {
+                    $0.string.hasPrefix("Round \(round)\n")
+                })
+                let manager = try XCTUnwrap(answer.layoutManager)
+                let container = try XCTUnwrap(answer.textContainer)
+                let characters = NSRange(location: (answer.string as NSString).length - 1, length: 1)
+                let glyphs = manager.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
+                let lastLine = manager.boundingRect(forGlyphRange: glyphs, in: container)
+                XCTAssertTrue(answer.convert(lastLine, to: scroll.documentView).intersects(scroll.documentVisibleRect),
+                              "Streaming \(lines) lines must show the end of the answer, not an empty estimated region.")
+            }
+        }
+    }
+
+    @MainActor
+    func testLazyTranscriptKeepsVisibleTextAfterLargeAnswerShrinksWhileReading() async throws {
+        let sessionID = UUID()
+        let interaction = AgentTextInteraction()
+        var messages = (0..<70).map {
+            ScrollTestMessage(id: $0, text: "Message \($0)\n" + String(repeating: "- wrapped line of text\n", count: 8))
+        }
+        messages.append(ScrollTestMessage(id: 100, text: String(repeating: "- Long final answer\n", count: 500)))
+        let host = NSHostingView(rootView: ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction))
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 600, height: 500),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        await settle(host)
+        let anchor = try XCTUnwrap(descendants(host).compactMap { $0 as? AgentTranscriptScrollAnchor }.first)
+        let scroll = try XCTUnwrap(anchor.enclosingScrollView)
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: CGPoint(x: 0, y: scroll.contentView.bounds.minY - 600))
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        XCTAssertFalse(anchor.followsEnd)
+        await settle(host)
+
+        messages[messages.count - 1].text = "Short final answer"
+        host.rootView = ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction)
+        await settle(host)
+        let document = try XCTUnwrap(scroll.documentView)
+        XCTAssertLessThanOrEqual(scroll.contentView.bounds.maxY, document.bounds.maxY + 1)
+        let visibleTexts = descendants(host).compactMap { $0 as? AgentSelectableTextView }.filter {
+            !$0.visibleRect.isEmpty && !$0.string.isEmpty
+        }
+        XCTAssertFalse(visibleTexts.isEmpty, "Shrinking content while reading must not leave an empty viewport.")
+    }
+
+    @MainActor
     func testLazyTranscriptRemainsAtRealBottomDuringLongCommandUpdatesAndReordering() async throws {
         let sessionID = UUID()
         let interaction = AgentTextInteraction()
@@ -335,6 +415,8 @@ final class AgentChatScrollingTests: XCTestCase {
             return
         }
         XCTAssertTrue(scroll.contentView.bounds.minY.isFinite, file: file, line: line)
+        XCTAssertTrue(end.enclosingScrollView === scroll, "The bottom marker must remain attached to this transcript.",
+                      file: file, line: line)
         XCTAssertEqual(scroll.documentVisibleRect.maxY, end.convert(end.bounds, to: document).maxY, accuracy: 1, file: file, line: line)
     }
 }

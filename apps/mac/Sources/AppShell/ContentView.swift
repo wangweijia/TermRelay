@@ -401,15 +401,18 @@ private struct StructuredAgentSessionView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(visibleTimeline) { item in
-                            AgentTimelineRow(item: item, session: session)
-                                .id(item.id)
+                    VStack(alignment: .leading, spacing: 12) {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(visibleTimeline) { item in
+                                AgentTimelineRow(item: item, session: session)
+                                    .id(item.id)
+                            }
+                            if session.state == .running {
+                                AgentTurnLoadingBubble()
+                                    .id("turn-loading-bubble")
+                            }
                         }
-                        if session.state == .running {
-                            AgentTurnLoadingBubble()
-                                .id("turn-loading-bubble")
-                        }
+                        // The scroll target must stay attached when lazy rows are recycled.
                         AgentTranscriptBottomMarker().frame(height: 1).id(Self.timelineBottomID)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
