@@ -148,6 +148,8 @@ final class AgentMarkdownTests: XCTestCase {
         XCTAssertGreaterThan(narrow.height, wide.height)
         let container = try XCTUnwrap(view.textContainer)
         let layout = try XCTUnwrap(view.layoutManager)
+        view.setFrameSize(narrow)
+        layout.ensureLayout(for: container)
         XCTAssertLessThanOrEqual(layout.usedRect(for: container).width, 241)
     }
 
@@ -183,5 +185,25 @@ final class AgentMarkdownTests: XCTestCase {
         view.update(text: "😁 e\u{300}\nselected", markdown: false, style: .body)
         XCTAssertEqual(view.string, "😁 e\u{300}\nselected")
         XCTAssertEqual((view.string as NSString).substring(with: view.selectedRange()), "selected")
+    }
+
+    @MainActor
+    func testMeasuringDifferentProposalsDoesNotMutateVisibleTextLayout() async throws {
+        let view = AgentSelectableTextView(frame: NSRect(x: 0, y: 0, width: 500, height: 200))
+        view.update(text: String(repeating: "Long paragraph of text that wraps.\n", count: 100),
+                    markdown: false, style: .body)
+        let container = try XCTUnwrap(view.textContainer)
+        let frame = view.frame
+        let containerSize = container.containerSize
+        let selection = NSRange(location: 3, length: 20)
+        view.setSelectedRange(selection)
+        let wide = view.contentSize(for: 500)
+        XCTAssertEqual(view.contentSize(for: 0), .zero)
+        XCTAssertGreaterThan(view.contentSize(for: 20).height, wide.height)
+        XCTAssertEqual(view.contentSize(for: 500), wide)
+        XCTAssertTrue(view.contentSize(for: .infinity).height.isFinite)
+        XCTAssertEqual(view.frame, frame)
+        XCTAssertEqual(container.containerSize, containerSize)
+        XCTAssertEqual(view.selectedRange(), selection)
     }
 }

@@ -364,16 +364,6 @@ private struct CopilotHistoryView: View {
     }
 }
 
-private struct TranscriptBottomPreference: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private struct TranscriptHeightPreference: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 private struct StructuredAgentSessionView: View {
     private static let timelineBottomID = "structured-agent-timeline-bottom"
 
@@ -382,12 +372,6 @@ private struct StructuredAgentSessionView: View {
     let displayName: String
     @State private var configurationError: String?
     @State private var textInteraction = AgentTextInteraction()
-    @State private var transcriptBottom: CGFloat = 0
-    @State private var transcriptHeight: CGFloat = 0
-
-    private var shouldFollowTranscript: Bool {
-        transcriptBottom <= transcriptHeight + 32 && !textInteraction.preventsAutomaticScroll
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -425,55 +409,22 @@ private struct StructuredAgentSessionView: View {
                             AgentTurnLoadingBubble()
                                 .id("turn-loading-bubble")
                         }
-                        Color.clear
-                            .frame(height: 1)
-                            .id(Self.timelineBottomID)
+                        AgentTranscriptBottomMarker().frame(height: 1).id(Self.timelineBottomID)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
                     .background {
-                        GeometryReader { geometry in
-                            Color.clear.preference(
-                                key: TranscriptBottomPreference.self,
-                                value: geometry.frame(in: .named("agent-transcript")).maxY
-                            )
+                        AgentTranscriptScrollObserver(sessionID: session.id, interaction: textInteraction) {
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
+                            }
                         }
                     }
                 }
-                .coordinateSpace(name: "agent-transcript")
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: TranscriptHeightPreference.self, value: geometry.size.height)
-                    }
-                }
-                .onPreferenceChange(TranscriptBottomPreference.self) { transcriptBottom = $0 }
-                .onPreferenceChange(TranscriptHeightPreference.self) { transcriptHeight = $0 }
                 .environment(\.agentTextInteraction, textInteraction)
-                .onAppear {
-                    DispatchQueue.main.async {
-                        guard !textInteraction.preventsAutomaticScroll else { return }
-                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
-                    }
-                }
-                .onChange(of: appModel.connectionState) { _, state in
-                    guard state == .connected, shouldFollowTranscript else { return }
-                    DispatchQueue.main.async {
-                        guard shouldFollowTranscript else { return }
-                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
-                    }
-                }
-                .onChange(of: visibleTimeline.last?.id) { _, id in
-                    guard id != nil, shouldFollowTranscript else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
-                    }
-                }
-                .onChange(of: session.state) { _, state in
-                    guard state == .running, shouldFollowTranscript else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(Self.timelineBottomID, anchor: .bottom)
-                    }
-                }
+                .id(session.id)
             }
             .background(Color(nsColor: .textBackgroundColor))
 
@@ -651,11 +602,8 @@ private struct AgentTimelineRow: View {
                     markdown: false, style: .command
                 )
                 if !command.output.isEmpty {
-                    ScrollView {
-                        AgentMarkdownView(text: command.output, markdown: false, style: .output)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: 220)
+                    AgentCommandOutputView(text: command.output)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !command.isRunning { Text("退出码：\(command.exitCode.map(String.init) ?? "—")").font(.caption) }
             }

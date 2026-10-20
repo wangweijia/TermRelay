@@ -245,10 +245,12 @@ enum AgentRichText {
 @MainActor
 final class AgentTextInteraction {
     weak var owner: AgentSelectableTextView?
+    weak var outputBeingRead: AgentCommandOutputScrollView?
+    weak var timelineEnd: NSView?
 
     var preventsAutomaticScroll: Bool {
-        guard let owner else { return false }
-        return owner.isSelecting || owner.selectedRange().length > 0
+        let selecting = owner.map { $0.isSelecting || $0.selectedRange().length > 0 } ?? false
+        return selecting || outputBeingRead?.isReadingEarlierOutput == true
     }
 }
 
@@ -291,6 +293,9 @@ final class AgentSelectableTextView: NSTextView {
     private var markdown = true
     private var style: AgentTextStyle = .body
     private var ownedStorage: NSTextStorage?
+    private let measurementLayout = NSLayoutManager()
+    private let measurementContainer = NSTextContainer()
+    private var cachedMeasurement: (width: CGFloat, limit: CGFloat, size: CGSize)?
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer? = nil) {
         let textContainer: NSTextContainer
@@ -321,13 +326,18 @@ final class AgentSelectableTextView: NSTextView {
         drawsBackground = false
         textContainerInset = .zero
         textContainer?.lineFragmentPadding = 0
-        textContainer?.widthTracksTextView = false
+        textContainer?.widthTracksTextView = true
         textContainer?.heightTracksTextView = false
         isHorizontallyResizable = false
-        isVerticallyResizable = true
+        isVerticallyResizable = false
         minSize = .zero
         maxSize = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        measurementContainer.lineFragmentPadding = 0
+        measurementContainer.widthTracksTextView = false
+        measurementContainer.heightTracksTextView = false
+        measurementLayout.addTextContainer(measurementContainer)
+        textStorage?.addLayoutManager(measurementLayout)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -348,6 +358,17 @@ final class AgentSelectableTextView: NSTextView {
 
     func update(text: String, markdown: Bool, style: AgentTextStyle) {
         guard source != text || self.markdown != markdown || self.style != style else { return }
+        if let source, !markdown, !self.markdown, self.style == style,
+           text.utf16.starts(with: source.utf16), let storage = textStorage {
+            let selection = selectedRange()
+            let suffix = (text as NSString).substring(from: (source as NSString).length)
+            storage.append(AgentRichText.render(suffix, markdown: false, style: style))
+            self.source = text
+            setSelectedRange(selection)
+            cachedMeasurement = nil
+            invalidateIntrinsicContentSize()
+            return
+        }
         source = text
         self.markdown = markdown
         self.style = style
@@ -379,6 +400,7 @@ final class AgentSelectableTextView: NSTextView {
         let preserved = Self.preservedSelection(selection, replacing: replaced, insertedLength: inserted.length)
         setSelectedRange(NSRange(location: min(preserved.location, new.length),
                                  length: min(preserved.length, max(0, new.length - preserved.location))))
+        cachedMeasurement = nil
         invalidateIntrinsicContentSize()
     }
 
@@ -391,11 +413,21 @@ final class AgentSelectableTextView: NSTextView {
         return NSRange(location: range.location, length: 0)
     }
 
-    func contentSize(for width: CGFloat) -> CGSize {
-        let width = max(1, width)
-        guard let textContainer, let layoutManager else { return CGSize(width: width, height: 0) }
-        textContainer.containerSize = CGSize(width: width, height: .greatestFiniteMagnitude)
-        layoutManager.ensureLayout(for: textContainer)
-        return CGSize(width: width, height: ceil(layoutManager.usedRect(for: textContainer).height))
+    func contentSize(for proposedWidth: CGFloat, maximumHeight: CGFloat = .greatestFiniteMagnitude) -> CGSize {
+        let width = proposedWidth.isFinite ? max(0, proposedWidth) : (bounds.width > 0 ? bounds.width : 400)
+        guard width > 0 else { return .zero }
+        if let cachedMeasurement, cachedMeasurement.width == width, cachedMeasurement.limit == maximumHeight {
+            return cachedMeasurement.size
+        }
+        // SwiftUI probes multiple sizes. Measuring must not resize the live text view or its container.
+        measurementContainer.containerSize = CGSize(width: width, height: maximumHeight)
+        measurementLayout.ensureLayout(for: measurementContainer)
+        let glyphs = measurementLayout.glyphRange(for: measurementContainer)
+        let characters = measurementLayout.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+        let overflows = NSMaxRange(characters) < (textStorage?.length ?? 0)
+        let height = overflows ? maximumHeight : min(maximumHeight, ceil(measurementLayout.usedRect(for: measurementContainer).height))
+        let size = CGSize(width: width, height: height)
+        cachedMeasurement = (width, maximumHeight, size)
+        return size
     }
 }
