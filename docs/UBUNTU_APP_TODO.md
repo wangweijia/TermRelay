@@ -15,10 +15,12 @@ Linux 自己拥有本地目录、凭据和子进程，不经过 Mac 转发，也
 只是不提供本地 App UI。聊天、模型设置、审批、用户问答和结果查看仍通过现有 Web / 手机完成，
 不另建 Linux 专用交互协议，不把“无 UI”解释为删除交互或默认自动审批。
 
-当前工作区实现仍为系统 Python 3.10+、GTK 3、VTE 和 `.deb` 的桌面首版，
-尚未完成 headless 改造。后续主线要求可在没有显示服务器、GTK / VTE、桌面 D-Bus 和登录桌面会话时运行。
-目标系统为 Ubuntu / Xubuntu 22.04、24.04；旧桌面代码可保留为可选入口，不作为无界面版交付前置。
-GNOME / Xfce / X11 / Wayland 的图形验收仅适用于继续交付桌面入口的情况。
+当前工作区已迁移为 TypeScript CLI、headless 服务和 Codex App Server 适配器，
+直接使用现有生成协议类型 / Schema。systemd / `.deb` 发布包按架构内置私有 Node，
+目标机器不需要预装 Node 或 Python；旧 Python / GTK / VTE 实现已移除。
+新增能力仍需目标系统实机验收，不能等同于全部交付完成。
+目标系统为 Ubuntu / Xubuntu 22.04、24.04；当前不交付本地桌面入口。
+GNOME / Xfce / X11 / Wayland 的图形验收仅适用于未来重新开发可选桌面 UI 的情况。
 
 **远程创建会话是 macOS / Linux 的通用能力，不是 Linux 特例**，按 U-024 统一设计和验收；
 macOS 保留本地 UI，但也应支持从同一个 Web 入口远程创建会话。
@@ -40,18 +42,18 @@ macOS 保留本地 UI，但也应支持从同一个 Web 入口远程创建会话
 
 | 能力 | 当前情况 | 仍有边界 |
 | --- | --- | --- |
-| 独立 Linux 桌面入口 | `apps/linux/termrelay/app.py`，GTK 3 + VTE | 尚无独立 headless 服务入口，需从 GTK 事件循环解耦 |
-| 本地真实 PTY | 登录 Shell、选目录、多标签、复制粘贴、resize、Ctrl-C、停止 | 没有 Provider 选择和专用 Agent 启动配置 |
-| 设备协议 | `platform: linux`，注册、心跳、现有 Server / Web 路由 | `tools` 当前只公布 `shell` |
-| 远程 PTY 交互 | input / resize / interrupt / stop、命令 ACK、内存去重 | 没有 ACP / AI API / 快捷任务命令处理 |
-| 公网配对 | 浏览器授权、凭据输入、TLS 和 Authorization Header | 凭据只在内存中，不支持钥匙环记住授权 |
+| 无界面入口 | `src/cli.ts` / `service.ts`，已移除 Python / GTK | 没有本地窗口；旧 GUI 配置不自动导入 |
+| 真实 PTY | node-pty、登录 Shell、resize、Ctrl-C、停止 | 本地通过 CLI 登记授权目录与启动配置，Web 提供终端 UI |
+| 设备协议 | `platform: linux`，注册、心跳、现有 Server / Web 路由 | headless 只公布启动成功的 shell / codex；远程创建仍关闭 |
+| 远程交互 | PTY 命令、Codex 结构化事件 / 配置 / 审批 / 问答、accepted / 最终 ACK | Copilot / DSH ACP、AI API / 快捷任务未实现，真实闭环待验收 |
+| 公网配对 | 终端网址 / 用户码、TLS 和 Authorization Header | CLI 支持显式选择 0600 明文凭据文件；没有加密钥匙环 |
 | 断线补传 | 运行期间的序号、watermark、未确认输出重传 | journal 不落盘，App 重启不能补传 |
-| 输出约束 | 未确认输出合计 16 MiB，VTE 回滚 10000 行 | 达到未确认输出上限会报错并停止产生日志的会话 |
+| 输出约束 | 未确认输出合计 16 MiB，网络 / RPC / PTY 有界缓冲 | 达到上限明确报错，不伪造完整历史 |
 | 进程归属清理 | 独立 supervisor、Linux subreaper、后代进程清理 | Linux 特有行为仍需目标系统验证 |
-| 打包与自动化入口 | `.deb` 脚本、desktop 文件、Ubuntu 22.04 / 24.04 CI 定义 | 缺少本文登记的真实桌面验收和发布记录 |
-| 本地配置 | 保存设备 UUID 和最近 Server URL，配置文件权限 `0600` | 工作区 ID、会话信息和命令去重状态仅在内存 |
+| 打包与自动化入口 | 内置 Node / 生产依赖的按架构 `.deb`、systemd 用户 unit、Ubuntu headless CI | 发布目录在开发主机检查；尚无实际 Linux 安装、systemd / linger 验收记录 |
+| 本地配置 | 持久设备 / 工作区 / 启动配置 ID、Codex 路径、0600 原子写入、运行锁 | 执行会话、journal 和命令去重状态仍仅在内存 |
 
-当前固定限制：最多同时运行 8 个会话、每次打开 App 最多创建 128 个会话；
+当前固定限制：headless 最多 8 个启动会话、128 个授权工作区；
 同一进程不能切换到其他 Server；退出会停止本地进程且不保留未同步输出。
 
 ## 3. 状态、优先级和依赖约定
@@ -70,19 +72,24 @@ macOS 保留本地 UI，但也应支持从同一个 Web 入口远程创建会话
 
 ## 4. P0：无界面入口、通用远程创建与发布闭环
 
-### U-023 CLI 管理入口与 headless 常驻服务（未实现，主线）
+### U-023 CLI 管理入口与 headless 常驻服务（代码已接入，目标系统待验收，主线）
 
 依赖：无；可先使用假运行时完成服务骨架，真实 ACP 依赖 U-010 及对应 Provider。
 编号保留原有任务 ID，新增项目不重排已有引用。
 
-- [ ] 从 `app.py` 解耦连接、事件调度、会话管理和 Runtime，运行核心不得导入 GTK / VTE。
-- [ ] 提供前台运行、配置、配对、状态和诊断命令；命令名称在实现时确定，本文不声明已有 CLI。
+- [ ] 验收 TypeScript CLI / 服务及小型原生 supervisor 的独立运行，无 GTK / VTE / Python 运行依赖。
+- [ ] 验收已实现的 `run`、`configure`、`workspace`、`session`、`tool`、`pair`、`status`、`doctor`。
 - [ ] 配对在终端输出授权网址和用户码，允许用户在另一台设备浏览器完成，不要求自动打开本机浏览器。
 - [ ] 提供普通用户身份的 systemd 用户服务、日志和停止 / 重启语义；明确 SSH 退出及 linger 的配置方式。
 - [ ] 区分服务配置和对话操作：CLI 用于部署管理，日常聊天、审批与问答仍通过现有 Web。
 - [ ] 保持现有协议、鉴权和出站连接方式；不得要求为执行机器开放新的公网入站端口。
 - [ ] 支持无显示服务器、无 GUI 依赖、无桌面 D-Bus 的启动；服务停止和异常退出仍按所有权清理进程。
 - [ ] 将持久化凭据、Provider 登录环境及 systemd 下的 PATH 差异纳入部署说明。
+
+当前实现：`src/cli.ts` 为唯一管理入口；服务直接使用既有 TypeScript 协议类型 / Schema。
+已提供运行锁、私有配置 / 状态、终端配对及 systemd unit / 部署说明。
+`session add` 仅保存下次启动时创建新会话的本地配置，不实现 U-024。
+未勾选项保留为 Ubuntu / Xubuntu SSH、systemd 和真实 Web 交互验收。
 
 完成标准：仅通过 SSH 配置并启动服务后，退出 SSH 仍可按配置保持运行；
 现有 Web 可操作所属会话，无任何本地窗口或本地点击要求。GTK 入口不再是 Runtime 的必需宿主。
@@ -122,9 +129,9 @@ Linux 对接 U-023 的会话管理，ACP 交付依赖 U-010 及对应 Provider�
 完成标准：从同一个 Web 入口可分别在 Mac App 和无 UI Linux Agent 上创建会话并完成后续交互；
 无需先在执行机器点击新建，重试不产生重复进程 / 首轮，路径授权与原有交互规则保持不变。
 
-### U-001 目标系统与 headless 兼容性验收（现有桌面代码待验收，无界面版待实现）
+### U-001 目标系统与 headless 兼容性验收（桌面与无界面版均待实机验收）
 
-依赖：headless 验收依赖 U-023；可选桌面验收对应 `app.py`、`tests/test_gui.py` 和现有 Linux CI。
+依赖：headless 验收依赖 U-023；未来可选桌面入口需单独实施，不复用已移除的 Python GUI。
 
 - [ ] 在 Ubuntu 22.04 / 24.04 Server 与 Xubuntu 22.04 / 24.04 分别验证 SSH 部署、启动、停止和重启。
 - [ ] 不设置 DISPLAY / WAYLAND_DISPLAY、不登录桌面，并在未安装 GTK / VTE 时验证核心服务。
@@ -132,7 +139,7 @@ Linux 对接 U-023 的会话管理，ACP 交付依赖 U-010 及对应 Provider�
 - [ ] 验证中文工作区路径和 Unicode 结构化事件经 Server 在 PC / 手机 Web 正确显示。
 - [ ] 若保留桌面发行入口，单独验证 GNOME / Xfce、输入法、缩放、剪贴板和 VTE 全屏 TUI，
   不将这些可选桌面验收作为 headless 主线前置。
-- [ ] 记录 Python / websocket-client / systemd / Provider 版本及复现步骤，GUI 版本单独记录。
+- [ ] 记录应用 / 内置 Node / node-pty / systemd / Provider 版本及复现步骤。
 
 完成标准：目标系统无显示环境的部署与远程交互可复现；
 Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
@@ -142,14 +149,14 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 依赖：无；正式发布依赖 U-001。
 
 - [ ] 在干净 Ubuntu / Xubuntu 环境构建并安装 `.deb`，确认 apt 自动补齐全部运行依赖。
-- [ ] 打包无 GUI 运行入口与 service 配置，headless 包不强依赖 GTK / VTE；旧桌面入口单独声明依赖。
+- [ ] 验收内置私有 Node / 生产依赖 / 原生模块的 CLI 与 service，目标机无需系统 Node 或 Python。
 - [ ] 验证 CLI 与 systemd 服务能从任意工作目录启动；若保留桌面包，再验证应用菜单入口。
 - [ ] 验证从旧版升级后设备 UUID 和合法配置不丢失，卸载后不误删用户目录。
-- [ ] 明确 amd64 / arm64 的实际支持范围；`Architecture: all` 不等于已经在两个架构验收。
-- [ ] 统一 Python 包、设备注册、配对请求和 `.deb` 的版本来源，避免多处版本号漂移。
+- [ ] 明确 amd64 / arm64 的实际支持范围；分别构建与验收，不跨架构复用 Node / 原生模块。
+- [ ] 保持 npm 包、CLI、设备注册、配对请求和 `.deb` 版本一致，并跟踪内置 Node 的安全更新。
 - [ ] 建立版本化发布产物、校验和及安装说明；发行包不得包含缓存、测试凭据或用户配置。
 - [ ] 对损坏配置、依赖缺失、不可写目录和 systemd 服务失败给出修复提示；
-  缺少 GI / VTE 只能影响可选桌面入口。
+  不向目标机引入开发依赖、编译工具或 Python。
 
 完成标准：可交付实际 `.deb` 文件及安装 / 升级 / 卸载记录，而不只有打包脚本。
 
@@ -205,6 +212,9 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 
 依赖：稳定持久化 ID 与记录可复用 U-005 的存储边界，但不要求共享同一种存储实现。
 
+已有 CLI 工作区新增 / 列表 / 移除、持久化 ID 和真实路径授权，以及独立启动配置。
+重命名、重新定位、执行会话持久化和通用远程创建尚未实现；以下仍需按完成标准验收。
+
 - [ ] 持久保存工作区不透明 ID 与本地路径映射，重启后不为同一已登记工作区重复生成 ID。
 - [ ] 通过本地 CLI / 配置管理工作区列表、有效状态、重命名、移除与重新定位；真实路径不交给 Web。
 - [ ] 增加会话状态、开始 / 结束时间、工具类型、失败原因、重命名和结束标签关闭操作。
@@ -216,9 +226,13 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 完成标准：工作区身份稳定、会话生命周期清晰，关闭已结束标签不丢待同步输出。
 远程新建是单独受控能力，不因新增列表而自动开放。
 
-### U-007 CLI 配置与工具发现（CLI 未实现，桌面设置可选）
+### U-007 CLI 配置与工具发现（部分实现，桌面设置可选）
 
 依赖：无；Provider 设置依赖 U-010 的能力模型。
+
+已有连接 / 工作区 / 启动配置 / Codex 路径管理、doctor 和私有状态快照；
+doctor 不验证 Provider 登录或版本兼容性。多 Provider、代理 / 环境配置、
+初始模型持久化和真实 systemd PATH 验收仍待完成。
 
 - [ ] 为连接、工具与凭据、工作区和 AI 服务提供 CLI 配置与状态查询，显示设备 ID。
 - [ ] 发现 Shell / Codex / Copilot / DSH 的可执行文件与版本，支持本地配置覆盖工具路径。
@@ -229,9 +243,14 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 
 完成标准：用户可通过 SSH 和 CLI 完成工具配置与故障定位，不需要本地窗口；凭据不混入普通配置。
 
-### U-008 无界面凭据与授权管理（未实现持久化，桌面钥匙环可选）
+### U-008 无界面凭据与授权管理（设备凭据基础已接入，加密存储与 Provider 凭据待补）
 
 依赖：无；设置入口关联 U-007。
+
+设备凭据已支持环境变量、systemd 原始 token 文件，以及 `pair --credential-file`
+显式选择的 Server / 设备绑定 0600 明文 JSON；校验文件归属、权限、大小和符号链接，
+并从子进程环境移除服务凭据变量。没有静默明文回退，也没有把该方案当成加密钥匙环。
+DSH Key、统一忘记 / 清除命令、加密存储和真实授权生命周期验收尚未完成。
 
 - [ ] 设计适合 headless 用户服务的凭据注入 / 存储方式，支持设备凭据与 DSH Key，
   不照搬 macOS Keychain，也不强依赖桌面 Secret Service。
@@ -251,15 +270,18 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 - [ ] 增加会话切换快捷键、终端字体 / 字号、搜索和常用操作菜单。
 - [ ] 为结束 / 失败状态提供清晰的标签标识，避免用户误以为终端仍可输入。
 - [ ] 补齐键盘焦点、Tab 导航、屏幕阅读器标签、缩放和无障碍对比度验收。
-- [ ] 保留 VTE 的终端复制粘贴和 bracketed paste 行为，不用聊天输入逻辑替换 PTY 输入。
+- [ ] 若未来增加本地终端 UI，保留复制粘贴和 bracketed paste 行为，不用聊天输入逻辑替换 PTY 输入。
 
 完成标准：常见操作可通过键盘完成，错误不会无提示消失，终端和聊天模式的操作边界明确。
 
 ## 6. P1：ACP 与结构化智能体主链路
 
-### U-010 通用 Agent Runtime / Adapter 层（未实现）
+### U-010 通用 Agent Runtime / Adapter 层（首个 Runtime 已接入，仍未完成）
 
 依赖：无；headless 宿主由 U-023 提供。后续 Provider、远程结构化交互和 AI API 均依赖此项。
+
+已有 `src/rpc.ts`、服务异步调度、PTY / ACP journal 互斥和 Node 合成 Provider 测试；
+当前直接接入 Codex，尚未抽出多 Provider 通用状态 / 能力模型，不把单一适配器当成完整平台。
 
 - [ ] 定义 Provider 描述、能力探测、会话状态、规范化动作 / 事件和错误模型。
 - [ ] 实现可取消的异步请求、请求 ID 关联、超时、流式事件、有界队列及子进程所有权清理。
@@ -272,9 +294,13 @@ Xvfb、真实桌面结果与 headless 结果分别记录，不能互相代替。
 完成标准：至少一个假 Provider 能完成创建 → 多轮 → 中断 → 关闭闭环；
 PTY / ACP 数据互斥，厂商原始协议不进入 Server / Web。
 
-### U-011 Codex 官方 App Server Adapter（未实现）
+### U-011 Codex 官方 App Server Adapter（代码已接入，真实 Provider 待验收）
 
 依赖：U-010；可执行文件配置关联 U-007。
+
+已有 stdio 握手、隔离 Thread、轮次 / 模型 / 推理强度、事件 / 审批 / 用户问答映射，
+以及合成子进程和无界面服务回归。运行中超时不自动重放，启动失败明确终止，
+尚未实现启动失败后的 PTY 回退；未运行真实 Codex 请求，不宣称 CLI 版本兼容性已验收。
 
 - [ ] 在 Linux 本地通过 stdio JSONL 启动 `codex app-server`，完成握手、版本和能力检查。
 - [ ] 按现有方案使用 `thread/start` 创建隔离 Thread，建立本地 session / turn / item ID 映射。
@@ -328,9 +354,13 @@ PTY / ACP 数据互斥，厂商原始协议不进入 Server / Web。
 完成标准：长回答、长日志、Markdown、选区及滚动行为在 GNOME / Xfce 下可用，
 且与 Web 展示同一份规范化事件。
 
-### U-015 审批、用户问答、自动审批与通知（未实现）
+### U-015 审批、用户问答、自动审批与通知（Codex 基础已接入，真实 Web / 推送待验收）
 
 依赖：U-010 及至少一个支持对应能力的 Adapter，复用现有 Web 交互；不依赖 U-014。
+
+Codex 已映射手动决策、策略 / 额外权限、问答和 Server 同步自动审批，
+合成测试覆盖重复处理和问题过期；尚未验证真实 PC / 手机并发、断线及 Bark 通知闭环，
+其他 Provider 仍待接入。
 
 - [ ] 支持 Provider 实际公布的允许一次、允许会话、拒绝和取消决策，不硬编码只接受“同意”。
 - [ ] 支持用户问题、选项及答案提交，严格关联 session / turn / request ID。
@@ -446,7 +476,7 @@ Web / API targets 只显示真正可调用的 Linux 能力。具体协议以
   仅保留桌面入口时运行 GUI 测试，补充持久化、Adapter、审批、历史和任务回归。
 - [ ] 增加假 Server / 假 Agent 的自动化端到端测试，真实模型调用保持显式 opt-in。
 - [ ] CI 变化触发范围覆盖影响 Linux 的 Contract / Server / Web 变更，而不只检测 Linux 目录。
-- [ ] 区分“纯 Python 逻辑通过”“无显示服务通过”“跨平台远程创建通过”“Linux PTY 通过”、
+- [ ] 区分“TypeScript 逻辑通过”“内置运行时发布通过”“无显示服务通过”“跨平台远程创建通过”“Linux PTY 通过”、
   “真实 Provider 通过”和可选的“GTK / 真实桌面通过”。
 - [ ] 建立错误码与脱敏诊断导出，不记录凭据、配对 device code、完整请求头或用户文件内容。
 - [ ] 建立发布清单、支持版本矩阵、回归结果和已知限制；需要跨端升级时写明版本配套关系。
@@ -487,10 +517,11 @@ U-019 不能因 Adapter 已能启动就跳过执行隔离与权限验收。
 | 位置 | 用途 |
 | --- | --- |
 | [`apps/linux/README.md`](../apps/linux/README.md) | 当前支持范围、运行、安装和已知限制 |
-| [`apps/linux/termrelay/app.py`](../apps/linux/termrelay/app.py) | GTK 界面、设置、会话和事件分发 |
-| [`apps/linux/termrelay/protocol.py`](../apps/linux/termrelay/protocol.py) | 设备 / 会话协议、内存 journal、PTY 命令 |
-| [`apps/linux/termrelay/runtime.py`](../apps/linux/termrelay/runtime.py) / [`supervisor.py`](../apps/linux/termrelay/supervisor.py) | PTY 与后代进程归属清理 |
-| [`apps/linux/termrelay/transport.py`](../apps/linux/termrelay/transport.py) / [`pairing.py`](../apps/linux/termrelay/pairing.py) | 重连、心跳与公网配对 |
+| [`apps/linux/src/cli.ts`](../apps/linux/src/cli.ts) / [`service.ts`](../apps/linux/src/service.ts) | CLI 配置、运行锁、状态和无界面会话调度 |
+| [`apps/linux/src/protocol.ts`](../apps/linux/src/protocol.ts) | 设备 / 会话协议、内存 journal、ACK 与去重 |
+| [`apps/linux/src/pty.ts`](../apps/linux/src/pty.ts) / [`native/supervisor.c`](../apps/linux/native/supervisor.c) | 真实 PTY、OS flock 与后代进程归属清理 |
+| [`apps/linux/src/transport.ts`](../apps/linux/src/transport.ts) / [`pairing.ts`](../apps/linux/src/pairing.ts) | 重连、心跳与公网配对 |
+| [`apps/linux/src/codex.ts`](../apps/linux/src/codex.ts) / [`rpc.ts`](../apps/linux/src/rpc.ts) | Codex 官方 stdio、结构化动作与事件 |
 | [`apps/linux/tests`](../apps/linux/tests) / [Linux CI](../.github/workflows/linux.yml) | 已有测试入口与 CI 定义 |
 | [工程架构](ARCHITECTURE.md) | 组件职责、持久化与信任边界 |
 | [Codex App Server ADR](ADR-001-CODEX-APP-SERVER.md) | 当前 Codex 集成决策与启动前 PTY 回退 |

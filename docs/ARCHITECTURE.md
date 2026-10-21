@@ -14,10 +14,11 @@ termrelay/
 │   │   │   ├── Remote/              # WebSocket、重连、消息路由
 │   │   │   └── Tools/               # CLI 工具适配器
 │   │   └── Tests/
-│   ├── linux/                       # 独立 GTK 3 / VTE 桌面客户端（Ubuntu / Xubuntu）
-│   │   ├── termrelay/               # 本地 PTY supervisor、协议、配对、桌面 UI
-│   │   ├── tests/                   # 协议、PTY 生命周期与 GTK 冒烟检查
-│   │   └── packaging/              # Debian launcher 与桌面入口
+│   ├── linux/                       # CLI / headless Agent（Ubuntu / Xubuntu）
+│   │   ├── src/                     # TypeScript CLI、服务、Codex stdio、PTY 与协议
+│   │   ├── native/                  # 小型 OS 进程归属 / flock supervisor
+│   │   ├── tests/                   # Node 合成 Provider、真实 PTY、WebSocket 闭环
+│   │   └── packaging/              # 内置 Node 的 Debian launcher 与 systemd 用户 unit
 │   ├── server/
 │   │   └── src/
 │   │       ├── database/             # TypeORM 配置与显式 migration
@@ -47,7 +48,8 @@ JSON Schema ──generate──> Swift DTO ──> Mac Remote 层
       └──────generate──> TypeScript DTO ──> Server / Web
 
 Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY──> AI CLI
-                              └─/ws/client──> Linux ──PTY──> Shell / AI CLI
+                              └─/ws/client──> Linux Agent ──PTY──> Shell
+                                                   └─stdio──> Codex App Server
 ```
 
 约束如下：
@@ -60,17 +62,24 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 
 Linux 是独立的本地进程 / 路径所有者，不经过 Mac；也可使用现有
 `/ws/client-public` + 设备配对凭据接入。设备注册平台允许 `macOS` 和 `linux`，
-存储沿用设备 JSON capabilities，不改变表结构。Linux 首版只公布 Shell PTY，
-不公布 ACP、快捷任务或 AI API Provider 能力；Server / Web 不增加 Linux 专用协议解析。
-界面使用 GTK 3 + VTE，独立 supervisor 通过 Linux subreaper 跟踪和清理后代进程。
+存储沿用设备 JSON capabilities，不改变表结构。Linux CLI / 服务使用 TypeScript，
+直接依赖生成的 `@termrelay/contracts` 类型 / Schema，不再维护 Python 实现。
+按本地启动配置创建 Shell PTY / Codex 结构化会话，握手成功后才公布对应工具。
+Codex 原始协议解析在 Linux，不进入 Server / Web；尚不公布快捷任务或 AI API 能力。
+node-pty 提供真实 PTY，小型原生 supervisor 通过 Linux subreaper 跟踪并清理后代进程，
+同时提供 OS flock 配置锁；Provider 协议解析仍全部在 TypeScript。
+发布包按架构携带私有 Node、生产依赖与原生模块，目标机器不需要 Node / Python；
+旧 GTK 入口已移除，version 1 headless 配置保持兼容。
 边界、内存上限、安装与验收说明见 [`apps/linux/README.md`](../apps/linux/README.md)。
 
 ### 已确认的演进方向：无界面 Linux 与通用远程创建
 
-后续 Linux 主线为 CLI 管理 + 后台 Agent，不再要求本地 GTK / VTE UI。
+Linux 主线已提供 CLI 管理 + 后台 Agent，不再要求本地 GTK / VTE UI。
 沿用现有设备主动出站连接 Server 的拓扑和鉴权、路由、持久化、审批及问答语义，
 用户继续通过同一个 Web / 手机入口交互；不新增 Provider 原始 ACP / JSON-RPC 公网入口。
-这是后续规划，当前 Linux 实现仍依赖 GTK，不能据此声明无界面服务已经可用。
+当前 Codex 结构化会话包含轮次、配置、审批和问答映射，部署入口为 systemd 用户服务；
+Linux 实机 / 真实 Provider 兼容性验收与完整功能对齐仍待完成。
+启动配置不等于远程创建，也不跨重启恢复会话或内存 journal。
 
 远程创建会话应是 macOS / Linux 共用能力：Web 提交目标设备、授权工作区、
 工具和模式，Server 校验并路由，设备按自身 Runtime 创建，再统一上报会话及事件。

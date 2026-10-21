@@ -1,115 +1,175 @@
-# TermRelay Linux
+# TermRelay Linux Agent
 
-独立于 `apps/mac` 的 Linux 桌面客户端，目标系统为 Ubuntu / Xubuntu 22.04、24.04，
-使用系统 Python 3.10+、GTK 3 和 VTE。GNOME / Xfce 共用同一份应用和 `.deb`，
-不依赖 Swift、Xcode、Electron 或正在运行的 macOS App。Wayland 和 X11 使用 GTK 的系统后端。
+独立于 macOS App 的 **TypeScript CLI + 无界面后台服务**，目标为 Ubuntu / Xubuntu
+22.04、24.04。已移除旧 Python / GTK 实现。日常聊天、模型设置、审批和问答通过现有
+Server / Web 完成，执行机器只主动出站连接，不开放原始 ACP / JSON-RPC 端口。
 
-## 首版范围
+开发环境使用仓库声明的 Node.js 22+ / pnpm；发布 `.deb` 内置**私有 Node 运行时**，
+安装机器不需要预装 Node、pnpm 或 Python。不是 SEA 单文件编译，不修改系统 Node。
 
-支持本地多标签真实 PTY、选择工作目录、登录 Shell、ANSI / 中文终端显示、
-`Ctrl+Shift+C/V` 复制粘贴、窗口 resize、Ctrl-C、停止和退出清理；最多同时运行 8 个会话。
-可在 Shell 内手动运行已安装的 Codex / Copilot / DSH CLI，但仍然属于 PTY，
-不会显示 ACP 消息、审批或模型控件。
+## 当前范围与边界
 
-复用现有 Server 的 `/ws/client`、`/ws/client-public` 和 Web 终端，
-支持设备注册、心跳、远程输入 / resize / interrupt / stop、命令去重和 ACK、
-进程存活期间的断线重连与按序补传。工作区真实路径与子进程留在 Linux；
-只向 Server 发布随机工作区 ID 和目录显示名，不发布远程新建权限。
-Server 必须同时更新到接受 `platform: linux` 的版本。平台保存在原有 JSON capabilities 字段，
-本次不改变数据库表结构，不需要 migration。
+- CLI：连接、工作区授权、启动配置、Codex 路径、无浏览器配对、状态与 doctor。
+- Shell：`node-pty` 真实 PTY，支持字节输入、resize、中断、停止和 Unicode 输出。
+- Codex：官方 `app-server` stdio JSONL，映射消息、思考、计划、命令、文件变更、
+  模型 / 推理强度、审批和用户问答。自动审批只在 Server 同步启用时执行。
+- 协议：直接使用 `@termrelay/contracts` 生成的类型与 Schema，沿用设备鉴权、
+  有序事件、ACK、去重和运行期间断线补传。Server 只接收工作区 ID 和展示名，不接收真实路径。
+- 进程：业务逻辑全部 TypeScript；一个小型 C supervisor 只负责 OS 级 flock、
+  Linux subreaper 和所属后代清理，不解析智能体协议。PTY 的原生绑定由 node-pty 提供。
 
-**尚未实现**：ACP 适配器与结构化审批、快捷任务、AI API Provider、
-历史继续、工作区文件预览、应用重启后的输出恢复、系统钥匙环持久化。
-首版不是 macOS App 的完整功能平替；以上功能也不会被上报为可用能力。
+**尚未完成**：macOS / Linux 通用远程创建、Copilot / DSH ACP、AI API、
+快捷任务、历史继续、文件预览、磁盘 journal 和加密钥匙环。
+当前 `session add` 只保存服务启动时创建新会话的配置；每次 run 使用新执行会话 ID，
+不自动提交首轮，不恢复旧任务。工作区仍发布 `remoteStartAllowed: false`。
+Codex 启动失败会明确终止服务，不静默转换成 Shell，也不重放模型任务。
 
-完整缺口、优先级、依赖与验收标准见 [Ubuntu / Xubuntu App TODO](../../docs/UBUNTU_APP_TODO.md)。
+Node 运行时只随 Agent 提供；智能体 CLI 仍需用户安装和登录。
+当前开发主机为 macOS，不能把本地回归或发布目录检查称为 Linux / systemd / `.deb` 实机验收。
+完整进度见 [Ubuntu TODO](../../docs/UBUNTU_APP_TODO.md)。
 
-## 后续方向：无界面 Agent
+## 从源码开发
 
-已确认后续以 CLI 管理 + 后台常驻服务为主，连接、鉴权、路由、持久化和交互语义沿用现有 App，
-只是取消 Linux 本地 UI，日常操作继续通过现有 Web / 手机完成。
-远程创建会话作为 macOS / Linux 通用能力共同补齐，不设计 Linux 专用交互协议。
-当前代码尚未完成该改造；下列启动和安装说明仍对应现有 GTK 首版。
-具体任务见 TODO 的 U-023 / U-024，可选桌面 UI 不作为 headless 交付前置。
-
-## 从源码运行
-
-在 Ubuntu / Xubuntu 的桌面会话中：
+仓库根目录，按根 README 准备 Node.js 22+ 和声明的 pnpm：
 
 ```bash
-sudo apt-get update
-sudo apt-get install python3 python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 python3-websocket
-
-# 仓库根目录；无需启动 Mac App，也无需安装 Python pip 包
-pnpm linux:dev
-# 或完全不依赖 Node / pnpm：
-PYTHONPATH="$PWD/apps/linux" /usr/bin/python3 -m termrelay
+pnpm install
+pnpm --filter @termrelay/linux build
+node apps/linux/dist/src/cli.js --help
 ```
 
-必须使用系统 `/usr/bin/python3`，不要使用缺少 apt GI 绑定的 virtualenv。
-点击“新建 Shell”选择工作目录即可离线使用，不要求 Server 在线。
-Shell 使用 `$SHELL`，未设置时使用 `/bin/bash`；CLI 的安装与登录由用户自行完成。
+构建需 C/C++ 编译工具链（Ubuntu 使用 `build-essential`），以生成 supervisor。
+node-pty 没有匹配平台预编译产物时，其 node-gyp 构建还需要 Python；它是上游原生依赖的
+**构建工具**，不属于 Agent 实现，也不会作为运行依赖装进发布包。
+macOS 开发构建会修正 node-pty 预编译 spawn-helper 的可执行位。
 
-## 连接 Server / Web
-
-隔离的受信 LAN 开发环境使用 `ws://服务器:3007/ws/client`，点击“连接”。
-这一入口不提供设备认证，不要暴露到公网或不受信网络。
-Server、MySQL 和 Web 的启动步骤沿用根目录 README；Web 通过 Linux 设备下的 PTY 会话交互。
-
-公网使用 `wss://域名/ws/client-public`，点击“公网配对”，在弹出的浏览器完成
-现有 Cloudflare Access 登录及配对码确认。配对成功后点击“连接”。
-也可在密码输入框粘贴现有设备凭据。公网只允许 TLS，凭据只经 Authorization Header 发送，
-不会放在 URL、日志或本地配置里。凭据仅保留在进程内存，退出后需要重新配对；
-旧授权可在 Web 配置中撤销。Xfce 不要求 GNOME Keyring。
-
-设备 UUID 和最近的 Server URL 保存在
-`${XDG_CONFIG_HOME:-~/.config}/termrelay/linux.json`（文件权限 `0600`）。
-同一次运行不能切换到其他 Server，避免将已经确认的会话序号和输出混入另一台 Server。
-可断开后重新连接同一 Server；需要切换 Server 时退出 App 后重新打开。
-
-## 输出与进程生命周期
-
-- 本地界面、PTY、网络各有独立有界队列；界面读取输出不等待 Server 成功。
-- 所有会话尚未被 Server 确认的输出总量最多 16 MiB。离线仍可启动和操作终端，
-  但达到该上限时会明确报错并停止产生日志的会话，不会悄悄丢弃旧输出并伪造完整历史。
-  因此长期离线的大量输出不适合这一首版。VTE 本地回滚保留 10000 行。
-- 每次 Server ACK 后释放已确认输出；重连先发布工作区及会话，再按 Server watermark
-  补传缺口，最后报告结束。Server watermark 回退时显式拒绝补传，避免无声丢历史。
-  输出 journal 只在内存里，App 重启不能继续旧进程或补传旧输出。
-  关闭时若仍有运行中会话或未确认输出，会要求确认并提示数据不会保留。
-- 每个 PTY 有独立 supervisor。Linux supervisor 作为 child subreaper 收养孤儿进程；
-  停止、关闭 App 或 App 异常退出造成控制管道关闭时，仅按父子归属清理自己的后代，
-  不按进程名终止其他终端或 CLI。主动停止先发 SIGTERM，1 秒后升级为 SIGKILL。
-- 最多同时运行 8 个会话、每次打开 App 最多创建 128 个会话；已结束标签保留供查看，
-  不自动清除其等待补传的数据。
-
-## 构建 / 安装 `.deb`
-
-在 Ubuntu / Xubuntu（安装了 `dpkg-deb`）的仓库根目录：
+源码管理命令可使用 `pnpm linux:cli ...`；`pnpm linux:dev` 前台运行服务。
+以下示例用安装后的 `termrelay-agent`，源码环境可替换为 `node apps/linux/dist/src/cli.js`。
 
 ```bash
+termrelay-agent configure --server ws://服务器:3007/ws/client --name Ubuntu
+termrelay-agent workspace add "$HOME/project" --name project
+termrelay-agent tool codex "$(command -v codex)"
+termrelay-agent session add --workspace project --provider codex
+# 可选的独立远程终端：
+termrelay-agent session add --workspace project --provider shell
+termrelay-agent doctor
+termrelay-agent run
+```
+
+工作目录必须已存在。Codex 需由同一普通用户提前安装并登录。
+`doctor` 不启动真实智能体、不验证登录、不发送模型请求；`run` 才完成 Provider 握手。
+LAN 的 `/ws/client` 不提供设备认证，只可用于隔离的受信开发网络。
+Shell 使用 `$SHELL`，未设置时为 `/bin/bash`。
+
+配置位于 `${XDG_CONFIG_HOME:-~/.config}/termrelay/agent.json`，可用 `--config /绝对路径/agent.json`
+覆盖。私有配置采用 0600 原子写入和 fsync，持久化设备 / 工作区 / 启动配置 ID。
+原 headless 版本合法的 version 1 `agent.json` 可继续使用；旧 GUI `linux.json` 不自动导入。
+运行锁阻止并发修改；最多登记 128 个工作区、配置 8 个启动会话。
+修改配置前先停服务；`session list` / `session remove ID` 只管理启动配置，不删除目录。
+
+## 公网配对
+
+```bash
+termrelay-agent configure --server wss://域名/ws/client-public --name Ubuntu
+termrelay-agent pair --credential-file "$HOME/.config/termrelay/device.credential"
+```
+
+在终端输出的授权网址完成现有 Cloudflare Access 授权，可使用另一台设备浏览器。
+凭据仅经 Authorization Header 发送，不写入 URL、日志、状态或普通配置。
+显式选择的凭据文件是 Server / 设备绑定的 **0600 明文 JSON**，不是加密钥匙环；
+请勿分享或提交。新路径不覆盖已有文件；可重配更新当前已登记的凭据文件。
+切换 Server 移除文件引用，不删除原凭据文件；旧授权需在 Web 撤销。
+
+也可注入 `TERMRELAY_DEVICE_CREDENTIAL`，或使用 systemd
+`CREDENTIALS_DIRECTORY/device-credential` 的原始 token 文件（不是 pair 生成的 JSON）。
+读取时校验归属、模式、普通文件、大小和符号链接；服务凭据环境变量不传给子进程。
+Provider 登录凭据仍由其 CLI 管理。
+
+## 发布 `.deb`：内置 Node
+
+在目标架构对应的 Ubuntu 22.04+ 构建机使用官方 Node 22 分发包：
+
+```bash
+pnpm install --frozen-lockfile
 pnpm linux:deb
-# 或 bash apps/linux/build-deb.sh
-sudo apt-get install ./apps/linux/dist/termrelay-linux_0.1.0_all.deb
-termrelay-linux
+sudo apt-get install "./apps/linux/dist/termrelay-linux_0.1.0_$(dpkg --print-architecture).deb"
+termrelay-agent --version
 ```
 
-包不包含原生扩展，声明 `Architecture: all`；GTK / VTE / WebSocket 由 apt 解析为目标机器的架构。
-安装后可在应用菜单中搜索 **TermRelay Linux**。删除包使用 `sudo apt-get remove termrelay-linux`；
-个人配置不会被自动删除。
+构建流程编译应用与 supervisor，用 pnpm deploy 收集生产依赖，并复制当前 Node 可执行文件和
+匹配的 LICENSE；默认从 Node 安装根目录取 LICENSE，可用 `TERMRELAY_NODE_LICENSE` 指定匹配文件。
+不在构建脚本里下载未校验的运行时。构建机 Node / OS / 架构必须匹配，
+拒绝依赖外部 libnode / OpenSSL / ICU 的系统动态 Node 构建。
+
+安装布局：
+
+```text
+/usr/bin/termrelay-agent                # 启动私有运行时；termrelay-linux 是兼容名称
+/usr/lib/termrelay-linux/release/
+  runtime/bin/node                     # 私有 Node，不依赖目标机 PATH 中的 Node
+  runtime/LICENSE
+  app/dist/src/                        # 编译后的 TypeScript
+  app/dist/termrelay-supervisor
+  app/node_modules/                    # 生产依赖，包含 PTY 原生模块与协议包
+  release.json                         # 应用 / Node 版本和平台 / 架构
+/usr/lib/systemd/user/termrelay-agent.service
+```
+
+发布包按 amd64 / arm64 分开构建，不再使用 `Architecture: all`；
+原生模块与 Node 运行时不跨架构复用。系统仍需 glibc、libstdc++、libgcc 等基础库，
+不是静态链接、任意 Linux 通用的单文件。卸载不删除用户配置。
+Node 安全更新由后续 Agent 发布更新负责。
+
+## systemd 用户服务
+
+先完成配置，确认前台可运行并退出。安装包不会自动启用服务；用同一普通用户执行：
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now termrelay-agent.service
+systemctl --user status termrelay-agent.service
+journalctl --user -u termrelay-agent.service -f
+termrelay-agent status
+
+# 修改配置前停止，修改后重新启动：
+systemctl --user stop termrelay-agent.service
+systemctl --user start termrelay-agent.service
+```
+
+需在退出 SSH / 重启后继续运行时，由管理员显式执行 `sudo loginctl enable-linger "$USER"`。
+不要以 root 运行 Agent。unit 使用私有 Node，不依赖登录 Shell 的 nvm。
+Provider 路径用 `tool codex /绝对路径` 固定；Provider 所需其他工具目录需通过用户 unit override
+配置 PATH，并保持相同 HOME / 登录用户。子进程 PATH 会加入当前私有 Node 的 bin 目录。
+秘密不要写入命令行或公开 unit。自定义配置可在 override 清空并重设 ExecStart。
+
+`status` 是私有本地快照，running 通过 OS flock 判断，不是实时在线探测。
+停止清理所属进程；Restart=on-failure 有启动频率限制，不自动续接旧任务。
+退出超时由 unit 的所属 cgroup 兜底，不按进程名称终止其他应用。
+
+## 生命周期与可靠性
+
+- PTY 字节与 ACP 事件严格分离；不支持的命令明确拒绝。结构化命令先 accepted，
+  实际完成 / 失败后最终 ACK；RPC 超时 / 断连表示结果可能未知，不自动重放。
+- 未确认事件总计最多 16 MiB，ACK 窗口 32 个事件；网络、RPC、PTY 队列也有限制。
+  断线在进程存活期间按 Server watermark 补传，watermark 回退显式失败。
+- journal、命令去重、待审批和实际执行会话均不落盘；停止时提示未确认输出不能恢复。
+  SIGKILL / 断电不能保证内存数据保存。
+- supervisor 按后代归属清理孤儿和 detached 子进程；stdio EOF / 父进程退出触发清理。
+  配置锁采用 OS flock，不以 PID 文件或过期锁时间猜测所有权。
+- 传输中断自动重连；认证撤销、协议错误和不可恢复错误明确报告后停止。
 
 ## 验证
 
 ```bash
 pnpm linux:test
-# Ubuntu / Xubuntu 的真实 GTK/VTE 冒烟检查（需 xvfb）：
-sudo apt-get install xvfb
-TERMRELAY_GUI_TEST=1 PYTHONPATH="$PWD/apps/linux" \
-  xvfb-run -a /usr/bin/python3 -m unittest discover -s apps/linux/tests -v
+pnpm linux:contracts
+pnpm check
 ```
 
-测试不会启动真实 AI CLI 或发起模型请求。非 Linux 环境跳过 subreaper 清理检查；
-没有桌面依赖时跳过 GTK 冒烟检查。提交的 CI 分别在 Ubuntu 22.04 / 24.04 的 Xvfb
-以及最小 Xfce 会话中运行图形入口、真实 PTY 和打包检查；未运行 CI 前不能视为目标系统已验收。
-发布前还应在实际 Ubuntu GNOME / Xubuntu Xfce 桌面上确认中文输入法、全屏 TUI、
-本地与 Web 双向操作、断网重连、配对撤销及停止后台 CLI。
+普通测试使用 Node 合成 stdio Provider，不运行真实智能体或发送模型请求。
+包含配置 / 凭据 / 锁、协议、真实 PTY 和实际 WebSocket 服务闭环。
+`linux:contracts` 使用真实 Server 校验器检查 Linux 发出的全部结构化事件类型。
+Linux 专有 subreaper 回归在其他 OS 跳过。CI 定义 Ubuntu 22.04 / 24.04 的
+无显示环境回归、内置运行时打包和安装检查；arm64、真实 systemd / linger、
+公网配对及当前 Codex CLI 版本仍需实机验收。

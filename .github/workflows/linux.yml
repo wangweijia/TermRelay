@@ -1,13 +1,25 @@
-name: Linux desktop
+name: Linux TypeScript agent
 
 on:
   push:
     paths:
       - apps/linux/**
+      - packages/contracts/**
+      - apps/server/**
+      - apps/web/**
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
       - .github/workflows/linux.yml
   pull_request:
     paths:
       - apps/linux/**
+      - packages/contracts/**
+      - apps/server/**
+      - apps/web/**
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
       - .github/workflows/linux.yml
   workflow_dispatch:
 
@@ -15,46 +27,37 @@ permissions:
   contents: read
 
 jobs:
-  desktop:
+  headless:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
-        desktop: [gtk, xfce]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install system desktop dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable declared pnpm
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Exercise TypeScript service, native PTY and owned cleanup
+        run: env -u DISPLAY -u WAYLAND_DISPLAY pnpm linux:test
+      - name: Validate Linux events through Server
+        run: pnpm linux:contracts
+      - name: Build and install private-runtime package
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 python3-websocket xvfb dbus-x11
-          if [ "${{ matrix.desktop }}" = "xfce" ]; then
-            sudo apt-get install -y xfwm4 xfconf
-          fi
-      - name: Exercise desktop and real PTY
-        env:
-          TERMRELAY_GUI_TEST: "1"
-          PYTHONPATH: ${{ github.workspace }}/apps/linux
-          DESKTOP: ${{ matrix.desktop }}
-        run: |
-          xvfb-run -a dbus-run-session -- bash -c '
-            if [ "$DESKTOP" = "xfce" ]; then
-              xfwm4 --daemon
-            fi
-            /usr/bin/python3 -m unittest discover -s apps/linux/tests -v
-          '
-      - name: Build and install Debian package
-        run: |
-          bash apps/linux/build-deb.sh
-          sudo apt-get install -y ./apps/linux/dist/termrelay-linux_0.1.0_all.deb
-          dpkg-query -W termrelay-linux
-          xvfb-run -a dbus-run-session -- /usr/bin/python3 -c '
-          import os, subprocess
-          process = subprocess.Popen(["termrelay-linux"])
-          try:
-              process.wait(timeout=3)
-              raise SystemExit("Desktop launcher exited before smoke check")
-          except subprocess.TimeoutExpired:
-              process.terminate()
-              process.wait(timeout=5)
-          '
+          pnpm linux:deb
+          sudo apt-get install -y ./apps/linux/dist/termrelay-linux_0.1.0_amd64.deb
+          cd /tmp
+          # Restrict PATH: no setup-node, pnpm or Python is needed by the installed CLI.
+          PATH=/usr/bin:/bin /usr/bin/termrelay-agent --help
+          PATH=/usr/bin:/bin /usr/bin/termrelay-linux configure --server ws://localhost:3007/ws/client --name CI
+          PATH=/usr/bin:/bin /usr/bin/termrelay-agent workspace add /tmp --name temporary
+          PATH=/usr/bin:/bin /usr/bin/termrelay-agent session add --workspace temporary --provider shell
+          PATH=/usr/bin:/bin /usr/bin/termrelay-agent doctor
+          test -f /usr/lib/systemd/user/termrelay-agent.service
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termrelay-linux-${{ matrix.os }}-amd64
+          path: apps/linux/dist/*.deb

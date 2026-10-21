@@ -1,0 +1,27 @@
+{
+  "name": "@termrelay/linux",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "files": ["dist/src", "dist/termrelay-supervisor"],
+  "scripts": {
+    "prebuild": "pnpm --filter @termrelay/contracts build",
+    "build": "tsc -p tsconfig.json && node scripts/build-native.cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "cli": "pnpm build && node dist/src/cli.js",
+    "test": "pnpm build && node --test dist/tests/*.spec.js"
+  },
+  "dependencies": {
+    "@termrelay/contracts": "workspace:*",
+    "ajv": "^8.20.0",
+    "commander": "^14.0.1",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.2"
+  },
+  "engines": {"node": ">=22"}
+}

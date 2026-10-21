@@ -20,6 +20,9 @@ for (const [name, path, next] of [
   }
 }
 const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', import.meta.url), 'utf8'));
+const toolEvent = JSON.parse(await readFile(new URL('./events/tool-event.schema.json', import.meta.url), 'utf8'));
+source = source.replace(/export type ToolEventKind =[\s\S]*?;/,
+  `export type ToolEventKind = ${toolEvent.properties.kind.enum.map(value => JSON.stringify(value)).join(' | ')};`);
 source = source.replace(/export interface DeviceRegisterPayload \{[\s\S]*?\n\}/, `export interface DeviceRegisterPayload {
   name: string;
   appVersion: string;

@@ -34,12 +34,15 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 
 ## 支持的智能体
 
-### Linux 桌面客户端（首版）
+### Linux 无界面 Agent（阶段版）
 
-新增独立的 **Ubuntu / Xubuntu** 客户端 `apps/linux`，使用 GTK 3 + VTE，
-无需 macOS App。支持本地多标签 Shell PTY、现有 Server / Web 远程终端、公网设备配对与断线补传，
-提供 `.deb` 打包；首版不含下述 macOS ACP、快捷任务及 AI API Provider 能力。
-安装、兼容范围与限制见 [Linux 客户端说明](apps/linux/README.md)。
+独立的 **Ubuntu / Xubuntu** Agent `apps/linux` 以 CLI 管理、systemd 用户服务常驻，
+使用 TypeScript，共享现有协议类型；发布包内置私有 Node，不要求目标机器安装 Node 或 Python。
+无需 macOS App 或 GTK。已接入 Shell PTY、Codex App Server 结构化 Runtime、
+现有 Server / Web 交互、公网配对与运行期间补传；提供无 GUI 强依赖的 `.deb` 脚本。
+当前使用本地启动配置，macOS / Linux 通用远程创建尚未接入；Copilot / DSH ACP、
+快捷任务及 AI API 仍待补齐。旧 Python / GTK 入口已移除，目标系统实机验收尚未完成。
+安装、兼容范围与限制见 [Linux Agent 说明](apps/linux/README.md)。
 待补功能及验收计划见 [Ubuntu / Xubuntu App TODO](docs/UBUNTU_APP_TODO.md)。
 
 | 智能体 | 交互模式 | 说明 |

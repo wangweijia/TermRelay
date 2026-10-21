@@ -266,11 +266,7 @@ export interface ToolEventCorrelation {
   approvalId?: string;
 }
 
-export type ToolEventKind =
-  | 'turn.started' | 'user.message' | 'assistant.delta' | 'assistant.completed' | 'reasoning.delta'
-  | 'command.started' | 'command.output' | 'command.completed'
-  | 'file.changed' | 'approval.requested' | 'approval.resolved' | 'user-input.requested' | 'user-input.resolved' | 'plan.updated'
-  | 'turn.completed' | 'warning' | 'error';
+export type ToolEventKind = "turn.started" | "user.message" | "assistant.delta" | "assistant.completed" | "reasoning.delta" | "command.started" | "command.output" | "command.completed" | "file.changed" | "approval.requested" | "approval.resolved" | "user-input.requested" | "user-input.resolved" | "plan.updated" | "turn.completed" | "config.updated" | "warning" | "error";
 
 export interface ToolEventPayload {
   kind: ToolEventKind;
