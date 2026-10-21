@@ -1,445 +1,55 @@
-<div align="center">
-  <img src="apps/mac/packaging/AppIcon/TermRelay-AppIcon-1024.png" width="132" alt="TermRelay app icon">
+# TermRelay
 
-  # TermRelay
+**用手机或浏览器，继续操作电脑上的终端和 AI 编程助手。**
 
-  **把 Mac 上的 Shell、Codex、GitHub Copilot 与 DeepSeek DSH，带到你手边的每一块屏幕。**
+比如：你在 Mac 上让 Codex 写代码，离开电脑后，用手机查看进度、回复问题、批准操作，不用一直守在电脑前。
 
-  一套面向个人开发工作流的远程会话中枢：在 macOS 上运行真实 PTY 或标准 **ACP**（Agent Client Protocol），
-  通过 Web 安全查看、交互、审批，并在手机上及时处理需要你决策的任务。
+任务仍在你的电脑上运行，TermRelay 负责把操作界面带到浏览器。
 
-  [快速开始](#快速开始) · [支持的智能体](#支持的智能体) · [架构](#架构) · [手机推送](#手机审批推送) · [部署](#生产部署) · [Cloudflare 配置](#cloudflare-配置) · [环境变量](#环境变量参考)
+## 能做什么
 
-  <sub>如果这个项目对你有帮助，欢迎点一个 ⭐️ Star。</sub>
-</div>
+- 远程使用终端，输入命令、查看输出。
+- 与 Codex、GitHub Copilot CLI、DeepSeek DSH 对话。
+- 在手机上处理 AI 的审批和提问，可选开启 iPhone 推送。
 
----
+主要支持 Mac；[Linux 版本](apps/linux/README.md)还在完善中，目前支持 Shell 和 Codex。
 
-## 这是什么
+## 看起来是什么样
 
-AI 编程任务经常运行很久，而审批、补充问题和终端操作不会等你回到电脑前。TermRelay 把执行环境留在 Mac，
-把操作界面延伸到桌面浏览器和手机：你可以离开工位，但不必失去对任务的控制。
+![浏览器中的会话、终端和审批界面](docs/images/web-workbench.jpg)
 
-它不是把终端画面简单录屏到网页。TermRelay 的核心是 **ACP（Agent Client Protocol）**：对支持 ACP 的智能体，
-TermRelay 不再把它们的输出当作终端文本来渲染，而是把消息、思考过程、计划、工具调用、文件变更、审批请求和
-用户提问这些结构化事件，通过统一协议转发到 Mac 原生界面和 Web 原生组件，两端呈现完全一致、可交互的界面。
-对不需要结构化交互的场景（普通 Shell、传统 CLI TUI），TermRelay 仍然提供一条完整的真实 PTY 链路。
+## 怎么用
 
-| 模式 | 本地运行方式 | Mac 界面 | Web 界面 | 适合场景 |
-|---|---|---|---|---|
-| **PTY** | 真实伪终端中的 Shell / Codex CLI | SwiftTerm | xterm.js | 完整 TUI、Shell 命令和传统 CLI 工作流 |
-| **ACP** | Codex App Server / Copilot CLI ACP Server / DeepSeek DSH ACP | SwiftUI 原生组件 | Vue 原生组件 | 消息流、思考、工具调用、审批和用户问答 |
+你需要一个运行中的服务端，以及电脑上的 TermRelay 客户端。浏览器和手机通过服务端访问电脑上的会话。
 
-PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize，PTY 不接受结构化审批命令，二者不会混用同一份数据。
+### 在 Mac 本机试用
 
-## 支持的智能体
-
-### Linux 无界面 Agent（阶段版）
-
-独立的 **Ubuntu / Xubuntu** Agent `apps/linux` 以 CLI 管理、systemd 用户服务常驻，
-使用 TypeScript，共享现有协议类型；发布包内置私有 Node，不要求目标机器安装 Node 或 Python。
-无需 macOS App 或 GTK。已接入 Shell PTY、Codex App Server 结构化 Runtime、
-现有 Server / Web 交互、公网配对与运行期间补传；提供无 GUI 强依赖的 `.deb` 脚本。
-已支持同一 Web / 手机入口远程创建 macOS / Linux 会话，工作区需在执行机器显式授权；Copilot / DSH ACP、
-快捷任务及 AI API 仍待补齐。旧 Python / GTK 入口已移除，目标系统实机验收尚未完成。
-安装、兼容范围与限制见 [Linux Agent 说明](apps/linux/README.md)。
-待补功能及验收计划见 [Ubuntu / Xubuntu App TODO](docs/UBUNTU_APP_TODO.md)。
-
-| 智能体 | 交互模式 | 说明 |
-|---|---|---|
-| **Shell** | PTY | 你日常使用的登录 Shell（`$SHELL`），完整终端体验 |
-| **Codex CLI** | PTY 或 ACP | ACP 模式通过官方 **Codex App Server** 运行，每次以 `thread/start` 创建全新 Thread；App Server 不可用或版本不兼容时自动回退到 PTY |
-| **GitHub Copilot CLI** | ACP | 通过 Copilot CLI 官方 **ACP Server** 连接；使用前需在终端执行一次 `copilot login` |
-| **DeepSeek DSH** | ACP | 标准 **ACP v1**，每次以 `session/new` 创建隔离会话；API Key 只保存在 macOS 钥匙串，注入本地 DSH 子进程 |
-
-在已启动的结构化会话中，Codex 可从 CLI 提供的模型与推理强度列表选择，变更从下一轮开始生效。Copilot ACP 若公布模型或推理强度配置选项，可直接切换；若仅公布 `/model` 命令，可在 Mac 或 Web 输入模型 ID 执行会话内模型切换（CLI 的响应会显示在会话中）。创建 Copilot 会话时可在 Mac 选择推理强度（默认、低、中、高、超高、最高），由 Mac 启动 ACP Server 时通过 `--effort` 传入；等级是否可用取决于模型。若 Copilot CLI 没有通过 ACP 公布推理强度配置选项，已启动的会话不能切换推理强度。PTY 与 DSH 不显示这些控件。
-
-新增 Agent Provider 时请先阅读 [结构化 Agent 适配层设计](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)；其中定义了通用能力模型、事件流和生命周期，接入新智能体不需要改动 Server 或 Web 的核心逻辑。
-
-## 核心能力
-
-- **统一 Web 配置**：顶部“配置”进入 `/settings`，只展示可调用 AI 设备、未撤销 Key 和未过期的 Mac 公网授权；可复制设备 ID、查看 Provider，生成、替换与撤销通用 AI API Key，管理 Mac 授权和审批通知。Mac 设置按连接、AI 服务和工具分组，工作目录与可执行文件通过选择器配置。沿用 Web 的 Cloudflare Access 登录保护，使用说明见 [AI 服务配置](docs/AI_SERVICE_SETUP.md)。
-- **真实远程终端**：保留 ANSI、TrueColor、中文、Emoji、终端 resize、输入、Ctrl-C 和停止操作。
-- **多 Provider 原生 ACP 体验**：结构化呈现回答、思考、计划、命令输出、文件变更和错误，不把 JSON-RPC 当作终端文本渲染。
-- **ACP Markdown 展示**：Mac 和 Web 自动识别并渲染 AI 回答、思考与计划中的 Markdown；普通文本保持原样，PTY 和命令输出仍按原方式展示。
-- **Mac Markdown 链接**：点击 Markdown 中的 HTTP / HTTPS 链接使用默认浏览器打开；绝对路径、`file://` 和相对路径文件链接使用系统默认应用打开，相对路径以当前会话工作目录为基准。文件链接中的 `#` 锚点不定位到具体行；历史工作目录未知、文件不存在或打开失败时显示提示。不支持其他 URL 协议。
-- **Mac 聊天文字选择**：单条消息内可连续拖选多行、段落、列表、代码及表格，并使用 `⌘C` 或右键复制；代码与表格随聊天窗口宽度换行。流式追加保留已有选区，选中文字或向上阅读时不会强制滚到底部。当前不支持跨消息拖选，PTY 终端选择不受影响。
-- **Mac 命令输出滚动**：ACP 命令输出使用独立原生滚动区，短输出按内容增高，长输出最高 220pt 并在内部滚动；新增日志默认跟随末尾，向上翻阅或选中文字时暂停跟随。聊天窗自动定位使用无动画、合并后的布局更新，仅在内容布局或视口尺寸变化时修正位置，不因底部拖动回弹重复定位，避免与长日志的内部滚动互相争抢位置。
-- **Mac 聊天定位**：底部定位标记独立于消息懒加载列表，长回答流式更新、内容收缩或切换会话时不会因标记被回收而定位到空白区域；消息仍按需加载。
-- **工作区 Markdown 预览**：在 Web 点击 ACP 回答中的同站点 `/Users/...` 或 `/Volumes/...` 文件链接，可预览当前会话工作区内的 UTF-8 `.md` / `.markdown` 文件（最大 512 KiB）。需要对应 Mac 在线且仍持有该会话；工作区外的路径、其他文件格式和相对链接不支持预览。文件内容只在点击时从 Mac 获取，不持久化到 Server。
-- **完整交互闭环**：支持审批的全部可用决策，以及 `requestUserInput` 式的用户问答。
-- **跨平台远程新建**：Web / 手机选择在线设备、已授权工作区和工具 / 模式后创建普通会话。Mac 在“设置 → 工作区”中添加或取消目录授权，与本地新建会话独立；取消授权不影响已有会话的运行或远程访问。Linux 使用 `workspace add --allow-remote-start` 或 `workspace remote-start NAME --allow true` 后重启服务。请求幂等、启动结果持久化；断线或超时显示“结果未知”，不会自动重建进程。默认手动审批，创建不发送首条提示词。升级 Server 时需运行新增数据库迁移，说明见 [Linux Agent](apps/linux/README.md#通过-web--手机远程创建)。
-- **跨会话审批中心**：PC 与手机 Web 可统一查看多个 ACP 窗口需要手动处理的审批；开启自动审批的会话不进入待审批列表。
-- **快捷任务**：在 Mac 上创建工作区命令并为每条任务单独配置代理；桌面和手机 Web 只显示任务元数据，可确认、一键运行、查看结果及停止。CLI 要求二次确认时可查看输出并手动发送限定的 y/n/yes/no，无需修改 CLI；不支持密码输入或自动批准。脚本、真实路径和代理地址留在 Mac，执行与现有终端会话隔离。设计与使用边界见 [快捷任务方案](docs/SHORTCUT_TASKS.md)。
-- **Mac 审批 Toast**：需要手动处理的本地 ACP 审批统一显示在窗口右上角，可展开、收起或直接审批；开启自动审批的会话不会出现 Toast，处理或会话结束后自动移除。
-- **手机审批推送**：Server 可通过 Bark 将需要手动处理的新审批推送到 iPhone；自动审批和项目 API 会话不推送，通知开关由 Web 控制并持久化。
-- **专用手机页面**：`/mobile` 使用独立的会话、工作区、审批三 Tab 布局，不是桌面页面的压缩版本。
-- **实时同步与恢复**：设备注册、心跳、Session 状态、历史事件回放、实时 WebSocket 订阅和命令 ACK。
-- **Mac 上继续 Copilot 历史**：连接 Server 后，侧边栏展示这台 Mac 设备的 Copilot 历史记录。选中历史可只读查看仍保留的对话；选择“以历史创建新 Copilot 会话”会在原工作目录启动新会话，首次发送消息时附上最近的历史对话与工作记录。此操作不是重新连接旧进程，不会恢复尚在执行的工具或审批。历史必须尚未过期，且原工作目录和 Copilot CLI 在本机可用；如果缺少可用对话，界面会明确报错。Copilot CLI 本地 `session/load` 仍可用于继续其原生会话。
-- **Mac 项目调用**：连接 Server 后加载这台 Mac 的项目 API 会话，运行中与已结束的对话都会保留在“项目调用”；每 5 秒同步列表，本地运行中的会话优先显示，审批由 Mac 自动处理；历史可查看消息、思考、计划和工作记录，已结束的历史支持隐藏或永久删除。App 与 Server 需同时更新。
-- **第三方 AI 对话**：调用方通过 AI API 创建对话、串行提交轮次并主动关闭，不区分长／短模式。创建时可选 `timeoutSeconds`；到期后拒绝新轮次，已有任务完成再自动关闭。省略时无自动过期时间，单轮也没有默认时长限制。完整参数、响应、配置与可运行示例见 [第三方 AI 接入手册](docs/AI_API_INTEGRATION.md)，部署见 [AI 服务配置](docs/AI_SERVICE_SETUP.md)。
-- **Mac 会话侧栏**：用“当前 / 历史”Tab 切换本地会话与这台 Mac 的 Copilot 历史；已结束或失败的历史可按 Web 相同规则删除：默认仅隐藏，或勾选永久清除数据库关联数据。
-- **Mac 新建会话**：工作目录选择器每次从用户主目录（`~`）打开，不沿用上次浏览的路径；取消选择不会改变已选工作目录。
-- **两种安全部署边界**：Web 走 Cloudflare Access；Mac App 可选局域网直连，或通过公网配对 + 设备凭据连接。
-
-## 界面预览
-
-### Mac App：原生 ACP 会话与审批
-
-![TermRelay Mac App 中的 GitHub Copilot ACP 会话、思考过程、命令执行与审批](docs/images/mac-app-acp.jpg)
-
-### Web：远程终端与统一审批中心
-
-![TermRelay Web 三栏工作台中的会话列表、远程终端和审批中心](docs/images/web-workbench.jpg)
-
-## 界面结构
-
-### PC 工作台
-
-PC 页面采用三栏布局，尽量把宽屏空间用于实际工作：
-
-```text
-┌──────────────┬────────────────────────────────┬──────────────────┐
-│ 会话列表      │ 当前 PTY / ACP 会话             │ 统一审批中心      │
-│ 状态与工作区  │ 输出、消息、输入与会话操作       │ 通知开关与决策按钮 │
-└──────────────┴────────────────────────────────┴──────────────────┘
-```
-
-### 手机工作台
-
-手机页面固定占满动态视口，并适配 iPhone 安全区。顶部展示连接状态，底部 Tab 固定，中间内容独立滚动：
-
-```text
-┌─────────────────────────┐
-│ TermRelay          在线  │
-├─────────────────────────┤
-│                         │
-│   当前 Tab 的完整内容    │
-│                         │
-├─────────────────────────┤
-│  会话  │  工作区  │ 审批 │
-└─────────────────────────┘
-```
-
-## 架构
-
-```mermaid
-flowchart LR
-    subgraph Mac[macOS App]
-        PTY[Shell / Codex PTY]
-        ACP[Codex App Server / Copilot ACP / DSH ACP]
-        UI[SwiftUI + SwiftTerm]
-        ACP <-->|Unix Socket + WebSocket| UI
-        PTY <-->|PTY| UI
-    end
-
-    UI <-->|/ws/client 局域网| Server[NestJS Relay Server]
-    UI <-->|/ws/client-public 公网 + 设备凭据| Server
-    Server <--> DB[(MySQL)]
-    Server <-->|/ws/web + REST| Desktop[PC Web]
-    Server <-->|/ws/web + REST| Mobile[Mobile Web]
-    Server -. approval .-> Bark[Bark / iPhone]
-    Access[Cloudflare Access] --> Desktop
-    Access --> Mobile
-    Tunnel[Cloudflare Tunnel] --> Server
-```
-
-协议由 `packages/contracts` 中的 JSON Schema 定义，并生成 Swift 与 TypeScript 类型。Server 负责校验、持久化、订阅回放和命令路由；Mac 始终是本地进程和本地路径的所有者，Server 只保存不透明的工作区 ID。
-
-## 技术栈
-
-| 模块 | 技术 |
-|---|---|
-| macOS | Swift 6、SwiftUI、AppKit、SwiftTerm |
-| Server | Node.js 22、NestJS、Fastify、WebSocket、TypeORM |
-| Web | Vue 3、Pinia、Vue Router、xterm.js、Vite |
-| 数据与协议 | MySQL 8、JSON Schema、TypeScript / Swift 生成类型 |
-| 发布 | Docker、linux/arm64 离线包、Cloudflare Tunnel / Access |
-
-## 快速开始
-
-### 环境要求
-
-- macOS 14 或更高版本
-- Swift 6 / Xcode 16+（Mac 构建需要完整 Xcode 工具链，包含 `metal`；仅安装 Command Line Tools 不够。若新版 Xcode 提示缺少 Metal Toolchain，运行 `xcodebuild -downloadComponent MetalToolchain`）
-- Node.js 22+
-- pnpm（版本见根目录 `package.json`）
-- Docker Desktop（运行完整 Server + MySQL 环境）
-- 已安装并登录的 Codex CLI（使用 Codex PTY/ACP 时）
-- 已安装并执行过 `copilot login` 的 GitHub Copilot CLI（使用 Copilot ACP 时）
-- 已安装的 DeepSeek `dsh` CLI 与 DeepSeek API Key（使用 DSH ACP 时）
-
-### 1. 安装依赖并检查工程
+准备 macOS 14+、完整 Xcode 16+（含 Metal 工具链）、Node.js 22+、pnpm（版本见 `package.json`）和 Docker Desktop。要使用哪个 AI 助手，就先安装并配置好对应的 CLI。
 
 ```bash
 git clone https://github.com/wangweijia/TermRelay.git
 cd TermRelay
 pnpm install
-pnpm check
-```
 
-### 2. 启动开发 Server
-
-开发 Compose 会启动 MySQL、执行迁移，并在本机 `3007` 端口提供 Server 与 Web：
-
-```bash
+# 启动服务端，保持运行
 docker compose -f deploy/server/compose.dev.yaml up --build
 ```
 
-打开：
-
-- PC：`http://localhost:3007/`
-- 手机专用页面：`http://localhost:3007/mobile`
-- 健康检查：`http://localhost:3007/health`
-
-### 3. 启动 Mac App
+另开一个终端，启动 Mac 客户端：
 
 ```bash
 swift run --package-path apps/mac TermRelay
 ```
 
-App 默认连接 `ws://localhost:3007/ws/client`。也可以在设置页修改 Server WebSocket 地址、CLI 路径、代理、ACP 发送快捷键，并把 DSH API Key 安全保存到 macOS 钥匙串。
+在客户端新建会话，然后打开 **http://localhost:3007**，就能在浏览器中操作。
 
-新建会话时可以选择：
+手机页面是 `/mobile`。在外网使用前，请按下面的部署文档配置访问保护，**不要把本地开发服务直接暴露到公网**。
 
-```text
-终端（Shell）
-└── PTY
+## 详细说明
 
-Codex
-├── PTY
-└── ACP（Codex App Server）
+- [服务端部署](docs/SERVER_RELEASE.md) · [公网访问配置](docs/CLOUDFLARE_ACCESS.md) · [Mac 公网配对](docs/CLOUDFLARE_MAC_CLIENT_AUTH.md)
+- [Linux 安装与使用](apps/linux/README.md)
+- [让其他程序调用电脑上的 AI 助手](docs/AI_SERVICE_SETUP.md)
+- [开发环境](docs/ENVIRONMENTS.md) · [项目架构](docs/ARCHITECTURE.md)
 
-GitHub Copilot
-└── ACP（Copilot CLI ACP Server）
-
-DeepSeek DSH
-└── ACP（标准 ACP v1，无终端模式）
-```
-
-## 常用开发命令
-
-```bash
-# 完整协议校验、类型检查和 Mac 测试
-pnpm check
-
-# Server 测试
-pnpm --filter @termrelay/server test
-
-# Web 生产构建
-pnpm --filter @termrelay/web build
-
-# Mac 测试（自动携带 SwiftPM 缓存路径和 --disable-sandbox）
-pnpm mac:test
-
-# 构建全部 Node/Web 产物
-pnpm build
-
-# 各平台发布构建（需要对应的本机构建环境）
-pnpm release:mac
-pnpm release:linux
-pnpm release:server
-
-# 发布工具回归
-pnpm test:release
-```
-
-发布构建入口统一在根目录 `scripts/build-*-release.sh`，产物位于
-`dist/termrelay-mac/`、`dist/termrelay-linux/`、`dist/termrelay-server/`。
-Linux `.deb` 需要在匹配架构的 Linux 主机上构建；原 `pnpm linux:deb` 保留为兼容入口。
-目录归属规则见 [工程结构与边界](docs/ARCHITECTURE.md#代码与工具放置规则)。
-
-Server 测试自动发现根目录和各模块编译后的 `*.spec.js`，包含远程创建会话测试；
-MySQL 探针默认跳过，仅在显式设置 `TERMRELAY_RUN_AI_MYSQL_PROBE=1` 时执行。
-
-真实 Codex App Server 探针需要显式开启，以免普通测试意外启动本地 Agent，也不会发送真实模型请求：
-
-```bash
-TERMRELAY_RUN_CODEX_INTEGRATION=1 \
-swift test --disable-sandbox --package-path apps/mac \
-  --filter CodexAppServerClientTests/testRealFreshACPThroughUnixSocketWhenExplicitlyEnabled
-```
-
-真实 DSH ACP 启动探针只验证全新的隔离会话能够进入 ready 并正常关闭：
-
-```bash
-TERMRELAY_RUN_DSH_INTEGRATION=1 \
-swift test --disable-sandbox --package-path apps/mac \
-  --filter DSHACPClientTests/testRealDSHFreshSessionWhenExplicitlyEnabled
-```
-
-## 手机审批推送
-
-TermRelay 使用 Server 端 Bark 地址，设备 Key **不会**被打包进 Web 前端，只存在于服务器环境变量中。
-
-1. 在 iPhone 上安装 [Bark](https://apps.apple.com/app/bark-customed-notifications/id1403753865)，复制专属推送地址。
-2. 在 Server 环境文件中配置：
-
-   ```dotenv
-   BARK_PUSH_URL=https://api.day.app/your-device-key
-   ```
-
-3. 执行数据库迁移并重启 Server。
-4. 在 PC 或手机 Web 的审批中心打开“手机通知”开关（默认关闭，逐设备持久化）。
-
-仅本地手动审批会话的新审批推送会包含会话名称和审批内容摘要；Mac 的“自动审批通过”离线也能开启，连接后同步至 Server。项目 API 会话自动审批，不推送。**不要**提交包含真实设备 Key 的 `.env` 文件，仓库只应保留 `.env.*.example` 模板。
-
-## 生产部署
-
-### Server 离线发布
-
-```bash
-pnpm release:server --version 0.1.0
-```
-
-默认生成适用于 `linux/arm64` 的离线 Docker 发布包，不包含生产环境文件或数据库密码。完整的构建、上传、迁移和一键部署流程见 [Server 离线发布指南](docs/SERVER_RELEASE.md)。
-
-### 两种访问路径
-
-TermRelay 的 Web 和 Mac App 走两条独立的信任边界，可以按需只启用其中一种：
-
-```text
-浏览器（PC / 手机）→ Cloudflare Access → Tunnel → Server :3006      （必须经过身份验证）
-Mac App（局域网）  → 受信 LAN                → Server :3006/ws/client       （无需公网配置）
-Mac App（非局域网）→ Cloudflare Tunnel（不经过 Access）→ Server /ws/client-public
-                     （凭 TermRelay 自身签发的设备凭据鉴权，见下文）
-```
-
-只要你和 Mac 始终在同一局域网，第三条路径可以完全不配置。若需要在外网也能连接 Mac（例如 Mac 放在家里，人在公司或路上），才需要额外的公网配对入口。
-
-## Cloudflare 配置
-
-### 1. Web 入口（浏览器必经，始终需要 Access）
-
-把 Web 发布到 Cloudflare Tunnel，并用 **Cloudflare Access** 保护整个域名（含 `/ws/web` WebSocket 升级）：
-
-1. Zero Trust → Networks → Tunnels，为域名（例如 `termrelay.example.com`）添加 Public Hostname，指向 Server 的 `http://SERVER_LAN_IP:3006`。
-2. Zero Trust → Access → Applications，新建 Self-hosted Application 覆盖整个域名，配置身份策略（推荐：邮箱一次性验证码 + 单邮箱白名单）。
-3. **不要**为 `/ws/web` 单独添加 Bypass 策略——浏览器登录后靠 Access Cookie 完成鉴权，去掉保护会让终端和审批接口直接暴露在公网。
-
-验证：未登录访问域名应跳转到 Access 登录页；登录后页面能连上 `wss://.../ws/web` 并正常收发数据。详见 [Cloudflare Access 部署](docs/CLOUDFLARE_ACCESS.md)。
-
-### 2. Mac App 公网入口（可选，核心是关闭 Protect with Access）
-
-Mac App 不是浏览器，无法完成 Cloudflare Access 的交互式登录；如果给 `/ws/client-public` 也套上 Access，Mac 永远连不上。**TermRelay 自己实现了一套配对 + 设备凭据机制**来承担这部分鉴权责任，所以这个入口必须绕开 Access，而不是复用 Access 会话：
-
-1. 在同一个 Tunnel 上，为以下路径新增 Public Hostname / 路由（同域名不同 path 即可）：
-
-   ```text
-   POST /api/client-pairings          # 创建配对
-   POST /api/client-pairings/token    # 轮询兑换设备凭据
-   WSS  /ws/client-public              # Mac 公网 WebSocket
-   ```
-
-2. 打开这些路由各自的 **Public Hostname 设置**，找到 **“Protect with Access”** 开关，**关闭它**（Toggle Off）。这一步是整个方案能否工作的核心：开着 Access，Mac 的设备凭据请求会先被 Cloudflare 拦成登录页，永远走不到 TermRelay Server。
-3. `/client/authorize`（浏览器批准配对的页面）和 `/api/client-approvals`（提交批准）**保持** Access 保护，不要关闭——批准动作必须由已登录用户在浏览器里完成。
-4. 建议单独为这两个公开接口配置 Cloudflare Rate Limiting；Server 自身也已内置限流。
-
-配置完成后，在 Mac App 设置页：
-
-1. 点击「使用公网地址」，Server URL 会自动填入 `wss://你的域名/ws/client-public`。
-2. 点击「授权此 Mac」，App 会打开系统浏览器跳转到 `/client/authorize?code=...`。
-3. 在浏览器完成 Cloudflare Access 登录后，确认页面上显示的设备信息无误并批准。
-4. 回到 Mac App，几秒内会显示「已授权」，凭据保存在 macOS 钥匙串，之后重启 App 会自动重连。
-
-设备凭据可以在 Web 设置页随时撤销；撤销后 Mac 上已建立的连接会被主动断开，需要重新走一次授权流程。设计细节、数据模型和失败恢复策略见 [Mac Client 公网配对与认证方案](docs/CLOUDFLARE_MAC_CLIENT_AUTH.md)。
-
-> 不确定是否需要这一步？只要你只在同一个局域网内使用 Mac App，跳过整节内容即可，Web 入口的 Access 配置不受影响。
-
-## 环境变量参考
-
-### Server（`apps/server/.env` 或 `deploy/server/.env.production`）
-
-| 变量 | 默认值 / 示例 | 说明 |
-|---|---|---|
-| `PORT` / `SERVER_PORT` | `3007`（开发）/ `3006`（生产） | Server 监听端口 |
-| `HOST` / `SERVER_BIND_ADDRESS` | `0.0.0.0` | 监听地址 |
-| `PUBLIC_ORIGIN` | `https://termrelay.example.com` | 浏览器实际访问的 HTTPS Origin，用于生成配对批准链接；**必填** |
-| `CLIENT_CREDENTIAL_LIFETIME_MS` | 留空 | Mac 设备凭据的自动过期时间；留空表示只在被主动撤销时失效 |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | 见 `.env.example` | MySQL 连接信息 |
-| `DB_MIGRATION_USER` / `DB_MIGRATION_PASSWORD` | 仅生产 | 只用于一次性 migration，不留在长期运行容器中 |
-| `BARK_PUSH_URL` | `https://api.day.app/your-device-key` | 手机审批推送地址，留空则不推送 |
-| `TERMINAL_EVENT_TTL_HOURS` | `24` | 终端事件回放的保留时长 |
-| `ACP_EVENT_TTL_HOURS` | `720` | ACP 对话与工具事件的保留时长（小时）；旧版本已过期的内容无法找回 |
-| `WEB_MAX_SESSION_SUBSCRIPTIONS` | `16` | 单个 Web 连接可同时订阅的会话数上限 |
-| `WEB_MAX_REPLAY_EVENTS` | `10000` | 单次历史回放的事件数上限 |
-| `WEB_SOCKET_PING_INTERVAL_MS` | `25000` | `/ws/web` 心跳间隔；如 Cloudflare 空闲策略变化可调整 |
-| `COMMAND_ACK_TIMEOUT_MS` | `15000` | 命令确认超时 |
-| `CLIENT_HEARTBEAT_INTERVAL_MS` / `CLIENT_HEARTBEAT_TIMEOUT_MS` | `15000` / `45000` | `/ws/client` 心跳与超时 |
-
-完整模板见 [`apps/server/.env.example`](apps/server/.env.example)、[`deploy/server/.env.production.example`](deploy/server/.env.production.example)。数据库、端口分配和迁移规则见 [开发与生产环境](docs/ENVIRONMENTS.md)。
-
-### 测试专用（不影响正常构建/部署）
-
-| 变量 | 用途 |
-|---|---|
-| `TERMRELAY_RUN_CODEX_INTEGRATION=1` | 显式开启才会启动真实 Codex App Server 探针 |
-| `TERMRELAY_RUN_DSH_INTEGRATION=1` | 显式开启才会启动真实 DSH ACP 探针 |
-
-普通 `pnpm check` / `pnpm mac:test` 不会设置以上变量，不会启动真实 Agent 或发送模型请求。
-
-## 安全说明
-
-- TermRelay 可以执行终端输入、停止进程并批准 Agent 操作；请把它视为高权限开发工具。
-- 公网部署前必须为浏览器入口增加可靠的身份边界（Cloudflare Access），为 Mac 公网入口关闭 Access 并依赖 TermRelay 自身的设备配对凭据。
-- Bark URL、数据库密码、Cloudflare 相关配置等必须放在未提交的环境文件或 Secret 管理系统中。
-- 清理逻辑只处理能够证明由 TermRelay 创建的 Runtime、Socket、进程和 DSH 临时目录，不扫描或终止无关 Agent 实例。
-- DSH API Key 只存储在 macOS 钥匙串并注入本地 DSH 子进程，不进入 TermRelay Server、Web、会话事件或日志。
-- Mac 设备凭据只授权公网 WebSocket 连接，不赋予浏览器管理接口权限；凭据可随时在 Web 端撤销。
-- ACP 与 PTY 是严格分离的协议路径；ACP 不接受终端输入/resize，PTY 不接受结构化审批命令。
-
-## 仓库布局
-
-```text
-apps/
-├── mac/                  SwiftUI macOS App、PTY 与 ACP Runtime
-├── server/               NestJS API、WebSocket、持久化与通知
-└── web/                  Vue PC / Mobile Web
-packages/
-└── contracts/            JSON Schema 与生成类型
-deploy/server/            Docker、Compose 和离线发布配置
-docs/                     架构、决策与部署文档
-scripts/                  校验和发布脚本
-```
-
-## 开发文档
-
-- [整体架构](docs/ARCHITECTURE.md)
-- [局域网 AI 服务设计](docs/AI_SERVICE_DESIGN.md)
-- [AI 服务配置与调用](docs/AI_SERVICE_SETUP.md)
-- [跨 Provider Skill 管理 TODO](docs/SKILL_MANAGEMENT_TODO.md)
-- [invest AI 接入待办（待确认）](docs/INVEST_AI_SERVICE_TODO.md)
-- [Codex App Server 架构决策](docs/ADR-001-CODEX-APP-SERVER.md)
-- [ACP 原生 UI 重构计划与完成记录](docs/CODEX_APP_SERVER_NATIVE_UI_REFACTOR_PLAN.md)
-- [结构化 Agent 适配层](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)
-- [开发与生产环境](docs/ENVIRONMENTS.md)
-- [Cloudflare Access 部署（Web 入口）](docs/CLOUDFLARE_ACCESS.md)
-- [Mac Client 公网配对与认证方案](docs/CLOUDFLARE_MAC_CLIENT_AUTH.md)
-- [Server 离线发布](docs/SERVER_RELEASE.md)
-- [可行性分析](docs/FEASIBILITY.md)
-
-## 当前阶段
-
-TermRelay 目前是可运行的早期项目，适合个人环境试用和继续开发。协议、数据迁移和核心交互均有自动化检查，但正式对外发布前仍建议补齐：
-
-- 正式签名、公证与自动更新的 macOS 发布流程
-- Web 应用层更完整的多用户权限模型
-- 更完整的事件级确认、断线补传与长期数据保留策略
-- 多用户、多设备隔离与审计策略
-- UI 端到端测试和公开演示素材
-
-## 参与贡献
-
-Issue、设计讨论和 Pull Request 都很欢迎。提交前请运行：
-
-```bash
-pnpm check
-pnpm --filter @termrelay/server test
-pnpm --filter @termrelay/web build
-```
-
-如果要新增 Agent Provider，请先阅读 [结构化 Agent 适配层设计](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)。
-
-## License
-
-仓库目前尚未指定开源许可证。在正式推广或接受外部贡献前，请先选择并添加合适的许可证。
+目前是适合个人试用的早期项目，尚未指定开源许可证。
