@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
 import { aiConversationRequestSchema, aiTurnRequestSchema } from '@termrelay/contracts';
 import { createHash } from 'node:crypto';
+import { canonicalJson } from '../common/json';
 
 const ajv = new Ajv2020({ strict: false, allErrors: false, validateFormats: false });
 const validators = { conversation: ajv.compile(aiConversationRequestSchema), turn: ajv.compile(aiTurnRequestSchema) };
@@ -39,12 +40,7 @@ export function compileOutput(schema: Record<string,unknown>): ValidateFunction 
 }
 
 export function fingerprint(value: unknown): string {
-  function ordered(v: unknown): unknown {
-    if (Array.isArray(v)) return v.map(ordered);
-    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).sort(([a],[b]) => a.localeCompare(b)).map(([k,x]) => [k,ordered(x)]));
-    return v;
-  }
-  return createHash('sha256').update(JSON.stringify(ordered(value))).digest('hex');
+  return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
 export function extractResult(text: string, output: import('@termrelay/contracts').AiOutput): unknown {

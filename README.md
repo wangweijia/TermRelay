@@ -236,6 +236,9 @@ pnpm mac:test
 pnpm build
 ```
 
+Server 测试自动发现根目录和各模块编译后的 `*.spec.js`，包含远程创建会话测试；
+MySQL 探针默认跳过，仅在显式设置 `TERMRELAY_RUN_AI_MYSQL_PROBE=1` 时执行。
+
 真实 Codex App Server 探针需要显式开启，以免普通测试意外启动本地 Agent，也不会发送真实模型请求：
 
 ```bash

@@ -11,7 +11,7 @@ test('registers a device, updates heartbeats, and marks disconnect offline', () 
   registry.connect(client, 1_000);
   const registered = registry.register(client, 'device-a', registration(), 2_000);
 
-  assert.equal(registry.getConnectionState(client), 'registered');
+  assert.equal(registry.isRegisteredClient(client, 'device-a'), true);
   assert.equal(registry.getClient('device-a'), client);
   assert.equal(registered.presence, 'online');
 

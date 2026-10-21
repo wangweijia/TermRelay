@@ -1,8 +1,8 @@
 import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import type { DeviceHeartbeatPayload, DeviceRegisterPayload } from '@termrelay/contracts';
 import type WebSocket from 'ws';
+import { readPositiveInteger } from '../common/config';
 
-export type ClientConnectionState = 'connected' | 'registered';
 export type DevicePresence = 'online' | 'offline';
 
 export interface DeviceSnapshot {
@@ -21,7 +21,6 @@ export interface DeviceSnapshot {
 
 interface ClientConnection {
   client: WebSocket;
-  state: ClientConnectionState;
   connectedAtMs: number;
   lastSeenAtMs: number;
   deviceId?: string;
@@ -72,7 +71,6 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
   connect(client: WebSocket, nowMs = Date.now()): void {
     this.connections.set(client, {
       client,
-      state: 'connected',
       connectedAtMs: nowMs,
       lastSeenAtMs: nowMs,
     });
@@ -112,7 +110,6 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
       lastSeenAt: registeredAt,
     };
 
-    connection.state = 'registered';
     connection.deviceId = deviceId;
     connection.lastSeenAtMs = nowMs;
     this.clientsByDeviceId.set(deviceId, client);
@@ -130,7 +127,6 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     const connection = this.connections.get(client);
     if (
       !connection ||
-      connection.state !== 'registered' ||
       connection.deviceId !== deviceId ||
       this.clientsByDeviceId.get(deviceId) !== client
     ) {
@@ -168,7 +164,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     const expired: ExpiredConnection[] = [];
     for (const connection of [...this.connections.values()]) {
       if (
-        connection.state === 'connected' &&
+        connection.deviceId === undefined &&
         nowMs - connection.connectedAtMs >= this.registrationTimeoutMs
       ) {
         expired.push({ reason: 'registration_timeout' });
@@ -178,7 +174,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
       }
 
       if (
-        connection.state === 'registered' &&
+        connection.deviceId !== undefined &&
         nowMs - connection.lastSeenAtMs >= this.heartbeatTimeoutMs
       ) {
         expired.push({
@@ -192,10 +188,6 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
     return expired;
   }
 
-  getConnectionState(client: WebSocket): ClientConnectionState | undefined {
-    return this.connections.get(client)?.state;
-  }
-
   getDeviceId(client: WebSocket): string | undefined {
     return this.connections.get(client)?.deviceId;
   }
@@ -207,8 +199,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
   isRegisteredClient(client: WebSocket, deviceId: string): boolean {
     const connection = this.connections.get(client);
     return (
-      connection?.state === 'registered' &&
-      connection.deviceId === deviceId &&
+      connection?.deviceId === deviceId &&
       this.clientsByDeviceId.get(deviceId) === client
     );
   }
@@ -252,11 +243,4 @@ function safeClose(client: WebSocket, code: number, reason: string): void {
   } catch {
     // The socket may already be closing; registry cleanup has still completed.
   }
-}
-
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

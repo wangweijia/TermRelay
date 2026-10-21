@@ -57,6 +57,7 @@ function parseHistoryCursor(cursor: string): { updatedAt: Date; id: string } | u
 
 @WebSocketGateway({ path: '/ws/client' })
 export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  protected readonly isPublicGateway: boolean = false;
   private readonly logger = new Logger(ClientGateway.name);
 
   constructor(
@@ -72,7 +73,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   handleConnection(client: WebSocket): void {
-    if (this.isPublicGateway() && !this.authorizations?.get(client)) {
+    if (this.isPublicGateway && !this.authorizations?.get(client)) {
       client.close(1008, 'unauthorized');
       return;
     }
@@ -164,7 +165,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.message.type === 'ai.capabilities' || result.message.type === 'ai.update') {
-      if (this.isPublicGateway()) return;
+      if (this.isPublicGateway) return;
       if (result.message.type === 'ai.capabilities') this.ai?.publishCapabilities(client,result.message.envelope.deviceId,result.message.envelope.payload);
       else await this.ai?.update(client,result.message.envelope.deviceId,result.message.envelope.payload);
       return;
@@ -387,10 +388,6 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return this.handleSessionEvent(client, result.message);
-  }
-
-  private isPublicGateway(): boolean {
-    return this.constructor.name === 'PublicClientGateway';
   }
 
   private async handleSessionEvent(

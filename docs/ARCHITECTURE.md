@@ -22,6 +22,7 @@ termrelay/
 │   ├── server/
 │   │   └── src/
 │   │       ├── database/             # TypeORM 配置与显式 migration
+│   │       ├── common/               # 环境配置读取与规范 JSON 序列化
 │   │       ├── devices/              # 设备状态持久化与查询
 │   │       ├── health/               # 存活检查
 │   │       ├── realtime/             # /ws/client 与 /ws/web
@@ -112,6 +113,11 @@ Server / 设备双重去重，相同请求不重投。Server 重启、断线或 
 ACP Web 的工作区 Markdown 文件预览使用独立的 HTTP → Server → Mac WebSocket 请求/响应链路，
 不经过 PTY 命令或持久化的会话事件。Server 用会话 ID 路由到设备，只临时转发文件内容；
 Mac 同时验证会话、工作区 ID、真实路径边界和文件大小，拒绝工作区外的文件。
+
+Server 的设备端与浏览器端校验器共用 `ProtocolSchemaValidator` 校验信封、版本、格式与 payload schema，
+各自保留允许的消息类型、上下文和语义约束，不合并 PTY / ACP 路由。
+公网设备网关显式声明自身身份，不依赖类名识别；仍要求设备凭据，且不接收 AI 能力发布。
+会话事件去重和 AI 请求指纹共用递归排序的 JSON 序列化，数组顺序保持不变。
 
 ## Codex 集成决策
 

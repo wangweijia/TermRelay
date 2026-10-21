@@ -7,7 +7,7 @@ import { AIRepository } from './ai.repository';
 import { AIProjectKeyEntity, AIResourceEntity, type AIResource } from './ai.entity';
 import { extractResult, fingerprint, validateRequest } from './ai.validation';
 
-export const isTerminal = (r: AIResource): boolean => ['closed','succeeded','failed','cancelled'].includes(r.status);
+const isTerminal = (r: AIResource): boolean => ['closed','succeeded','failed','cancelled'].includes(r.status);
 interface AICommand { deviceId: string; type: string; payload: unknown }
 
 @Injectable()

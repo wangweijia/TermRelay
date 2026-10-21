@@ -2,20 +2,10 @@ import { Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/comm
 import type { CommandAckPayload, Envelope } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
+import { readPositiveInteger } from '../common/config';
 import { SessionsService } from '../sessions/sessions.service';
 import { SessionStartService } from '../sessions/session-start.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
-
-export type RemoteCommandType =
-  | 'terminal.input'
-  | 'terminal.resize'
-  | 'session.interrupt'
-  | 'session.stop'
-  | 'tool.turn.start'
-  | 'tool.config.set'
-  | 'tool.turn.interrupt'
-  | 'tool.approval.resolve'
-  | 'tool.user-input.resolve';
 
 export interface CommandRouteError {
   ok: false;
@@ -32,8 +22,7 @@ interface PendingCommand {
   browser: WebSocket;
   deviceId: string;
   sessionId: string;
-  commandId: string;
-  type: RemoteCommandType;
+  isSessionStop: boolean;
   timer: NodeJS.Timeout;
 }
 
@@ -56,7 +45,7 @@ export class CommandRelayService implements OnModuleDestroy {
 
   async route(
     browser: WebSocket,
-    envelope: Envelope<Record<string, unknown>>,
+    envelope: Envelope<unknown>,
   ): Promise<{ ok: true } | CommandRouteError> {
     const sessionId = envelope.sessionId!;
     const commandId = normalizeCommandId(envelope.commandId!);
@@ -130,8 +119,7 @@ export class CommandRelayService implements OnModuleDestroy {
       browser,
       deviceId: envelope.deviceId,
       sessionId,
-      commandId,
-      type: envelope.type as RemoteCommandType,
+      isSessionStop: envelope.type === 'session.stop',
       timer,
     });
 
@@ -170,7 +158,7 @@ export class CommandRelayService implements OnModuleDestroy {
     if (envelope.payload.status !== 'accepted') {
       clearTimeout(pending.timer);
       this.pending.delete(commandId);
-      if (pending.type === 'session.stop' && envelope.payload.status === 'completed') {
+      if (pending.isSessionStop && envelope.payload.status === 'completed') {
         await this.sessions.finishSession(pending.sessionId);
       }
     }
@@ -206,13 +194,6 @@ function send(client: WebSocket, envelope: Envelope<CommandAckPayload>): void {
   } catch {
     // The browser may have disconnected while the command was in flight.
   }
-}
-
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function normalizeCommandId(commandId: string): string {
