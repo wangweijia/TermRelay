@@ -97,7 +97,8 @@ sudo apt-get install "./apps/linux/dist/termrelay-linux_0.1.0_$(dpkg --print-arc
 termrelay-agent --version
 ```
 
-构建流程编译应用与 supervisor，用 pnpm deploy 收集生产依赖，并复制当前 Node 可执行文件和
+构建流程编译应用与 supervisor，在临时隔离 workspace 用 pnpm deploy 收集生产依赖，
+避免生产安装设置影响开发工作区；再复制当前 Node 可执行文件和
 匹配的 LICENSE；默认从 Node 安装根目录取 LICENSE，可用 `TERMRELAY_NODE_LICENSE` 指定匹配文件。
 不在构建脚本里下载未校验的运行时。构建机 Node / OS / 架构必须匹配，
 拒绝依赖外部 libnode / OpenSSL / ICU 的系统动态 Node 构建。
@@ -120,6 +121,8 @@ termrelay-agent --version
 原生模块与 Node 运行时不跨架构复用。系统仍需 glibc、libstdc++、libgcc 等基础库，
 不是静态链接、任意 Linux 通用的单文件。卸载不删除用户配置。
 Node 安全更新由后续 Agent 发布更新负责。
+覆盖 22.04 / 24.04 的正式通用包应在较旧的 22.04 构建，再到两版系统验证；
+24.04 本机构建产物不默认承诺向下兼容，CI 产物按构建 OS 分开标记。
 
 ## systemd 用户服务
 

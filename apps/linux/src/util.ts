@@ -1,7 +1,7 @@
-import { constants, accessSync, statSync } from 'node:fs';
+import { constants, accessSync, statSync, readFileSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
-export const VERSION = '0.1.0';
+export const VERSION = text(record(JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'))).version, 128);
 export const MAX_MESSAGE = 1024 * 1024;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type JsonObject = Record<string, unknown>;

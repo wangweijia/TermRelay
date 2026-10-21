@@ -10,6 +10,7 @@ import { CodexRuntime, type RpcConnection, type RpcFactory } from '../src/codex.
 import type { ToolEventPayload } from '@termrelay/contracts';
 import type { JsonObject } from '../src/util.js';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 
 export const fixture = join(__dirname, 'fixtures/fake-codex.js');
 export const fixtureClient: RpcFactory = (_argv, cwd, receive, fail) => new JsonLineClient([process.execPath, fixture], cwd, receive, fail);
@@ -135,4 +136,27 @@ test('Linux subreaper cleans detached provider descendants on stdin EOF', { skip
     pid = result.pid;
   } finally { await client.close(); }
   await until(() => !existsSync(`/proc/${pid}/stat`) || readFileSync(`/proc/${pid}/stat`, 'utf8').split(' ')[2] === 'Z');
+});
+
+test('Linux cleans detached descendants after the owning Node process crashes', { skip: process.platform !== 'linux' }, async () => {
+  const owner = spawnSync(process.execPath, [join(__dirname, 'fixtures/abrupt-owner.js')], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(owner.signal, 'SIGKILL', owner.stderr);
+  const { pid } = JSON.parse(owner.stdout) as { pid: number };
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  await until(() => !existsSync(`/proc/${pid}/stat`) || readFileSync(`/proc/${pid}/stat`, 'utf8').split(' ')[2] === 'Z');
+});
+
+test('questions reject malformed booleans and expired answers', async () => {
+  const client = new MemoryClient(), events: ToolEventPayload[] = [];
+  const runtime = new CodexRuntime('unused', tmpdir(), event => events.push(event), () => client);
+  runtime.threadId = 'thread'; runtime.turnId = 'turn';
+  const request = (questions: unknown) => runtime.receive({
+    id: 20, method: 'item/tool/requestUserInput', params: { threadId: 'thread', turnId: 'turn', itemId: 'i', questions },
+  });
+  await assert.rejects(request([{ id: 'q', header: '', question: '?', isSecret: null }]));
+  assert.equal(events.length, 0);
+  await request([{ id: 'q', header: '', question: '?' }]);
+  const id = runtime.questions.keys().next().value!;
+  runtime.questions.get(id)!.deadline = 0;
+  await assert.rejects(runtime.command('tool.user-input.resolve', { requestId: id, turnId: 'turn', answers: { q: ['yes'] } }, randomUUID()), /expired/);
 });

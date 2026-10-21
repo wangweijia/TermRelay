@@ -12,6 +12,7 @@ import { CodexRuntime } from '../src/codex.js';
 import { JsonLineClient } from '../src/rpc.js';
 import { RelayConnection } from '../src/transport.js';
 import { record } from '../src/util.js';
+import { createServer } from 'node:http';
 
 async function until(condition: () => boolean): Promise<void> {
   const end = Date.now() + 7000;
@@ -74,7 +75,7 @@ test('headless Agent -> real WebSocket -> synthetic Codex -> ordered events/ACK 
   assert.equal(JSON.stringify(status).includes('synthetic prompt'), false);
 });
 
-test('transport uses Authorization header and rejects unauthorized without leaking response body', async t => {
+test('transport uses Authorization header instead of URL credentials', async t => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
@@ -84,7 +85,26 @@ test('transport uses Authorization header and rejects unauthorized without leaki
   const connection = new RelayConnection(`ws://127.0.0.1:${address.port}/ws/client`, 'synthetic-token', event => {
     if (event.kind === 'connected') connected = true;
   });
+
   connection.start();
   try { await until(() => connected && !!received); assert.equal(received, 'Bearer synthetic-token'); }
   finally { connection.close(); }
+});
+
+test('authorization failures stop retries without exposing handshake bodies', async t => {
+    const server = createServer((_request, response) => {
+      response.writeHead(401); response.end('synthetic-sensitive-body');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+    const address = server.address(); assert.ok(address && typeof address === 'object');
+    const errors: string[] = [];
+    const connection = new RelayConnection(`ws://127.0.0.1:${address.port}/ws/client`, 'synthetic-token', event => {
+      if (event.kind === 'fatal') errors.push(event.error.message);
+    });
+    connection.start();
+    try {
+      await until(() => errors.length > 0);
+      assert.equal(errors.length, 1); assert.equal(errors.join('').includes('synthetic-sensitive-body'), false);
+    } finally { connection.close(); }
 });

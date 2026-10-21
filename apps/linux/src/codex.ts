@@ -156,11 +156,10 @@ export class CodexRuntime implements AgentRuntime {
         }
         const answers = record(payload.answers);
         if (Object.keys(answers).length !== pending.ids.length || pending.ids.some(key => !Object.hasOwn(answers, key))) throw new Error('Answers must cover every question');
-        const response: JsonObject = {};
-        for (const [key, values] of Object.entries(answers)) {
+        const response = Object.fromEntries(Object.entries(answers).map(([key, values]) => {
           if (!Array.isArray(values) || !values.length) throw new Error('Invalid answer');
-          response[key] = { answers: values.map(value => text(value, 65536, 0)) };
-        }
+          return [key, { answers: values.map(value => text(value, 65536, 0)) }];
+        }));
         this.questions.delete(id);
         await this.client.respond(pending.rpcId, { answers: response });
         this.emit('user-input.resolved', { requestId: id, turnId: pending.turnId, answers }, pending.turnId, pending.itemId);
@@ -240,7 +239,8 @@ export class CodexRuntime implements AgentRuntime {
       const questions = params.questions.map(input => {
         const q = record(input), options = q.options ?? [];
         if (!Array.isArray(options)) throw new Error('Invalid question options');
-        const allowsOther = q.isOther ?? !options.length, isSecret = q.isSecret ?? false;
+        const allowsOther = q.isOther === undefined ? !options.length : q.isOther;
+        const isSecret = q.isSecret === undefined ? false : q.isSecret;
         if (typeof allowsOther !== 'boolean' || typeof isSecret !== 'boolean') throw new Error('Invalid question metadata');
         return {
           id: text(q.id), header: text(q.header, 256, 0), question: text(q.question, 65536, 0),
@@ -249,7 +249,7 @@ export class CodexRuntime implements AgentRuntime {
         };
       });
       const ids = questions.map(q => q.id);
-      const blocking = params.isBlocking ?? true;
+      const blocking = params.isBlocking === undefined ? true : params.isBlocking;
       if (new Set(ids).size !== ids.length || typeof blocking !== 'boolean') throw new Error('Invalid question IDs / blocking state');
       const timeout = params.autoResolutionMs === undefined ? undefined : integer(params.autoResolutionMs, 1, 86400000);
       const requestId = randomUUID();
@@ -275,7 +275,7 @@ export class CodexRuntime implements AgentRuntime {
       const available = params.availableDecisions ?? Object.keys(mapping);
       if (!Array.isArray(available)) throw new Error('Invalid approval decisions');
       for (const decision of available) {
-        if (typeof decision === 'string' && mapping[decision]) results.set(mapping[decision], { decision });
+        if (typeof decision === 'string' && Object.hasOwn(mapping, decision)) results.set(mapping[decision]!, { decision });
       }
       if (kind === 'command' && Array.isArray(params.proposedExecpolicyAmendment) && params.proposedExecpolicyAmendment.length) {
         results.set('allowPolicy', { decision: { acceptWithExecpolicyAmendment: { execpolicy_amendment: params.proposedExecpolicyAmendment } } });

@@ -51,11 +51,11 @@ jobs:
           sudo apt-get install -y ./apps/linux/dist/termrelay-linux_0.1.0_amd64.deb
           cd /tmp
           # Restrict PATH: no setup-node, pnpm or Python is needed by the installed CLI.
-          PATH=/usr/bin:/bin /usr/bin/termrelay-agent --help
-          PATH=/usr/bin:/bin /usr/bin/termrelay-linux configure --server ws://localhost:3007/ws/client --name CI
-          PATH=/usr/bin:/bin /usr/bin/termrelay-agent workspace add /tmp --name temporary
-          PATH=/usr/bin:/bin /usr/bin/termrelay-agent session add --workspace temporary --provider shell
-          PATH=/usr/bin:/bin /usr/bin/termrelay-agent doctor
+          PATH=/nonexistent /usr/bin/termrelay-agent --help
+          PATH=/nonexistent /usr/bin/termrelay-linux configure --server ws://localhost:3007/ws/client --name CI
+          PATH=/nonexistent /usr/bin/termrelay-agent workspace add /tmp --name temporary
+          PATH=/nonexistent /usr/bin/termrelay-agent session add --workspace temporary --provider shell
+          PATH=/nonexistent /usr/bin/termrelay-agent doctor
           test -f /usr/lib/systemd/user/termrelay-agent.service
       - uses: actions/upload-artifact@v4
         with:

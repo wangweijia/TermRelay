@@ -38,9 +38,12 @@ static int terminate_owned(pid_t child, int sig) {
             if (errno == ENOENT || errno == ESRCH || errno == EACCES) continue;
             closedir(directory); free(entries); return -1;
         }
-        char *read = fgets(line, sizeof(line), file);
+        size_t size = fread(line, 1, sizeof(line) - 1, file);
+        int read_error = ferror(file) ? errno : 0;
         fclose(file);
-        char *tail = read ? strrchr(line, ')') : NULL;
+        if (!size && (read_error == 0 || read_error == ENOENT || read_error == ESRCH)) continue;
+        line[size] = '\0';
+        char *tail = size ? strrchr(line, ')') : NULL;
         char state; int parent;
         if (!tail || sscanf(tail + 1, " %c %d", &state, &parent) != 2) {
             closedir(directory); free(entries); return -1;
@@ -65,7 +68,10 @@ static int terminate_owned(pid_t child, int sig) {
     } while (changed);
     int result = 0;
     for (size_t i = 0; i < count; i++) {
-        if (entries[i].owned && kill(entries[i].pid, sig) && errno != ESRCH) result = -1;
+        if (!entries[i].owned) continue;
+        if (kill(entries[i].pid, sig)) {
+            if (errno != ESRCH) { result = -1; break; }
+        } else result++;
     }
     free(entries);
     (void)child;
@@ -161,13 +167,20 @@ int main(int argc, char **argv) {
         if (fds[1].revents & (POLLERR | POLLHUP)) break;
     }
     free(buffer); close(input[1]);
-    if (terminate_owned(child, SIGTERM)) failed = 1;
+    if (terminate_owned(child, SIGTERM) < 0) failed = 1;
     usleep(200000);
-    if (terminate_owned(child, SIGKILL)) failed = 1;
+    if (terminate_owned(child, SIGKILL) < 0) failed = 1;
     if (!reaped) {
         while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
     }
-    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+    int remaining = 0;
+    for (int attempt = 0; attempt < 20; attempt++) {
+        while (waitpid(-1, NULL, WNOHANG) > 0) {}
+        remaining = terminate_owned(child, SIGKILL);
+        if (remaining <= 0) break;
+        usleep(50000);
+    }
+    if (remaining != 0) failed = 1;
     if (failed) { fprintf(stderr, "Agent supervisor/ownership cleanup failed\n"); return 1; }
     return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 }
