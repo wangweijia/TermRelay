@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isErrno, record, serverURL, text, UUID } from './util.js';
 
-export interface Workspace { id: string; name: string; path: string }
+export interface Workspace { id: string; name: string; path: string; remoteStartAllowed?: boolean }
 export interface Profile { id: string; workspaceId: string; provider: 'shell' | 'codex' }
 export interface Config {
   version: 1; deviceId: string; name: string; serverURL: string;
@@ -36,7 +36,8 @@ export function validateConfig(input: unknown): Config {
     const w = record(input);
     const path = text(w.path, 4096);
     if (!isAbsolute(path)) throw new Error('Workspace path must be absolute');
-    return { id: id(w.id), name: text(w.name, 128), path };
+    if (w.remoteStartAllowed !== undefined && typeof w.remoteStartAllowed !== 'boolean') throw new Error('Invalid remote workspace authorization');
+    return { id: id(w.id), name: text(w.name, 128), path, ...(w.remoteStartAllowed !== undefined ? { remoteStartAllowed: w.remoteStartAllowed } : {}) };
   });
   if (new Set(workspaces.map(w => w.id)).size !== workspaces.length
       || new Set(workspaces.map(w => w.name)).size !== workspaces.length

@@ -86,10 +86,20 @@ Linux 实机 / 真实 Provider 兼容性验收与完整功能对齐仍待完成�
 Mac 新会话同时进入本地 UI；Linux 无本地 UI 也应完成同样的交互闭环。
 不改变普通会话与外部 AI API 会话各自的归属、审批和生命周期规则。
 
-现有 `session.start` 仅有 PTY 导向的 Schema 草案，Mac / Linux 工作区当前均未开放远程启动，
-尚不能视为端到端已实现。需要统一补齐模式校验、幂等创建、结果关联、
-启动失败和未知结果处理，不能复用“目标会话必须已存在”的命令路由而跳过创建阶段。
-计划和完成标准见 [U-023 / U-024](UBUNTU_APP_TODO.md)。
+现已实现独立的 `/api/session-starts` 创建链路，不能复用“目标会话必须已存在”的命令路由：
+工作区发布 `remoteStartAllowed` 和可启动工具 / 模式的 `launchOptions`，旧客户端不公布该列表则不开放。
+Mac 在新建会话界面逐目录授权并保存在本地偏好；Linux 通过 CLI 配置，缺省均不授权。
+Server 新增显式迁移，工作区只持久化能力元数据，`session_starts` 保存创建参数及结果，
+不保存工作目录真实路径。Web 提交 UUID 请求 ID，Server 先持久化，再以相同 session ID / command ID
+定向发送 `session.start`；PTY 必填尺寸，ACP 不接受尺寸，创建不提交首轮，不允许指定本地路径 / 脚本。
+设备检查本地授权、路径、能力和容量后启动，Runtime 就绪才上报 `session.started` 与最终 ACK。
+Mac PTY 不依赖本地视图出现才启动，ACP / PTY 复用本地会话工厂，并进入原有侧栏；
+Linux 支持零启动配置等待远程请求。默认手动审批，不改变外部 AI API 会话语义。
+Server / 设备双重去重，相同请求不重投。Server 重启、断线或 60 秒后未知结果只允许查询对账，
+不把 ACK 接收当成 Provider 就绪，不自动恢复原进程；迟到的会话注册可将未知状态对账为已创建。
+创建结果持久保留以维持幂等，设备内最多保存 4096 个创建去重记录，达到上限明确拒绝，
+不会通过淘汰记录来重新执行。使用与目标验收见 [Linux Agent](../apps/linux/README.md#通过-web--手机远程创建)
+和 [U-023 / U-024](UBUNTU_APP_TODO.md)。
 
 ACP Web 的工作区 Markdown 文件预览使用独立的 HTTP → Server → Mac WebSocket 请求/响应链路，
 不经过 PTY 命令或持久化的会话事件。Server 用会话 ID 路由到设备，只临时转发文件内容；

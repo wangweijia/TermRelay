@@ -4,12 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { ToolEventPayload } from '@termrelay/contracts';
 import { MAX_BUFFER, Protocol, type Command, type Packet } from '../src/protocol.js';
 
-export function serverPacket(deviceId: string, type: string, payload: unknown, sessionId?: string, commandId?: string): Packet {
-  return { event: 'message', data: {
-    type, payload, deviceId, protocolVersion: '2', messageId: randomUUID(), sentAt: new Date().toISOString(),
-    ...(sessionId ? { sessionId } : {}), ...(commandId ? { commandId } : {}),
-  } };
-}
+import { serverPacket } from './fixtures/relay.js';
 function setup(mode: 'pty' | 'acp' = 'pty') {
   const packets: Packet[] = [], commands: Command[] = [];
   const protocol = new Protocol(randomUUID(), 'Linux', p => packets.push(p), c => commands.push(c));
@@ -66,4 +61,33 @@ test('commands validate payload, mode, device identity and cross-session dedupli
   assert.throws(() => protocol.receive(serverPacket('other', 'session.synced', { lastAcceptedSeq: 0 }, 's')));
   const id = randomUUID(); receive('tool.turn.start', { text: 'hello' }, 's', id);
   assert.throws(() => receive('tool.turn.start', { text: 'hello' }, 'other', id));
+});
+
+test('remote creation validates workspace/mode and deduplicates accepted, failed and completed requests', () => {
+  const { protocol, receive, packets, commands } = setup();
+  protocol.addWorkspace('authorized', 'Project', [{ toolKey: 'codex', runtimeMode: 'acp' }]);
+  const id = randomUUID();
+  const payload = { workspaceId: 'authorized', toolKey: 'codex', runtimeMode: 'acp' };
+  receive('session.start', payload, id, id);
+  receive('session.start', payload, id, id);
+  assert.equal(commands.length, 1);
+  assert.equal((packets.at(-1)!.data.payload as { status: string }).status, 'accepted');
+  protocol.complete(commands[0]!, new Error('Provider not ready'));
+  receive('session.start', payload, id, id);
+  assert.equal(commands.length, 1);
+  assert.equal((packets.at(-1)!.data.payload as { status: string }).status, 'failed');
+  receive('session.start', { ...payload, displayName: 'Changed' }, id, id);
+  assert.equal((packets.at(-1)!.data.payload as { errorCode: string }).errorCode, 'conflict');
+  for (const changed of [{ workspaceId: 'w' }, { runtimeMode: 'pty', rows: 24, columns: 80 }, { path: '/tmp' }, { rows: 24 }]) {
+    const rejected = randomUUID();
+    receive('session.start', { ...payload, ...changed }, rejected, rejected);
+    assert.equal((packets.at(-1)!.data.payload as { status: string }).status, 'rejected');
+  }
+  const successful = randomUUID();
+  receive('session.start', payload, successful, successful);
+  protocol.start(successful, 'authorized', 'codex', 'acp');
+  protocol.complete(commands.at(-1)!);
+  receive('session.start', payload, successful, successful);
+  assert.equal(commands.length, 2);
+  assert.equal((packets.at(-1)!.data.payload as { status: string }).status, 'completed');
 });

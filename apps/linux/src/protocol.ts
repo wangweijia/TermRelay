@@ -31,6 +31,7 @@ export class Protocol {
   readonly workspaces = new Map<string, WorkspaceRegisteredPayload>();
   readonly sessions = new Map<string, SessionJournal>();
   readonly commands = new Map<string, { sessionId: string; result: CommandAckPayload }>();
+  private readonly creations = new Map<string, { sessionId: string; signature: string; result?: CommandAckPayload }>();
   constructor(
     readonly deviceId: string, readonly name: string,
     private readonly send: (packet: Packet) => void,
@@ -50,16 +51,16 @@ export class Protocol {
     for (const session of this.sessions.values()) { session.ready = false; session.endSent = false; }
     this.publish('device.register', { name: this.name, appVersion: VERSION, platform: 'linux', tools: this.tools });
   }
-  addWorkspace(id: string, name: string): void {
-    const value = { workspaceId: id, displayName: name, available: true, remoteStartAllowed: false };
+  addWorkspace(id: string, name: string, launchOptions: WorkspaceRegisteredPayload['launchOptions'] = []): void {
+    const value = { workspaceId: id, displayName: name, available: true, remoteStartAllowed: launchOptions.length > 0, launchOptions };
     this.workspaces.set(id, value);
     if (this.registered) this.publish('workspace.registered', value);
   }
-  start(id: string, workspaceId: string, toolKey: string, runtimeMode: 'pty' | 'acp'): void {
+  start(id: string, workspaceId: string, toolKey: string, runtimeMode: 'pty' | 'acp', displayName?: string): void {
     if (this.sessions.has(id)) throw new Error('Session ID already exists');
     const workspace = this.workspaces.get(workspaceId);
     if (!workspace) throw new Error('Unknown workspace');
-    const journal = new SessionJournal({ workspaceId, toolKey, runtimeMode, displayName: workspace.displayName, startedAt: new Date().toISOString() });
+    const journal = new SessionJournal({ workspaceId, toolKey, runtimeMode, displayName: displayName ?? workspace.displayName, startedAt: new Date().toISOString() });
     this.sessions.set(id, journal);
     if (this.registered) this.publish('session.started', journal.started, id, { seq: 0 });
   }
@@ -125,16 +126,37 @@ export class Protocol {
       }
     } else {
       const commandId = text(message.commandId).toLowerCase();
+      if (kind === 'session.start') {
+        const signature = JSON.stringify([payload.workspaceId, payload.toolKey, payload.runtimeMode, payload.rows, payload.columns, payload.displayName]);
+        const creation = this.creations.get(commandId);
+        if (creation) {
+          if (creation.sessionId !== sessionId || creation.signature !== signature) {
+            this.ack(sessionId, { commandId, status: 'rejected', errorCode: 'conflict', message: 'Creation ID is already bound to another request' });
+          } else this.ack(sessionId, creation.result ?? { commandId, status: 'accepted' });
+          return;
+        }
+        if (this.creations.size >= 4096) {
+          this.ack(sessionId, { commandId, status: 'rejected', errorCode: 'limit', message: 'Creation deduplication capacity reached' });
+          return;
+        }
+        this.creations.set(commandId, { sessionId, signature });
+      }
       const existing = this.commands.get(commandId);
       if (existing) {
         if (existing.sessionId !== sessionId) throw new Error('Command ID reused across sessions');
         this.ack(sessionId, existing.result); return;
       }
       try {
-        const session = this.sessions.get(sessionId);
-        if (!session || session.ended) throw new Error('Session is closed or unavailable');
-        if (kind !== 'session.stop' && kind.startsWith('tool.') !== (session.started.runtimeMode === 'acp')) throw new Error('Command does not match session runtime mode');
         validateCommand(kind, payload);
+        const session = this.sessions.get(sessionId);
+        if (kind === 'session.start') {
+          if (commandId !== sessionId.toLowerCase() || session) throw new Error('Creation requires a fresh session ID matching command ID');
+          const workspace = this.workspaces.get(text(payload.workspaceId));
+          if (!workspace?.remoteStartAllowed || !workspace.launchOptions?.some(o => o.toolKey === payload.toolKey && o.runtimeMode === payload.runtimeMode)) throw new Error('Remote workspace/tool is not authorized');
+        } else {
+          if (!session || session.ended) throw new Error('Session is closed or unavailable');
+          if (kind !== 'session.stop' && kind.startsWith('tool.') !== (session.started.runtimeMode === 'acp')) throw new Error('Command does not match session runtime mode');
+        }
         this.command({ sessionId, commandId, kind, payload });
         this.remember(sessionId, { commandId, status: 'accepted' });
       } catch (error) {
@@ -148,6 +170,8 @@ export class Protocol {
       : { commandId: command.commandId, status: 'completed' });
   }
   private remember(sessionId: string, result: CommandAckPayload): void {
+    const creation = this.creations.get(result.commandId);
+    if (creation) creation.result = result;
     this.commands.set(result.commandId, { sessionId, result });
     if (this.commands.size > 4096) this.commands.delete(this.commands.keys().next().value!);
     this.ack(sessionId, result);

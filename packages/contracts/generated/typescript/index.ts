@@ -36,9 +36,19 @@ export interface WorkspaceRegisteredPayload {
   displayName: string;
   available: boolean;
   remoteStartAllowed: boolean;
+  launchOptions?: { toolKey: string; runtimeMode: SessionRuntimeMode }[];
 }
 
 export type SessionRuntimeMode = 'pty' | 'acp';
+
+export interface SessionStartPayload {
+  workspaceId: string;
+  toolKey: string;
+  runtimeMode: SessionRuntimeMode;
+  rows?: number;
+  columns?: number;
+  displayName?: string;
+}
 
 export interface SessionStartedPayload {
   workspaceId: string;
@@ -151,18 +161,61 @@ export const deviceHeartbeatSchema = {
 } as const;
 
 export const workspaceRegisteredSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://termrelay.local/contracts/events/workspace-registered.schema.json',
-  title: 'workspace.registered payload',
-  type: 'object',
-  required: ['workspaceId', 'displayName', 'available', 'remoteStartAllowed'],
-  properties: {
-    workspaceId: { type: 'string', minLength: 1, maxLength: 128 },
-    displayName: { type: 'string', minLength: 1, maxLength: 255 },
-    available: { type: 'boolean' },
-    remoteStartAllowed: { type: 'boolean' },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/workspace-registered.schema.json",
+  "title": "workspace.registered payload",
+  "type": "object",
+  "required": [
+    "workspaceId",
+    "displayName",
+    "available",
+    "remoteStartAllowed"
+  ],
+  "properties": {
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "remoteStartAllowed": {
+      "type": "boolean"
+    },
+    "launchOptions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": [
+          "toolKey",
+          "runtimeMode"
+        ],
+        "properties": {
+          "toolKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "runtimeMode": {
+            "enum": [
+              "pty",
+              "acp"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
   },
-  additionalProperties: false,
+  "additionalProperties": false
 } as const;
 
 export const sessionStartedSchema = {
@@ -912,6 +965,79 @@ export const toolUserInputResolveSchema = {
     },
   },
   additionalProperties: false,
+} as const;
+
+export const sessionStartSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/session-start.schema.json",
+  "title": "session.start payload",
+  "type": "object",
+  "required": [
+    "workspaceId",
+    "toolKey",
+    "runtimeMode"
+  ],
+  "properties": {
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "toolKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "runtimeMode": {
+      "enum": [
+        "pty",
+        "acp"
+      ]
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "columns": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtimeMode": {
+            "const": "pty"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rows": true,
+          "columns": true
+        },
+        "required": [
+          "rows",
+          "columns"
+        ]
+      },
+      "else": {
+        "properties": {
+          "rows": false,
+          "columns": false
+        }
+      }
+    }
+  ]
 } as const;
 
 export const terminalInputSchema = {

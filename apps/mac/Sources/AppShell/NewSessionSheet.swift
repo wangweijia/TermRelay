@@ -66,6 +66,14 @@ struct NewSessionSheet: View {
                 .padding(12)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 9))
+                Toggle("允许 Web / 手机在此目录远程创建会话", isOn: Binding(
+                    get: { appModel.currentWorkspaceAllowsRemoteStart },
+                    set: { appModel.setCurrentWorkspaceRemoteStart($0) }
+                ))
+                .font(.caption)
+                Text("仅授权此目录；真实路径与 CLI 凭据不上传。关闭后不影响已运行会话。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 9) {

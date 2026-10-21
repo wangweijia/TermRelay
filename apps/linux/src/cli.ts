@@ -21,11 +21,17 @@ export async function main(argv = process.argv): Promise<number> {
       console.log(`Configured device ${s.configure(options.server, options.name).deviceId}`);
     }));
   const workspace = program.command('workspace').description('Manage locally authorized directories');
-  workspace.command('add <path>').requiredOption('--name <name>')
-    .action(async (path: string, options: { name: string }) => edit(s => {
+  workspace.command('add <path>').requiredOption('--name <name>').option('--allow-remote-start', 'Allow Web to create sessions in this directory')
+    .action(async (path: string, options: { name: string; allowRemoteStart?: boolean }) => edit(s => {
       const config = s.load(), real = realpathSync(resolve(path));
       if (!statSync(real).isDirectory() || config.workspaces.some(w => w.path === real)) throw new Error('Workspace must be a new existing directory');
-      config.workspaces.push({ id: randomUUID(), name: options.name, path: real }); s.save(config);
+      config.workspaces.push({ id: randomUUID(), name: options.name, path: real, remoteStartAllowed: options.allowRemoteStart === true }); s.save(config);
+    }));
+  workspace.command('remote-start <name>').requiredOption('--allow <boolean>', 'true or false')
+    .action(async (name: string, options: { allow: string }) => edit(s => {
+      const config = s.load(), entry = config.workspaces.find(w => w.name === name);
+      if (!entry || !['true', 'false'].includes(options.allow)) throw new Error('Specify an existing workspace and --allow true or false');
+      entry.remoteStartAllowed = options.allow === 'true'; s.save(config);
     }));
   workspace.command('list').action(() => console.log(JSON.stringify(store().load().workspaces, null, 2)));
   workspace.command('remove <name>').action(async (name: string) => edit(s => {
@@ -69,7 +75,10 @@ export async function main(argv = process.argv): Promise<number> {
       { name: 'platform', ok: process.platform === 'linux', detail: process.platform },
       { name: 'node', ok: Number(process.versions.node.split('.')[0]) >= 22, detail: process.version },
       ...config.workspaces.map(w => ({ name: `workspace:${w.name}`, ok: existsSync(w.path) && statSync(w.path).isDirectory() })),
-      ...[...new Set(config.sessions.map(s => s.provider))].map(provider => ({
+      ...[...new Set([
+        ...config.sessions.map(s => s.provider),
+        ...(config.workspaces.some(w => w.remoteStartAllowed) ? ['shell', ...(config.tools.codex ? ['codex'] : [])] : []),
+      ])].map(provider => ({
         name: provider, ok: !!findExecutable(provider === 'shell' ? process.env.SHELL || '/bin/bash' : config.tools.codex || 'codex'),
       })),
       { name: 'credential', ok: serverURL(config.serverURL).pathname !== '/ws/client-public' || !!readCredential(config) },

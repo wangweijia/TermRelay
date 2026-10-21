@@ -7,7 +7,7 @@ import { Protocol, BufferLimitError, type Command, type Packet } from './protoco
 import { TerminalRuntime, type PtyEvent } from './pty.js';
 import { RelayConnection, type Connection, type RelayEvent } from './transport.js';
 import { UnknownResultError } from './rpc.js';
-import { errorMessage, findExecutable } from './util.js';
+import { errorMessage, executable, findExecutable, integer, text } from './util.js';
 
 export interface ServiceOptions {
   connection?: (url: string, credential: string, event: (event: RelayEvent) => void) => Connection;
@@ -29,6 +29,7 @@ export class AgentService {
   private finish?: () => void;
   private lastError?: string;
   private failed = false;
+  private readonly startingSessions = new Set<string>();
   state = 'starting';
   private readonly log: (message: string) => void;
   constructor(readonly store: ConfigStore, private readonly options: ServiceOptions = {}) {
@@ -77,7 +78,8 @@ export class AgentService {
     if (this.tasks.size >= 32) throw new Error('Agent command queue is full');
     this.track(Promise.resolve().then(async () => {
       try {
-        if (command.kind === 'session.stop') await this.stopSession(command.sessionId);
+        if (command.kind === 'session.start') await this.startRemoteSession(command);
+        else if (command.kind === 'session.stop') await this.stopSession(command.sessionId);
         else if (this.agents.has(command.sessionId)) await this.agents.get(command.sessionId)!.command(command.kind, command.payload, command.commandId);
         else {
           const terminal = this.terminals.get(command.sessionId);
@@ -86,8 +88,9 @@ export class AgentService {
         }
       } catch (error) {
         this.log(`Command ${command.kind} failed: ${errorMessage(error)}`);
-        this.protocol.complete(command, error);
-        if (error instanceof UnknownResultError) await this.stopSession(command.sessionId, true);
+        this.protocol.complete(command, command.kind === 'session.start'
+          ? new Error('Session startup failed; check the local Agent log and workspace/tool authorization') : error);
+        if (error instanceof UnknownResultError && this.protocol.sessions.has(command.sessionId)) await this.stopSession(command.sessionId, true);
         return;
       }
       this.protocol.complete(command);
@@ -157,11 +160,16 @@ export class AgentService {
     });
   }
   private async startSessions(): Promise<void> {
+    const codex = this.config.tools.codex ?? findExecutable('codex');
+    this.protocol.tools = [
+      ...(findExecutable(process.env.SHELL || '/bin/bash') ? ['shell'] : []),
+      ...(codex && executable(codex) ? ['codex'] : []),
+    ];
     for (const workspace of this.config.workspaces) {
       if (realpathSync(workspace.path) !== workspace.path || !statSync(workspace.path).isDirectory()) throw new Error(`Workspace authorization changed: ${workspace.name}`);
-      this.protocol.addWorkspace(workspace.id, workspace.name);
+      this.protocol.addWorkspace(workspace.id, workspace.name, workspace.remoteStartAllowed
+        ? this.protocol.tools.map(toolKey => ({ toolKey, runtimeMode: toolKey === 'shell' ? 'pty' : 'acp' })) : []);
     }
-    const tools = new Set<string>();
     for (const profile of this.config.sessions) {
       const workspace = this.config.workspaces.find(w => w.id === profile.workspaceId)!;
       const id = randomUUID();
@@ -178,10 +186,78 @@ export class AgentService {
         if (this.stopping) throw new Error('Agent startup failed');
         this.protocol.start(id, workspace.id, 'codex', 'acp'); agent.publishConfiguration();
       }
-      tools.add(profile.provider); this.log(`Session ready: ${id} (${profile.provider})`);
+      this.log(`Session ready: ${id} (${profile.provider})`);
     }
-    this.protocol.tools = [...tools];
-    if (!tools.size) this.log('No startup sessions configured; remote creation is not yet implemented');
+    if (!this.config.sessions.length) this.log('No startup sessions configured; waiting for authorized remote creation');
+  }
+
+  private async startRemoteSession(command: Command): Promise<void> {
+    if (this.stopping) throw new Error('Agent is stopping');
+    const active = [...this.protocol.sessions.values()].filter(s => !s.ended).length;
+    if (active + this.startingSessions.size >= 8) throw new Error('Maximum eight active or starting sessions');
+    this.startingSessions.add(command.sessionId);
+    try {
+      // Re-read authorization at execution time; a stale Server catalog cannot grant access.
+      const config = this.store.load();
+      const workspace = config.workspaces.find(w => w.id === command.payload.workspaceId);
+      if (!workspace?.remoteStartAllowed || realpathSync(workspace.path) !== workspace.path || !statSync(workspace.path).isDirectory()) throw new Error('Workspace authorization is unavailable or changed');
+      const id = command.sessionId;
+      const displayName = command.payload.displayName === undefined ? undefined : text(command.payload.displayName, 128);
+      if (command.payload.toolKey === 'shell' && command.payload.runtimeMode === 'pty') {
+        const pending: PtyEvent[] = [];
+        let published = false, startupBytes = 0;
+        let startupError: Error | undefined;
+        const terminal = new TerminalRuntime(workspace.path, event => {
+          if (published) { this.onPty(id, event); return; }
+          if (event.kind === 'output') {
+            startupBytes += event.data.length;
+            if (startupBytes > 1024 * 1024) startupError = new Error('PTY startup output exceeded 1 MiB');
+            else pending.push(event);
+          } else startupError = event.kind === 'error' ? event.error : new Error(`PTY exited during startup (${event.code})`);
+        });
+        this.terminals.set(id, terminal);
+        try {
+          await terminal.ready;
+          await terminal.command('terminal.resize', { rows: integer(command.payload.rows, 1, 1000), columns: integer(command.payload.columns, 1, 1000) });
+          if (startupError) throw startupError;
+          if (this.stopping) throw new Error('Agent is stopping');
+          this.protocol.start(id, workspace.id, 'shell', 'pty', displayName);
+          published = true;
+          for (const event of pending) this.onPty(id, event);
+        } catch (error) {
+          if (this.protocol.sessions.has(id)) this.protocol.end(id, true);
+          await terminal.close(); this.terminals.delete(id); throw error;
+        }
+      } else if (command.payload.toolKey === 'codex' && command.payload.runtimeMode === 'acp') {
+        const executable = config.tools.codex ?? findExecutable('codex');
+        if (!executable) throw new Error('Codex is not available');
+        const pending: ToolEventPayload[] = [];
+        let published = false, startupBytes = 0;
+        let startupError: Error | undefined;
+        const agent = (this.options.codex ?? ((path, cwd, emit) => new CodexRuntime(path, cwd, emit)))(
+          executable, workspace.path, event => {
+            if (published) { this.onTool(id, event); return; }
+            startupBytes += Buffer.byteLength(JSON.stringify(event));
+            if (event.kind === 'error') startupError = new Error(String(event.data.message));
+            else if (startupBytes > 1024 * 1024) startupError = new Error('Provider startup events exceeded 1 MiB');
+            else pending.push(event);
+          });
+        this.agents.set(id, agent);
+        try {
+          await agent.start();
+          if (startupError) throw startupError;
+          if (this.stopping) throw new Error('Agent is stopping');
+          this.protocol.start(id, workspace.id, 'codex', 'acp', displayName);
+          published = true;
+          for (const event of pending) this.onTool(id, event);
+          agent.publishConfiguration();
+        } catch (error) {
+          if (this.protocol.sessions.has(id)) this.protocol.end(id, true);
+          await agent.close(); this.agents.delete(id); throw error;
+        }
+      } else throw new Error('Unsupported tool/runtime mode');
+      this.status();
+    } finally { this.startingSessions.delete(command.sessionId); }
   }
   async run(): Promise<number> {
     const stopped = new Promise<void>(resolve => { this.finish = resolve; });

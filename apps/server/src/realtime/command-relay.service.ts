@@ -1,8 +1,9 @@
-import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
 import type { CommandAckPayload, Envelope } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
 import { SessionsService } from '../sessions/sessions.service';
+import { SessionStartService } from '../sessions/session-start.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 
 export type RemoteCommandType =
@@ -45,6 +46,7 @@ export class CommandRelayService implements OnModuleDestroy {
   constructor(
     private readonly registry: DeviceConnectionRegistry,
     private readonly sessions: SessionsService,
+    @Optional() private readonly starts?: SessionStartService,
   ) {}
 
   onModuleDestroy(): void {
@@ -65,6 +67,9 @@ export class CommandRelayService implements OnModuleDestroy {
         code: 'unknown_session',
         detail: 'Session does not exist for the requested device.',
       };
+    }
+    if (commandId === sessionId.toLowerCase() && await this.starts?.isCreationID(sessionId)) {
+      return { ok: false, code: 'conflict', detail: 'Creation command ID is reserved; use a new command ID for session interaction.' };
     }
     if (!['starting', 'running'].includes(session.status)) {
       return {

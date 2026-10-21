@@ -5,10 +5,16 @@ import { MAX_MESSAGE, integer, record, text, type JsonObject } from './util.js';
 export type PtyEvent = { kind: 'output'; data: Buffer } | { kind: 'exit'; code: number } | { kind: 'error'; error: Error };
 export class TerminalRuntime {
   readonly process: OwnedProcess;
+  readonly ready: Promise<void>;
   private buffer = Buffer.alloc(0);
   stopping = false;
   constructor(directory: string, private readonly emit: (event: PtyEvent) => void, shell = process.env.SHELL || '/bin/bash') {
     this.process = new OwnedProcess([process.execPath, join(__dirname, 'pty-worker.js'), directory, shell], directory);
+    let resolveReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    this.ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    const timer = setTimeout(() => rejectReady(new Error('PTY startup timed out')), 15000);
+    void this.ready.then(() => clearTimeout(timer), () => clearTimeout(timer));
     this.process.child.stdout.on('data', (data: Buffer) => {
       try {
         this.buffer = Buffer.concat([this.buffer, data]);
@@ -17,16 +23,17 @@ export class TerminalRuntime {
           if (index > MAX_MESSAGE) throw new Error('PTY output frame exceeded');
           const value = record(JSON.parse(this.buffer.subarray(0, index).toString('utf8')));
           this.buffer = this.buffer.subarray(index + 1);
-          if (value.kind === 'output') this.emit({ kind: 'output', data: Buffer.from(text(value.data, MAX_MESSAGE), 'base64') });
+          if (value.kind === 'ready') resolveReady();
+          else if (value.kind === 'output') this.emit({ kind: 'output', data: Buffer.from(text(value.data, MAX_MESSAGE), 'base64') });
           else if (value.kind === 'exit') this.emit({ kind: 'exit', code: integer(value.code, 0, 255) });
           else throw new Error('Invalid PTY worker event');
         }
         if (this.buffer.length > MAX_MESSAGE) throw new Error('PTY output frame exceeded');
-      } catch { this.emit({ kind: 'error', error: new Error('Invalid PTY worker output') }); }
+      } catch { rejectReady(new Error('Invalid PTY worker output')); this.emit({ kind: 'error', error: new Error('Invalid PTY worker output') }); }
     });
     void this.process.exited.then(
-      code => this.emit({ kind: 'exit', code }),
-      () => this.emit({ kind: 'error', error: new Error('PTY supervisor failed') }),
+      code => { rejectReady(new Error(`PTY exited before readiness (${code})`)); this.emit({ kind: 'exit', code }); },
+      () => { rejectReady(new Error('PTY supervisor failed')); this.emit({ kind: 'error', error: new Error('PTY supervisor failed') }); },
     );
   }
   async command(kind: string, payload: JsonObject): Promise<void> {

@@ -34,6 +34,7 @@ export class WorkspaceRepository {
         displayName: payload.displayName,
         available: payload.available,
         remoteStartAllowed: payload.remoteStartAllowed,
+        launchOptions: payload.launchOptions ?? [],
       }),
     );
     return 'accepted';
@@ -42,6 +43,11 @@ export class WorkspaceRepository {
   findById(id: string): Promise<WorkspaceEntity | null> {
     if (!this.dataSource) return Promise.resolve(null);
     return this.repository.findOneBy({ id });
+  }
+
+  listRemote(): Promise<WorkspaceEntity[]> {
+    if (!this.dataSource) return Promise.resolve([]);
+    return this.repository.findBy({ available: true, remoteStartAllowed: true });
   }
 
   private get repository(): Repository<WorkspaceEntity> {

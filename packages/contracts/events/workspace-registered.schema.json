@@ -8,7 +8,21 @@
     "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "displayName": { "type": "string", "minLength": 1, "maxLength": 255 },
     "available": { "type": "boolean" },
-    "remoteStartAllowed": { "type": "boolean" }
+    "remoteStartAllowed": { "type": "boolean" },
+    "launchOptions": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["toolKey", "runtimeMode"],
+        "properties": {
+          "toolKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "runtimeMode": { "enum": ["pty", "acp"] }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }

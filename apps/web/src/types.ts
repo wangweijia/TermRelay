@@ -19,6 +19,7 @@ export interface SessionRecord {
 
 export interface DeviceRecord {
   id: string;
+  name?: string;
   status: 'connected' | 'connecting' | 'offline' | 'degraded';
   activeSessionCount: number;
   disconnectedAt?: string;

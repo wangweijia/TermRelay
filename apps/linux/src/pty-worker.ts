@@ -21,6 +21,7 @@ terminal.onExit(event => {
   emit({ kind: 'exit', code: event.exitCode, signal: event.signal ?? 0 });
   process.stdin.destroy();
 });
+emit({ kind: 'ready' });
 let buffer = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (data: string) => {

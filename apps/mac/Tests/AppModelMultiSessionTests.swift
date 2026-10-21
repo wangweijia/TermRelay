@@ -3,6 +3,43 @@ import XCTest
 
 final class AppModelMultiSessionTests: XCTestCase {
     @MainActor
+    func testRemoteShellRequiresLocalWorkspaceOptInAndRunsWithoutATerminalView() async throws {
+        let suite = "AppModelRemoteStart-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(defaults: defaults)
+        model.sessionName = "Unchanged local draft"
+        model.selectedTool = .copilot
+        let id = UUID()
+        let request = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: "untrusted",
+            toolKey: "shell", runtimeMode: "pty", displayName: "Remote", rows: 24, columns: 80)
+        let rejected = await model.startRemoteSession(request)
+        XCTAssertFalse(rejected.succeeded)
+        XCTAssertTrue(model.sessions.isEmpty)
+        XCTAssertFalse(model.currentWorkspaceAllowsRemoteStart)
+        model.setCurrentWorkspaceRemoteStart(true)
+        XCTAssertTrue(model.currentWorkspaceAllowsRemoteStart)
+        let workspace = try XCTUnwrap(model.remoteWorkspaceIDs.first)
+        let authorized = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: workspace,
+            toolKey: "shell", runtimeMode: "pty", displayName: "Remote", rows: 24, columns: 80)
+        let created = await model.startRemoteSession(authorized)
+        XCTAssertTrue(created.succeeded, created.message ?? "")
+        XCTAssertEqual(model.sessions.count, 1)
+        XCTAssertEqual(model.sessions.first?.id, id)
+        XCTAssertEqual(model.sessions.first?.displayName, "Remote")
+        XCTAssertEqual(model.terminalSession(id: id)?.state, .running)
+        XCTAssertEqual(model.selectedTool, .copilot)
+        XCTAssertEqual(model.sessionName, "Unchanged local draft")
+        model.setCurrentWorkspaceRemoteStart(false)
+        XCTAssertFalse(model.currentWorkspaceAllowsRemoteStart)
+        XCTAssertEqual(model.terminalSession(id: id)?.state, .running)
+        let duplicate = await model.startRemoteSession(authorized)
+        XCTAssertFalse(duplicate.succeeded)
+        XCTAssertEqual(model.sessions.count, 1)
+        await model.terminateAllSessions()
+    }
+
+    @MainActor
     func testStartingSecondSessionKeepsFirstSessionRunning() async throws {
         let suiteName = "AppModelMultiSessionTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

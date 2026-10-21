@@ -2,7 +2,7 @@ import Ajv2020, { type AnySchema, type ValidateFunction } from 'ajv/dist/2020';
 import {
   envelopeSchema, toolEventSchema, toolTurnStartSchema, toolTurnInterruptSchema,
   toolApprovalResolveSchema, toolUserInputResolveSchema, toolConfigSetSchema,
-  terminalInputSchema, terminalResizeSchema,
+  terminalInputSchema, terminalResizeSchema, sessionStartSchema,
 } from '@termrelay/contracts';
 import { record, UUID, type JsonObject } from './util.js';
 
@@ -12,6 +12,7 @@ ajv.addFormat('date-time', (value: string) => /^\d{4}-\d\d-\d\dT/.test(value) &&
 const envelope = ajv.compile(envelopeSchema);
 const event = ajv.compile(toolEventSchema);
 const commands = new Map<string, ValidateFunction>(Object.entries({
+  'session.start': sessionStartSchema,
   'tool.turn.start': toolTurnStartSchema, 'tool.turn.interrupt': toolTurnInterruptSchema,
   'tool.approval.resolve': toolApprovalResolveSchema, 'tool.user-input.resolve': toolUserInputResolveSchema,
   'tool.config.set': toolConfigSetSchema, 'terminal.input': terminalInputSchema, 'terminal.resize': terminalResizeSchema,

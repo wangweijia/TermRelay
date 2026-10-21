@@ -18,11 +18,12 @@ Server / Web 完成，执行机器只主动出站连接，不开放原始 ACP / 
 - 进程：业务逻辑全部 TypeScript；一个小型 C supervisor 只负责 OS 级 flock、
   Linux subreaper 和所属后代清理，不解析智能体协议。PTY 的原生绑定由 node-pty 提供。
 
-**尚未完成**：macOS / Linux 通用远程创建、Copilot / DSH ACP、AI API、
+**尚未完成**：Copilot / DSH ACP、AI API、
 快捷任务、历史继续、文件预览、磁盘 journal 和加密钥匙环。
 当前 `session add` 只保存服务启动时创建新会话的配置；每次 run 使用新执行会话 ID，
-不自动提交首轮，不恢复旧任务。工作区仍发布 `remoteStartAllowed: false`。
-Codex 启动失败会明确终止服务，不静默转换成 Shell，也不重放模型任务。
+不自动提交首轮，不恢复旧任务。远程创建独立于启动配置，逐工作区显式授权。
+启动配置的 Codex 启动失败会明确终止服务；远程创建失败只返回该请求的失败，
+保留其他会话，不静默转换成 Shell，也不重放模型任务。
 
 Node 运行时只随 Agent 提供；智能体 CLI 仍需用户安装和登录。
 当前开发主机为 macOS，不能把本地回归或发布目录检查称为 Linux / systemd / `.deb` 实机验收。
@@ -67,6 +68,57 @@ Shell 使用 `$SHELL`，未设置时为 `/bin/bash`。
 原 headless 版本合法的 version 1 `agent.json` 可继续使用；旧 GUI `linux.json` 不自动导入。
 运行锁阻止并发修改；最多登记 128 个工作区、配置 8 个启动会话。
 修改配置前先停服务；`session list` / `session remove ID` 只管理启动配置，不删除目录。
+
+## 通过 Web / 手机远程创建
+
+Server、Web 与对应执行端需一起升级。Server 新增 `RemoteSessionStart1792540800000`
+显式迁移（`workspaces.launch_options` 和 `session_starts`）；保持 `synchronize: false`，
+沿用现有部署迁移步骤。源码开发 Server 可先 `pnpm --filter @termrelay/server build`，
+再使用本地开发数据库环境运行 `pnpm --filter @termrelay/server migration:run`。
+不要使用生产凭据执行本地验证。
+
+Linux 先停服务，在本机授权目录，再启动服务：
+
+```bash
+termrelay-agent workspace add "$HOME/project" --name project --allow-remote-start
+# 已登记的目录改用：
+termrelay-agent workspace remote-start project --allow true
+# 不需要 session add；零启动配置也可等待远程创建。
+termrelay-agent run
+```
+
+systemd 用户服务使用 `systemctl --user stop termrelay-agent` / `start termrelay-agent`。
+撤销同样先停服务，执行 `workspace remote-start project --allow false` 后重启。
+旧配置缺少此字段时默认为不授权。Mac 在“新建会话”的工作目录下勾选
+“允许 Web / 手机在此目录远程创建会话”；无需实际创建本地会话，授权在 App 重启后保留，
+取消勾选不影响已运行会话。
+
+Web 顶部“新建会话”、手机会话页“新建”使用同一入口，只展示在线且已授权工作区。
+Linux 提供 Shell / PTY 与已配置 Codex / ACP；Mac 按本机可用工具提供 Shell / PTY、
+Codex / PTY / ACP、Copilot / ACP、DSH / ACP。Provider 的安装、登录、Key 与代理仍在执行机器管理。
+模型 / 推理强度在创建成功后的会话配置中调整，默认手动审批，**创建不提交首条消息**。
+每设备远程创建最多容纳 8 个活动或启动中的会话；容量不足会明确拒绝。
+
+请求 UUID 同时作为创建幂等 ID、命令 ID 和会话 ID。Server 先持久化再投递；
+后续交互必须生成新的命令 ID，不能复用创建 ID。
+相同 ID / 参数只投递一次，换参数会冲突；设备在存活期间也去重。断线、Server 重启
+或等待超过 60 秒后报告“结果未知”，不重投、不自动启动另一个进程；晚到的
+`session.started` 可通过查询原请求对账。浏览器保存待处理请求，重开创建窗口可继续查询；
+网络失败可“重新提交同一请求”，不要另生成 ID 盲目重试。结果记录保留，不自动过期，
+以免历史幂等 ID 失效后重新执行。Agent 重启不会恢复原 Provider 进程。
+
+公共 REST API 沿用 Web 的 Cloudflare Access 边界，不是外部 AI API：
+
+- `GET /api/session-starts/targets`：在线设备的已授权工作区及工具 / 模式，不包含本地路径。
+- `POST /api/session-starts`：`requestId`、`deviceId`、`workspaceId`、`toolKey`、`runtimeMode`，
+  可选 `displayName`；只有 PTY 需要 `rows` / `columns`（1–1000），ACP 不接受终端参数。
+- `GET /api/session-starts/:requestId`：`pending` / `accepted` / `completed` / `failed` / `unknown`。
+  创建完成后会话 ID 等于 `requestId`，进入现有会话列表和交互链路。
+
+Server 不接受任意目录、可执行文件、脚本、初始提示词或自动审批参数；设备在执行时再次校验授权。
+普通远程会话保持 `origin: local`，不修改外部 AI API 会话的归属、自动审批或超时规则。
+旧客户端缺少可启动能力列表，不会出现在新建目标中。真实 Ubuntu / Xubuntu、systemd、
+真实 Provider 和手机浏览器的人机验收仍需在目标环境完成。
 
 ## 公网配对
 

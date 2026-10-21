@@ -34,6 +34,23 @@ struct RelayWorkspace: Encodable, Sendable {
     let displayName: String
     let available: Bool
     let remoteStartAllowed: Bool
+    var launchOptions: [RelayLaunchOption] = []
+}
+
+struct RelayLaunchOption: Codable, Sendable, Equatable {
+    let toolKey: String
+    let runtimeMode: String
+}
+
+struct RemoteSessionStart: Sendable, Equatable {
+    let commandID: UUID
+    let sessionID: UUID
+    let workspaceID: String
+    let toolKey: String
+    let runtimeMode: String
+    let displayName: String?
+    let rows: Int
+    let columns: Int
 }
 
 struct RelaySessionStarted: Encodable, Sendable {

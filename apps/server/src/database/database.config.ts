@@ -22,6 +22,8 @@ import { ShortcutRunEntity } from '../shortcuts/shortcut-run.entity';
 import { AIProjectKeyEntity, AIResourceEntity } from '../ai/ai.entity';
 import { AIService1791590400000 } from './migrations/1791590400000-ai-service';
 import { UnifiedAIConversations1791820800000 } from './migrations/1791820800000-unified-ai-conversations';
+import { RemoteSessionStart1792540800000 } from './migrations/1792540800000-remote-session-start';
+import { SessionStartEntity } from '../sessions/session-start.entity';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -52,6 +54,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       Shortcuts1790640000000,
       AIService1791590400000,
       UnifiedAIConversations1791820800000,
+      RemoteSessionStart1792540800000,
     ],
     entities: [
       DeviceEntity,
@@ -64,6 +67,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       ShortcutRunEntity,
       AIProjectKeyEntity,
       AIResourceEntity,
+      SessionStartEntity,
     ],
   };
 }

@@ -40,7 +40,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 使用 TypeScript，共享现有协议类型；发布包内置私有 Node，不要求目标机器安装 Node 或 Python。
 无需 macOS App 或 GTK。已接入 Shell PTY、Codex App Server 结构化 Runtime、
 现有 Server / Web 交互、公网配对与运行期间补传；提供无 GUI 强依赖的 `.deb` 脚本。
-当前使用本地启动配置，macOS / Linux 通用远程创建尚未接入；Copilot / DSH ACP、
+已支持同一 Web / 手机入口远程创建 macOS / Linux 会话，工作区需在执行机器显式授权；Copilot / DSH ACP、
 快捷任务及 AI API 仍待补齐。旧 Python / GTK 入口已移除，目标系统实机验收尚未完成。
 安装、兼容范围与限制见 [Linux Agent 说明](apps/linux/README.md)。
 待补功能及验收计划见 [Ubuntu / Xubuntu App TODO](docs/UBUNTU_APP_TODO.md)。
@@ -68,6 +68,7 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 - **Mac 聊天定位**：底部定位标记独立于消息懒加载列表，长回答流式更新、内容收缩或切换会话时不会因标记被回收而定位到空白区域；消息仍按需加载。
 - **工作区 Markdown 预览**：在 Web 点击 ACP 回答中的同站点 `/Users/...` 或 `/Volumes/...` 文件链接，可预览当前会话工作区内的 UTF-8 `.md` / `.markdown` 文件（最大 512 KiB）。需要对应 Mac 在线且仍持有该会话；工作区外的路径、其他文件格式和相对链接不支持预览。文件内容只在点击时从 Mac 获取，不持久化到 Server。
 - **完整交互闭环**：支持审批的全部可用决策，以及 `requestUserInput` 式的用户问答。
+- **跨平台远程新建**：Web / 手机选择在线设备、已授权工作区和工具 / 模式后创建普通会话。Mac 在“新建会话”中逐目录勾选授权；Linux 使用 `workspace add --allow-remote-start` 或 `workspace remote-start NAME --allow true` 后重启服务。请求幂等、启动结果持久化；断线或超时显示“结果未知”，不会自动重建进程。默认手动审批，创建不发送首条提示词。升级 Server 时需运行新增数据库迁移，说明见 [Linux Agent](apps/linux/README.md#通过-web--手机远程创建)。
 - **跨会话审批中心**：PC 与手机 Web 可统一查看多个 ACP 窗口需要手动处理的审批；开启自动审批的会话不进入待审批列表。
 - **快捷任务**：在 Mac 上创建工作区命令并为每条任务单独配置代理；桌面和手机 Web 只显示任务元数据，可确认、一键运行、查看结果及停止。CLI 要求二次确认时可查看输出并手动发送限定的 y/n/yes/no，无需修改 CLI；不支持密码输入或自动批准。脚本、真实路径和代理地址留在 Mac，执行与现有终端会话隔离。设计与使用边界见 [快捷任务方案](docs/SHORTCUT_TASKS.md)。
 - **Mac 审批 Toast**：需要手动处理的本地 ACP 审批统一显示在窗口右上角，可展开、收起或直接审批；开启自动审批的会话不会出现 Toast，处理或会话结束后自动移除。

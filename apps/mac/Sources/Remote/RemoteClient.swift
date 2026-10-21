@@ -9,6 +9,7 @@ actor RemoteClient {
     typealias QuickActionInputHandler = @Sendable (QuickActionInputRequest) async -> QuickActionInputResult
     typealias FilePreviewWorkspaceHandler = @Sendable (UUID, String) async -> URL?
     typealias AIHandler = @Sendable (String, JSONValue) async -> Void
+    typealias SessionStartHandler = @Sendable (RemoteSessionStart) async -> RemoteCommandResult
 
     private let deviceID: UUID
     private let stateHandler: StateHandler
@@ -19,6 +20,8 @@ actor RemoteClient {
     private let quickActionInputHandler: QuickActionInputHandler
     private let filePreviewWorkspaceHandler: FilePreviewWorkspaceHandler
     private let aiHandler: AIHandler
+    private let sessionStartHandler: SessionStartHandler
+    private var sessionStarts: [UUID: (RemoteSessionStart, Task<RemoteCommandResult, Never>)] = [:]
     private var externalSessions = Set<UUID>()
     private var serverURL: URL?
     private var credential: String?
@@ -58,6 +61,7 @@ actor RemoteClient {
         quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
         filePreviewWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
         aiHandler: @escaping AIHandler = { _, _ in },
+        sessionStartHandler: @escaping SessionStartHandler = { _ in .rejected("unavailable", "Remote creation is unavailable") },
         outboxDirectory: URL? = nil
     ) {
         self.deviceID = deviceID
@@ -69,6 +73,7 @@ actor RemoteClient {
         self.quickActionInputHandler = quickActionInputHandler
         self.filePreviewWorkspaceHandler = filePreviewWorkspaceHandler
         self.aiHandler = aiHandler
+        self.sessionStartHandler = sessionStartHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
         let recovered = (try? outbox.load()) ?? []
         for event in recovered {
@@ -270,14 +275,15 @@ actor RemoteClient {
         )
     }
 
-    func publishWorkspace(id: String, directory: URL) async {
+    func publishWorkspace(id: String, directory: URL, launchOptions: [RelayLaunchOption] = []) async {
         await send(
             type: "workspace.registered",
             payload: RelayWorkspace(
                 workspaceId: id,
                 displayName: directory.lastPathComponent,
                 available: FileManager.default.fileExists(atPath: directory.path),
-                remoteStartAllowed: false
+                remoteStartAllowed: !launchOptions.isEmpty,
+                launchOptions: launchOptions
             )
         )
     }
@@ -506,6 +512,23 @@ actor RemoteClient {
             stateHandler(.degraded, message)
             return
         }
+        if registered, envelope.type == "session.start" {
+            guard let request = decodeSessionStart(envelope) else {
+                if let commandID = envelope.commandId, let sessionID = envelope.sessionId {
+                    _ = await send(type: "command.ack", sessionId: sessionID, commandId: commandID,
+                        payload: RelayCommandAck(commandId: commandID, status: "rejected",
+                            errorCode: "invalid_command", message: "Invalid session.start payload"))
+                }
+                return
+            }
+            _ = await send(type: "command.ack", sessionId: request.sessionID.uuidString.lowercased(), commandId: request.commandID,
+                payload: RelayCommandAck(commandId: request.commandID, status: "accepted", errorCode: nil, message: nil))
+            let result = await executeSessionStart(request)
+            _ = await send(type: "command.ack", sessionId: request.sessionID.uuidString.lowercased(), commandId: request.commandID,
+                payload: RelayCommandAck(commandId: request.commandID, status: result.succeeded ? "completed" : "rejected",
+                    errorCode: result.errorCode, message: result.message))
+            return
+        }
         guard registered, let command = decodeCommand(envelope) else { return }
         if completedCommands.contains(command.commandId) {
             await acknowledge(command, result: .completed)
@@ -665,6 +688,7 @@ actor RemoteClient {
                 guard let values = value.array?.compactMap(\.string), !values.isEmpty else { return nil }
                 answers[questionID] = values
             }
+
             guard !answers.isEmpty else { return nil }
             return .resolveUserInput(
                 commandId: commandId,
@@ -675,6 +699,41 @@ actor RemoteClient {
             )
         default: return nil
         }
+    }
+
+    func executeSessionStart(_ request: RemoteSessionStart) async -> RemoteCommandResult {
+        if let existing = sessionStarts[request.commandID] {
+            guard existing.0 == request else { return .rejected("conflict", "Creation ID was reused") }
+            return await existing.1.value
+        }
+        guard sessionStarts.count < 4096 else {
+            return .rejected("limit", "Creation deduplication capacity reached; restart after verifying active sessions")
+        }
+        let handler = sessionStartHandler
+        let task = Task { await handler(request) }
+        sessionStarts[request.commandID] = (request, task)
+        return await task.value
+    }
+
+    func decodeSessionStart(_ envelope: IncomingRelayEnvelope) -> RemoteSessionStart? {
+        guard envelope.type == "session.start", let commandID = envelope.commandId,
+              let rawID = envelope.sessionId, let sessionID = UUID(uuidString: rawID), commandID == sessionID,
+              let payload = envelope.payload.object,
+              Set(payload.keys).isSubset(of: ["workspaceId", "toolKey", "runtimeMode", "displayName", "rows", "columns"]),
+              let workspaceID = payload["workspaceId"]?.string, !workspaceID.isEmpty, workspaceID.count <= 128,
+              let toolKey = payload["toolKey"]?.string, !toolKey.isEmpty, toolKey.count <= 128,
+              let mode = payload["runtimeMode"]?.string, ["pty", "acp"].contains(mode) else { return nil }
+        let rows = payload["rows"]?.integer ?? 24
+        let columns = payload["columns"]?.integer ?? 80
+        if mode == "pty" {
+            guard payload["rows"]?.integer != nil, payload["columns"]?.integer != nil,
+                  (1...1000).contains(rows), (1...1000).contains(columns) else { return nil }
+        } else if payload["rows"] != nil || payload["columns"] != nil { return nil }
+        if let name = payload["displayName"] {
+            guard let text = name.string, !text.isEmpty, text.count <= 128 else { return nil }
+        }
+        return RemoteSessionStart(commandID: commandID, sessionID: sessionID, workspaceID: workspaceID,
+            toolKey: toolKey, runtimeMode: mode, displayName: payload["displayName"]?.string, rows: rows, columns: columns)
     }
 
     private func acknowledge(_ command: RemoteTerminalCommand, result: RemoteCommandResult) async {

@@ -5,6 +5,7 @@ import StructuredAgentView from '../components/StructuredAgentView.vue';
 import ApprovalInbox from '../components/ApprovalInbox.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
 import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
+import SessionStartPanel from '../components/SessionStartPanel.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -16,6 +17,7 @@ const sessionPendingDelete = ref<SessionRecord>();
 const purgeAssociatedData = ref(false);
 const deletingSession = ref(false);
 const shortcutsOpen = ref(false);
+const sessionStartOpen = ref(false);
 let toastTimer: number | undefined;
 
 const connectionLabel = computed(() => {
@@ -79,6 +81,7 @@ onBeforeUnmount(() => {
 <template>
   <main class="console-page">
     <Teleport to="#app-header-actions" defer>
+      <button type="button" @click="sessionStartOpen = true">新建会话</button>
       <button type="button" @click="shortcutsOpen = true">快捷任务</button>
       <div class="connection-pill" :data-state="relay.connectionState" role="status">
         <span />{{ connectionLabel }}
@@ -139,7 +142,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="empty-state">
           <strong>{{ originFilter === 'external' ? '暂无项目调用' : '暂无手动会话' }}</strong>
-          <span>{{ originFilter === 'external' ? '项目通过 AI API 创建的会话会显示在这里。' : 'Mac 注册并上传会话后会显示在这里。' }}</span>
+          <span>{{ originFilter === 'external' ? '项目通过 AI API 创建的会话会显示在这里。' : '点击“新建会话”选择已授权的在线 Mac / Linux 工作区。' }}</span>
         </div>
       </aside>
 
@@ -219,6 +222,13 @@ onBeforeUnmount(() => {
         @toggle-notifications="relay.setApprovalNotifications"
       />
     </section>
+
+    <div v-if="sessionStartOpen" class="modal-backdrop" role="presentation" @click.self="sessionStartOpen = false">
+      <div class="shortcut-dialog" role="dialog" aria-modal="true" aria-label="远程创建会话">
+        <button type="button" class="shortcut-close" aria-label="关闭" @click="sessionStartOpen = false">×</button>
+        <SessionStartPanel @created="sessionStartOpen = false; originFilter = 'local'" />
+      </div>
+    </div>
 
     <div v-if="shortcutsOpen" class="modal-backdrop" role="presentation" @click.self="shortcutsOpen = false">
       <div class="shortcut-dialog" role="dialog" aria-modal="true" aria-label="快捷任务">

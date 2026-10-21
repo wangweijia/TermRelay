@@ -24,6 +24,7 @@ import { SessionsService } from '../sessions/sessions.service';
 import { ShortcutsService } from '../shortcuts/shortcuts.service';
 import { FilePreviewService } from '../sessions/file-preview.service';
 import { AIService } from '../ai/ai.service';
+import { SessionStartService } from '../sessions/session-start.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
 import {
@@ -67,6 +68,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly shortcuts?: ShortcutsService,
     @Optional() private readonly previews?: FilePreviewService,
     @Optional() private readonly ai?: AIService,
+    @Optional() private readonly starts?: SessionStartService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -115,6 +117,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       if (this.registry.getClient(envelope.deviceId) && this.registry.getClient(envelope.deviceId) !== client) {
         await this.shortcuts?.disconnected(envelope.deviceId);
+        await this.starts?.disconnected(envelope.deviceId);
       }
       const device = this.registry.register(
         client,
@@ -167,6 +170,13 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
     if (result.message.type === 'command.ack') {
+      try {
+        if (await this.starts?.acknowledge(client, result.message.envelope)) return;
+      } catch (error) {
+        this.logger.error(`Failed to persist creation acknowledgement: ${String(error)}`);
+        this.sendProtocolError(client, 'conflict', 'Creation acknowledgement could not be accepted.', result.message.envelope.messageId);
+        return;
+      }
       const acknowledged = await this.commands?.acknowledge(
         client,
         result.message.envelope,
