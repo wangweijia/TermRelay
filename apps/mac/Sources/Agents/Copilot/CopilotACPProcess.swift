@@ -25,7 +25,7 @@ enum CopilotReasoningEffort: String, CaseIterable, Sendable {
     }
 }
 
-final class CopilotACPProcess: @unchecked Sendable, CopilotACPTransport {
+final class CopilotACPProcess: @unchecked Sendable, ACPTransport {
     let lines: AsyncThrowingStream<Data, Error>
 
     private let executableURL: URL

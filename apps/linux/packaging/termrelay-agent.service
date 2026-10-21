@@ -1,0 +1,17 @@
+[Unit]
+Description=TermRelay headless user agent
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/termrelay-agent run
+Restart=on-failure
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=60
+UMask=0077
+
+[Install]
+WantedBy=default.target

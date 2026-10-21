@@ -13,7 +13,6 @@ import type {
   ToolUserInputResolvePayload,
 } from '@termrelay/contracts';
 import {
-  envelopeSchema,
   toolConfigSetSchema,
   sessionInterruptSchema,
   sessionStopSchema,
@@ -26,7 +25,7 @@ import {
   toolTurnStartSchema,
   toolUserInputResolveSchema,
 } from '@termrelay/contracts';
-import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
+import { ProtocolSchemaValidator, type SchemaValidationResult } from './protocol-schema-validator';
 
 export type ValidBrowserMessage =
   | { type: 'session.subscribe'; envelope: Envelope<SessionSubscribePayload> }
@@ -44,122 +43,38 @@ export type ValidBrowserMessage =
   | { type: 'tool.approval.resolve'; envelope: Envelope<ToolApprovalResolvePayload> }
   | { type: 'tool.user-input.resolve'; envelope: Envelope<ToolUserInputResolvePayload> };
 
-export type BrowserValidationResult =
-  | { ok: true; message: ValidBrowserMessage }
-  | {
-      ok: false;
-      code: 'invalid_message' | 'unsupported_version';
-      detail: string;
-      relatedMessageId?: string;
-    };
+export type BrowserValidationResult = SchemaValidationResult<ValidBrowserMessage>;
 
 @Injectable()
 export class BrowserProtocolValidator {
-  private readonly envelopeValidator: ValidateFunction;
-  private readonly payloadValidators: ReadonlyMap<string, ValidateFunction>;
-
-  constructor() {
-    const ajv = new Ajv2020({ allErrors: true, strict: true });
-    ajv.addFormat('uuid', UUID_PATTERN);
-    ajv.addFormat('date-time', (value: string) => {
-      return ISO_DATE_TIME_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
-    });
-    this.envelopeValidator = ajv.compile(envelopeSchema);
-    this.payloadValidators = new Map([
-      ['session.subscribe', ajv.compile(sessionSubscribeSchema)],
-      ['session.unsubscribe', ajv.compile(sessionUnsubscribeSchema)],
-      ['terminal.input', ajv.compile(terminalInputSchema)],
-      ['terminal.resize', ajv.compile(terminalResizeSchema)],
-      ['session.interrupt', ajv.compile(sessionInterruptSchema)],
-      ['session.stop', ajv.compile(sessionStopSchema)],
-      ['tool.turn.start', ajv.compile(toolTurnStartSchema)],
-      ['tool.config.set', ajv.compile(toolConfigSetSchema)],
-      ['tool.turn.interrupt', ajv.compile(toolTurnInterruptSchema)],
-      ['tool.approval.resolve', ajv.compile(toolApprovalResolveSchema)],
-      ['tool.user-input.resolve', ajv.compile(toolUserInputResolveSchema)],
-    ]);
-  }
+  private readonly schemas = new ProtocolSchemaValidator<ValidBrowserMessage>('browser', {
+    'session.subscribe': sessionSubscribeSchema,
+    'session.unsubscribe': sessionUnsubscribeSchema,
+    'terminal.input': terminalInputSchema,
+    'terminal.resize': terminalResizeSchema,
+    'session.interrupt': sessionInterruptSchema,
+    'session.stop': sessionStopSchema,
+    'tool.turn.start': toolTurnStartSchema,
+    'tool.config.set': toolConfigSetSchema,
+    'tool.turn.interrupt': toolTurnInterruptSchema,
+    'tool.approval.resolve': toolApprovalResolveSchema,
+    'tool.user-input.resolve': toolUserInputResolveSchema,
+  });
 
   validate(input: unknown): BrowserValidationResult {
-    const record = asRecord(input);
-    const relatedMessageId = readUuid(record?.messageId);
-    if (record && record.protocolVersion !== undefined && record.protocolVersion !== '2') {
-      return {
-        ok: false,
-        code: 'unsupported_version',
-        detail: 'Only protocol version 2 is supported.',
-        ...(relatedMessageId ? { relatedMessageId } : {}),
-      };
-    }
-
-    if (!this.envelopeValidator(input)) {
-      return invalid(formatErrors(this.envelopeValidator.errors), relatedMessageId);
-    }
-
-    const envelope = input as Envelope;
-    const payloadValidator = this.payloadValidators.get(envelope.type);
-    if (!payloadValidator) {
-      return invalid(
-        `Unsupported browser message type: ${envelope.type}`,
-        envelope.messageId,
-      );
-    }
-    if (!payloadValidator(envelope.payload)) {
-      return invalid(
-        `${envelope.type} payload: ${formatErrors(payloadValidator.errors)}`,
-        envelope.messageId,
-      );
-    }
+    const result = this.schemas.validate(input);
+    if (!result.ok) return result;
+    const { type, envelope } = result.message;
     if (!envelope.sessionId) {
       return invalid(`${envelope.type} requires sessionId.`, envelope.messageId);
     }
 
-    if (isRemoteCommand(envelope.type) && !envelope.commandId) {
+    if (type !== 'session.subscribe' && type !== 'session.unsubscribe' && !envelope.commandId) {
       return invalid(`${envelope.type} requires commandId.`, envelope.messageId);
     }
 
-    return asValidBrowserMessage(envelope);
+    return result;
   }
-}
-
-function asValidBrowserMessage(envelope: Envelope): BrowserValidationResult {
-  switch (envelope.type) {
-    case 'session.subscribe':
-      return valid(envelope.type, envelope as unknown as Envelope<SessionSubscribePayload>);
-    case 'session.unsubscribe':
-      return valid(envelope.type, envelope as unknown as Envelope<SessionUnsubscribePayload>);
-    case 'terminal.input':
-      return valid(envelope.type, envelope as unknown as Envelope<TerminalInputPayload>);
-    case 'terminal.resize':
-      return valid(envelope.type, envelope as unknown as Envelope<TerminalResizePayload>);
-    case 'session.interrupt':
-      return valid(envelope.type, envelope as unknown as Envelope<SessionInterruptPayload>);
-    case 'session.stop':
-      return valid(envelope.type, envelope as unknown as Envelope<SessionStopPayload>);
-    case 'tool.turn.start':
-      return valid(envelope.type, envelope as unknown as Envelope<ToolTurnStartPayload>);
-    case 'tool.config.set':
-      return valid(envelope.type, envelope as unknown as Envelope<{ id: 'model' | 'effort'; value: string }>);
-    case 'tool.turn.interrupt':
-      return valid(envelope.type, envelope as unknown as Envelope<ToolTurnInterruptPayload>);
-    case 'tool.approval.resolve':
-      return valid(envelope.type, envelope as unknown as Envelope<ToolApprovalResolvePayload>);
-    case 'tool.user-input.resolve':
-      return valid(envelope.type, envelope as unknown as Envelope<ToolUserInputResolvePayload>);
-    default:
-      throw new Error(`Payload validator missing for ${envelope.type}.`);
-  }
-}
-
-function valid<TType extends ValidBrowserMessage['type']>(
-  type: TType,
-  envelope: Envelope<unknown>,
-): BrowserValidationResult {
-  return { ok: true, message: { type, envelope } as ValidBrowserMessage };
-}
-
-function isRemoteCommand(type: string): boolean {
-  return ['terminal.input', 'terminal.resize', 'session.interrupt', 'session.stop', 'tool.turn.start', 'tool.config.set', 'tool.turn.interrupt', 'tool.approval.resolve', 'tool.user-input.resolve'].includes(type);
 }
 
 function invalid(
@@ -173,28 +88,3 @@ function invalid(
     ...(relatedMessageId ? { relatedMessageId } : {}),
   };
 }
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function readUuid(value: unknown): string | undefined {
-  return typeof value === 'string' && UUID_PATTERN.test(value)
-    ? value
-    : undefined;
-}
-
-function formatErrors(errors: ErrorObject[] | null | undefined): string {
-  if (!errors?.length) return 'Schema validation failed.';
-  return errors
-    .map((error) => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`)
-    .join('; ')
-    .slice(0, 1_500);
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const ISO_DATE_TIME_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;

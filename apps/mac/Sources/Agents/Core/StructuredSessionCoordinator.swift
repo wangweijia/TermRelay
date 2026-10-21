@@ -23,10 +23,7 @@ actor StructuredSessionCoordinator {
         continuation = stream.continuation
     }
 
-    func start(
-        request: AgentSessionRequest,
-        afterRuntimeStart: @MainActor @Sendable () throws -> Void = {}
-    ) async throws {
+    func start(request: AgentSessionRequest) async throws {
         guard state == .created else {
             throw AgentError.invalidState(expected: "created", actual: state)
         }
@@ -35,7 +32,6 @@ actor StructuredSessionCoordinator {
         do {
             try await runtime.start()
             beginConsumingEvents()
-            try await afterRuntimeStart()
             reference = try await runtime.createSession(request)
             state = .ready
         } catch {

@@ -43,7 +43,7 @@ struct TermRelayApp: App {
                 .task { appModel.connectToServer() }
         }
         Settings {
-            ServerSettingsView()
+            AppSettingsView()
                 .environmentObject(appModel)
         }
     }

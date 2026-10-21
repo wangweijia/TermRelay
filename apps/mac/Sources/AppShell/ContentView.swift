@@ -1005,7 +1005,7 @@ private struct SessionSummaryView: View {
         ContentUnavailableView {
             Label(session.displayName, systemImage: "rectangle.stack")
         } description: {
-            Text("已选择该会话。当前多终端运行时正在独立开发，接入后将在这里切换对应终端。")
+            Text("该会话的本地运行时已不可用。请关闭此记录后创建新会话；这不会重新连接或恢复原进程。")
         } actions: {
             Button("创建新会话", action: newSessionAction)
         }

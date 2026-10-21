@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import type WebSocket from 'ws';
 import { ClientGateway } from './client.gateway';
+import { PublicClientGateway } from './public-client.gateway';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { ProtocolValidator } from './protocol-validator';
 import type { SessionsService } from '../sessions/sessions.service';
 import type { CommandRelayService } from './command-relay.service';
 import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
+import type { AIService } from '../ai/ai.service';
 import type {
   SessionStartedPayload,
   SessionEndedPayload,
@@ -31,7 +33,7 @@ test('registers a client, acknowledges registration, and accepts heartbeats', ()
     }),
   );
 
-  assert.equal(registry.getConnectionState(client), 'registered');
+  assert.equal(registry.isRegisteredClient(client, 'device-a'), true);
   assert.equal(registry.getDevice('device-a')?.presence, 'online');
   const acknowledgement = socket.messages[0];
   assert.equal(acknowledgement?.event, 'message');
@@ -118,7 +120,7 @@ test('reports invalid payloads without registering the client', () => {
     }),
   );
 
-  assert.equal(registry.getConnectionState(client), 'connected');
+  assert.equal(registry.getDeviceId(client), undefined);
   assert.equal(socket.messages[0]?.data.payload.code, 'invalid_message');
   assert.equal(socket.closed.length, 0);
 });
@@ -418,7 +420,48 @@ test('deletes only owned finished Copilot history with the requested purge mode'
   assert.equal(sessions.deletions.length, 3);
 });
 
-function makeGateway() {
+test('public gateways require authorization independently of their class name', () => {
+  class RenamedPublicGateway extends PublicClientGateway {}
+  for (const Gateway of [PublicClientGateway, RenamedPublicGateway]) {
+    const { gateway, registry, authorizations } = makeGateway(Gateway);
+    const unauthorized = new FakeSocket();
+    gateway.handleConnection(unauthorized.asWebSocket());
+    assert.deepEqual(unauthorized.closed, [{ code: 1008, reason: 'unauthorized' }]);
+
+    const authorized = new FakeSocket();
+    const client = authorized.asWebSocket();
+    authorizations.attach(client, { credentialId: 'credential-a', deviceId: 'device-a', expiresAt: null });
+    gateway.handleConnection(client);
+    registry.register(client, 'device-a', {
+      name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['codex'],
+    });
+    assert.equal(registry.isRegisteredClient(client, 'device-a'), true);
+    assert.deepEqual(authorized.closed, []);
+  }
+});
+
+test('only LAN gateways publish AI capabilities', async () => {
+  class RenamedPublicGateway extends PublicClientGateway {}
+  for (const Gateway of [ClientGateway, PublicClientGateway, RenamedPublicGateway]) {
+    const publications: string[] = [];
+    const ai = {
+      publishCapabilities: (_client: WebSocket, deviceId: string) => publications.push(deviceId),
+    } as unknown as AIService;
+    const { gateway, authorizations } = makeGateway(Gateway, ai);
+    const client = new FakeSocket().asWebSocket();
+    authorizations.attach(client, { credentialId: 'credential-a', deviceId: 'device-a', expiresAt: null });
+    gateway.handleConnection(client);
+    await gateway.handleMessage(client, envelope('device-a', 'device.register', {
+      name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['codex'],
+    }));
+    await gateway.handleMessage(client, envelope('device-a', 'ai.capabilities', {
+      providers: [{ provider: 'codex', capacity: 1, workspaceEnabled: false }],
+    }));
+    assert.deepEqual(publications, Gateway === ClientGateway ? ['device-a'] : []);
+  }
+});
+
+function makeGateway(Gateway: typeof ClientGateway = ClientGateway, ai?: AIService) {
   const registry = new DeviceConnectionRegistry();
   const sessions = new FakeSessionsService();
   const commands = new FakeCommands();
@@ -428,12 +471,15 @@ function makeGateway() {
     sessions,
     commands,
     authorizations,
-    gateway: new ClientGateway(
+    gateway: new Gateway(
       new ProtocolValidator(),
       registry,
       sessions as unknown as SessionsService,
       commands as unknown as CommandRelayService,
       authorizations,
+      undefined,
+      undefined,
+      ai,
     ),
   };
 }

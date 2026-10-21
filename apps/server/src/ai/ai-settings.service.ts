@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { AIRepository } from './ai.repository';
 import { AIProjectKeyEntity } from './ai.entity';
 
-export const keySummary = ({id,revoked,grants}: AIProjectKeyEntity) => ({id,revoked,legacy:grants.unrestricted !== true});
+const keySummary = ({id,revoked,grants}: AIProjectKeyEntity) => ({id,revoked,legacy:grants.unrestricted !== true});
 
 @Injectable()
 export class AISettingsService {

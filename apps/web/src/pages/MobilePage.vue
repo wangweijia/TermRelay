@@ -5,6 +5,7 @@ import StructuredAgentView from '../components/StructuredAgentView.vue';
 import TerminalView from '../components/TerminalView.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
 import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
+import SessionStartPanel from '../components/SessionStartPanel.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -13,6 +14,7 @@ const relay = useRelayStore();
 const originFilter = ref<'local' | 'external'>('local');
 const listedSessions = computed(() => relay.sessions.filter(s => (s.origin ?? 'local') === originFilter.value));
 const activeTab = ref<MobileTab>('sessions');
+const sessionStartOpen = ref(false);
 const toast = ref<string>();
 let toastTimer: number | undefined;
 let previousViewport: string | null = null;
@@ -67,7 +69,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <Transition name="toast"><div v-if="toast" class="mobile-toast">{{ toast }}</div></Transition>
 
     <section v-show="activeTab === 'sessions'" class="mobile-screen mobile-sessions">
-      <div class="mobile-section-heading"><strong>{{ listedSessions.length }} 个会话</strong><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
+      <div class="mobile-section-heading"><strong>{{ listedSessions.length }} 个会话</strong><button @click="sessionStartOpen = true">新建</button><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
       <SessionSourceSwitch v-model="originFilter" :manual-count="relay.sessions.filter(s => s.origin !== 'external').length" :project-count="relay.sessions.filter(s => s.origin === 'external').length" />
       <div class="mobile-session-list">
         <article v-for="session in listedSessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
@@ -104,6 +106,13 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <section v-show="activeTab === 'shortcuts'" class="mobile-screen mobile-shortcuts">
       <ShortcutPanel :active="activeTab === 'shortcuts'" />
     </section>
+
+    <div v-if="sessionStartOpen" class="modal-backdrop" role="presentation" @click.self="sessionStartOpen = false">
+      <div class="shortcut-dialog" role="dialog" aria-modal="true" aria-label="远程创建会话">
+        <button type="button" class="shortcut-close" aria-label="关闭" @click="sessionStartOpen = false">×</button>
+        <SessionStartPanel @created="sessionStartOpen = false; originFilter = 'local'; activeTab = 'workspace'" />
+      </div>
+    </div>
 
     <nav class="mobile-tabs" aria-label="主要功能">
       <button :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'"><span>▤</span>会话</button>

@@ -13,13 +13,13 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
     let configuredExecutableURL: URL?
     let reasoningEffort: CopilotReasoningEffort
     let initialContext: String?
-    let transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)?
+    let transportFactory: (@Sendable (URL, URL, [String: String]) -> any ACPTransport)?
 
     init(
         configuredExecutableURL: URL? = nil,
         reasoningEffort: CopilotReasoningEffort = .automatic,
         initialContext: String? = nil,
-        transportFactory: (@Sendable (URL, URL, [String: String]) -> any CopilotACPTransport)? = nil
+        transportFactory: (@Sendable (URL, URL, [String: String]) -> any ACPTransport)? = nil
     ) {
         self.configuredExecutableURL = configuredExecutableURL
         self.reasoningEffort = reasoningEffort
@@ -61,7 +61,7 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
             workspaceURL: configuration.workspaceURL,
             providerVersion: installation.version,
             initialContext: initialContext,
-            client: CopilotACPClient(transport: transport)
+            client: ACPClient(transport: transport, providerName: "Copilot")
         )
     }
 
@@ -75,7 +75,7 @@ struct CopilotStructuredAdapter: StructuredAgentAdapter {
             environment: environment,
             reasoningEffort: reasoningEffort
         )
-        let client = CopilotACPClient(transport: transport)
+        let client = ACPClient(transport: transport, providerName: "Copilot")
         defer { Task { await client.stop() } }
         let initialized = try await client.start()
         guard initialized.object?["protocolVersion"]?.integer == 1 else {
@@ -151,7 +151,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     private let sessionID: UUID
     private let workspaceURL: URL
     private var initialContext: String?
-    private let client: CopilotACPClient
+    private let client: ACPClient
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
     private var promptTask: Task<Void, Never>?
@@ -183,7 +183,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         workspaceURL: URL,
         providerVersion: String,
         initialContext: String? = nil,
-        client: CopilotACPClient
+        client: ACPClient
     ) {
         self.sessionID = sessionID
         self.workspaceURL = workspaceURL
@@ -450,7 +450,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         promptTask = nil
     }
 
-    private func receive(_ message: CopilotACPMessage) async {
+    private func receive(_ message: ACPMessage) async {
         switch message {
         case .notification(let method, let params):
             if method == "session/update" { receiveSessionUpdate(params) }

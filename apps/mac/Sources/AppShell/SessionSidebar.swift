@@ -268,7 +268,7 @@ private struct SessionSidebarRowContent: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: toolIcon)
+            Image(systemName: BuiltInTool(rawValue: session.toolID)?.iconName ?? "terminal")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(isRunning ? Color.accentColor : .secondary)
                 .frame(width: 24, height: 24)
@@ -303,15 +303,6 @@ private struct SessionSidebarRowContent: View {
 
     private var toolName: String {
         BuiltInTool(rawValue: session.toolID)?.displayName ?? session.toolID
-    }
-
-    private var toolIcon: String {
-        switch BuiltInTool(rawValue: session.toolID) {
-        case .codex: "sparkles"
-        case .copilot: "chevron.left.forwardslash.chevron.right"
-        case .dsh: "brain.head.profile"
-        default: "terminal"
-        }
     }
 
     private var stateColor: Color {
@@ -362,7 +353,7 @@ private struct ConnectionFooter: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .help("Server 设置")
+            .help("设置")
         }
         .padding(12)
     }

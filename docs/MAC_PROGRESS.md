@@ -62,7 +62,7 @@ PTY TUI、控制连接和审批 Hook Bridge。侧边栏可独立切换和停止�
 相关文件：
 
 - `apps/mac/Sources/AppShell/AppModel.swift`
-- `apps/mac/Sources/AppShell/ServerSettingsView.swift`
+- `apps/mac/Sources/AppShell/AppSettingsView.swift`（原 `ServerSettingsView.swift`）
 
 ### 4. 连接状态模型
 
@@ -93,7 +93,7 @@ starting → running → stopping → finished
     └───────────────→ failed
 ```
 
-阶段 0 的 `LocalTerminalSession` 已关联 SwiftTerm PTY、终端视图、输出批处理和进程生命周期；原有 `ManagedSession` 仍需在阶段 1 与多窗口状态统一。
+阶段 0 的 `LocalTerminalSession` 已关联 SwiftTerm PTY、终端视图、输出批处理和进程生命周期。当前 `ManagedSession` 仅作为元数据与历史状态快照；未被运行时使用的阶段 0 状态机已移除，实时状态由各运行时负责。
 
 相关文件：`apps/mac/Sources/Session/ManagedSession.swift`。
 
@@ -101,23 +101,25 @@ starting → running → stopping → finished
 
 已定义：
 
-- `TerminalRenderer`：接收终端字节和尺寸变化。
+- 阶段 0 曾定义 `TerminalRenderer` 占位协议，但实际终端直接使用 SwiftTerm；该未使用协议已移除。
 - `CLIToolAdapter`：为 CLI 工具生成启动配置。
 - `LaunchConfiguration`：描述可执行文件、参数、目录和环境变量。
 
-已增加 SwiftTerm/PTY 实现、登录 Shell Adapter、CodexAdapter、可执行文件搜索和终端环境构造。
+已增加 SwiftTerm/PTY 实现、登录 Shell Adapter、可执行文件搜索和终端环境构造。当前 Codex / Copilot / DSH 的 CLI 检测由 `BuiltInTool.makeAdapter()` 共用实现；结构化 Provider 适配器保持独立。
 
 相关文件：
 
-- `apps/mac/Sources/Terminal/TerminalRenderer.swift`
+- `apps/mac/Sources/Terminal/LocalTerminalSession.swift`
 - `apps/mac/Sources/Tools/CLIToolAdapter.swift`
 
 ### 7. 初始单元测试
 
-已编写两个 `ManagedSession` 状态机测试：
+阶段 0 曾编写两个 `ManagedSession` 状态机测试：
 
 - 正常状态转换。
 - 已结束会话不能重新运行。
+
+当前这两个测试已替换为元数据默认值与历史快照测试；实时状态与审批行为由运行时测试覆盖。
 
 2026-09-10 验证时，当前系统只选择了 `/Library/Developer/CommandLineTools`，工具链找不到 `XCTest`，因此测试未能执行。Mac 主程序本身已经构建成功；该问题属于本机测试工具链配置，不是测试断言失败。
 
@@ -147,7 +149,7 @@ starting → running → stopping → finished
 | 自动连接和设备注册 | 已完成 | 支持注册、心跳和指数退避重连 |
 | NSOpenPanel 目录选择 | 已完成 | 当前用于单活动终端 |
 | CLI 工具选择器 | 已完成 | 支持登录 Shell 和 Codex |
-| CodexAdapter | 基础完成 | 支持检测、环境构造和 PTY 启动 |
+| Codex CLI Adapter | 基础完成 | 通过 `BuiltInTool.makeAdapter()` 支持检测、环境构造和 PTY 启动 |
 | 多窗口和 ManagedSession | 部分完成 | 同一 App 窗口支持多个独立 PTY Session 并通过侧边栏切换；尚无独立 macOS 窗口 |
 | 菜单栏驻留 | 未实现 | 无 `MenuBarExtra` 或 AppKit 生命周期管理 |
 | 退出确认和进程清理 | 部分完成 | App 退出会终止进程，尚无会话数量确认框 |

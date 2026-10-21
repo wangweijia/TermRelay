@@ -14,9 +14,7 @@ struct TerminalProbeSnapshot: Sendable, Equatable {
     var droppedBytes: UInt64 = 0
 }
 
-/// Stage-0 relay probe. It follows the future network path's batching contract
-/// without requiring a Server: output is rendered immediately by SwiftTerm and
-/// copied here for 40 ms / 8 KiB bounded batching.
+/// SwiftTerm renders immediately; relay output is copied into bounded 40 ms / 8 KiB batches.
 final class TerminalOutputBatcher: @unchecked Sendable {
     typealias Handler = @Sendable (TerminalOutputBatch, TerminalProbeSnapshot) -> Void
 

@@ -54,7 +54,7 @@ final class ToolProxyConfigurationTests: XCTestCase {
         let directory = URL(fileURLWithPath: "/private/tmp/project")
         var proxy = ToolProxyConfiguration.inherited
         proxy.mode = .disabled
-        let launch = try CodexAdapter(configuredExecutableURL: executable)
+        let launch = try BuiltInTool.codex.makeAdapter(executableURL: executable)
             .makeLaunchConfiguration(directory: directory, proxy: proxy)
 
         XCTAssertEqual(launch.executableURL, executable)
@@ -64,6 +64,37 @@ final class ToolProxyConfigurationTests: XCTestCase {
             launch.environment["PATH"]?.split(separator: ":").first.map(String.init),
             executable.deletingLastPathComponent().path
         )
+    }
+
+    func testEveryToolDetectsItsConfiguredExecutableWithoutFallingBack() {
+        let executable = URL(fileURLWithPath: "/bin/echo")
+        let missing = URL(fileURLWithPath: "/tmp/termrelay-missing-\(UUID().uuidString)")
+        for tool in BuiltInTool.allCases {
+            XCTAssertEqual(tool.makeAdapter(executableURL: executable).detect(),
+                           ToolAvailability(isAvailable: true, detail: executable.path))
+            let unavailable = tool.makeAdapter(executableURL: missing).detect()
+            XCTAssertFalse(unavailable.isAvailable, tool.rawValue)
+            XCTAssertTrue(unavailable.detail.contains(missing.path), tool.rawValue)
+        }
+    }
+
+    func testACPOnlyToolsStillRejectPTYLaunches() {
+        for tool in [BuiltInTool.copilot, .dsh] {
+            XCTAssertThrowsError(try tool.makeAdapter(executableURL: URL(fileURLWithPath: "/bin/echo"))
+                .makeLaunchConfiguration(directory: URL(fileURLWithPath: "/tmp"), proxy: .inherited)) {
+                XCTAssertEqual($0 as? ToolLaunchError,
+                               .unsupportedMode("\(tool.displayName) 当前仅支持 ACP 模式"))
+            }
+        }
+    }
+
+    func testShellLaunchKeepsLoginShellSemantics() throws {
+        let executable = URL(fileURLWithPath: "/bin/zsh")
+        let launch = try BuiltInTool.shell.makeAdapter(executableURL: executable)
+            .makeLaunchConfiguration(directory: URL(fileURLWithPath: "/tmp"), proxy: .inherited)
+        XCTAssertEqual(launch.executableURL, executable)
+        XCTAssertEqual(launch.executableName, "-zsh")
+        XCTAssertEqual(launch.arguments, [])
     }
 
     func testExecutableSearchIncludesInstalledNVMNodeVersions() {

@@ -14,6 +14,7 @@ import type {
 } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
+import { readPositiveInteger } from '../common/config';
 import type {
   SessionEventRecord,
   SessionRecord,
@@ -128,15 +129,8 @@ export class BrowserGateway
 
     const { envelope } = result.message;
     if (
-      result.message.type === 'terminal.input' ||
-      result.message.type === 'terminal.resize' ||
-      result.message.type === 'session.interrupt' ||
-      result.message.type === 'session.stop' ||
-      result.message.type === 'tool.turn.start' ||
-      result.message.type === 'tool.config.set' ||
-      result.message.type === 'tool.turn.interrupt' ||
-      result.message.type === 'tool.approval.resolve' ||
-      result.message.type === 'tool.user-input.resolve'
+      result.message.type !== 'session.subscribe' &&
+      result.message.type !== 'session.unsubscribe'
     ) {
       if (!this.commands) {
         this.sendProtocolError(client, 'internal_error', 'Command relay is unavailable.', envelope.messageId);
@@ -144,7 +138,7 @@ export class BrowserGateway
       }
       const routed = await this.commands.route(
         client,
-        envelope as unknown as Envelope<Record<string, unknown>>,
+        envelope,
       );
       if (!routed.ok) {
         this.sendProtocolError(
@@ -171,10 +165,7 @@ export class BrowserGateway
       return;
     }
 
-    const subscribeEnvelope = result.message.type === 'session.subscribe'
-      ? result.message.envelope
-      : undefined;
-    if (!subscribeEnvelope) return;
+    const subscribeEnvelope = result.message.envelope;
     await this.subscribeSession(
       client,
       subscribeEnvelope.deviceId,
@@ -364,11 +355,4 @@ export class BrowserGateway
       this.logger.warn(`Failed to send ${envelope.type} to a browser client.`);
     }
   }
-}
-
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

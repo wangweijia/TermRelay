@@ -3,14 +3,19 @@
   "$id": "https://termrelay.local/contracts/commands/session-start.schema.json",
   "title": "session.start payload",
   "type": "object",
-  "required": ["workspaceId", "toolKey", "rows", "columns"],
+  "required": ["workspaceId", "toolKey", "runtimeMode"],
   "properties": {
-    "workspaceId": { "type": "string", "minLength": 1 },
-    "toolKey": { "type": "string", "minLength": 1 },
-    "initialPrompt": { "type": "string", "maxLength": 65536 },
+    "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "toolKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "runtimeMode": { "enum": ["pty", "acp"] },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },
     "rows": { "type": "integer", "minimum": 1, "maximum": 1000 },
     "columns": { "type": "integer", "minimum": 1, "maximum": 1000 }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [{
+    "if": { "properties": { "runtimeMode": { "const": "pty" } } },
+    "then": { "properties": { "rows": true, "columns": true }, "required": ["rows", "columns"] },
+    "else": { "properties": { "rows": false, "columns": false } }
+  }]
 }
-

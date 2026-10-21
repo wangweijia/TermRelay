@@ -29,13 +29,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var clientAuthorizationState: ClientAuthorizationState = .notRequired
     @Published var selectedTool: BuiltInTool = .shell
     @Published var copilotReasoningEffort: CopilotReasoningEffort = .automatic
-    @Published var codexInteractionMode: CodexInteractionMode {
-        didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
-    }
     @Published var acpSendShortcut: ACPSendShortcut {
         didSet { defaults.set(acpSendShortcut.rawValue, forKey: Keys.acpSendShortcut) }
     }
     @Published var sessionName = ""
+    @Published private(set) var remoteWorkspaceIDs: Set<String> = []
     @Published var aiServiceEnabled: Bool {
         didSet {
             defaults.set(aiServiceEnabled,forKey:"aiServiceEnabled")
@@ -61,7 +59,10 @@ final class AppModel: ObservableObject {
         didSet { persistProxyConfigurations() }
     }
     @Published var toolExecutablePaths: [String: String] {
-        didSet { defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths); Task { await publishAICapabilities() } }
+        didSet {
+            defaults.set(toolExecutablePaths, forKey: Keys.toolExecutablePaths)
+            Task { await publishAICapabilities(); await publishRemoteWorkspaces() }
+        }
     }
     @Published var serverURL: String {
         didSet {
@@ -98,6 +99,7 @@ final class AppModel: ObservableObject {
         self.credentialStore = credentialStore
         self.pairingClient = pairingClient
         self.quickActionStore = quickActionStore
+        remoteWorkspaceIDs = Set(defaults.stringArray(forKey: "remoteWorkspaceIDs") ?? [])
         aiServiceEnabled = defaults.bool(forKey:"aiServiceEnabled")
         aiWorkingDirectory = defaults.string(forKey:"aiWorkingDirectory") ?? ""
         do {
@@ -108,7 +110,6 @@ final class AppModel: ObservableObject {
         }
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
-        codexInteractionMode = .acp
         acpSendShortcut = defaults.string(forKey: Keys.acpSendShortcut)
             .flatMap(ACPSendShortcut.init(rawValue:)) ?? .commandEnter
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -176,11 +177,12 @@ final class AppModel: ObservableObject {
             aiHandler: { [weak self] type,payload in
                 guard let self else { return }
                 await self.aiRuntime.handle(type:type,payload:payload)
+            },
+            sessionStartHandler: { [weak self] request in
+                await self?.startRemoteSession(request) ?? .rejected("app_unavailable", "Mac App is shutting down.")
             }
         )
     }
-
-    func beginConnecting() { connectionState = .connecting }
 
     private func aiLaunch(configuration: AIExecutionConfiguration, root: URL, directory: URL) throws -> AILaunchContext {
         guard serverURL.hasSuffix("/ws/client"), let tool = BuiltInTool(rawValue:configuration.provider),
@@ -252,7 +254,7 @@ final class AppModel: ObservableObject {
         structuredSessions[id] = session
         sessions.append(ManagedSession(id:id,directory:directory,toolID:create.provider,displayName:create.displayName,runtimeMode:.acp,projectID:create.projectId))
         let workspace = workspaceID(for:directory)
-        await remoteClient.publishWorkspace(id:workspace,directory:directory)
+        await publishWorkspace(directory)
         await remoteClient.publishSession(id:id,workspaceId:workspace,toolKey:create.provider,displayName:create.displayName,runtimeMode:.acp,startedAt:session.startedAt,projectID:create.projectId)
     }
     private func observeAI(_ event: ToolEvent) async {
@@ -270,9 +272,6 @@ final class AppModel: ObservableObject {
             await remoteClient?.publishSessionEnded(id:id,status:.finished,finishedAt:RelayDate.now())
         }
     }
-    func markConnected() { connectionState = .connected }
-    func markOffline() { connectionState = .offline }
-
     func connectToServer() {
         guard !connectionStarted else { return }
         connectionStarted = true
@@ -379,14 +378,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addSession(directory: URL, toolID: String, displayName: String? = nil) {
-        sessions.append(
-            ManagedSession(directory: directory, toolID: toolID, displayName: displayName)
-        )
+    var selectedToolAvailability: ToolAvailability {
+        toolAvailability(for: selectedTool)
     }
 
-    var selectedToolAvailability: ToolAvailability {
-        selectedTool.makeAdapter(executableURL: configuredExecutableURL(for: selectedTool)).detect()
+    func toolAvailability(for tool: BuiltInTool) -> ToolAvailability {
+        tool.makeAdapter(executableURL: configuredExecutableURL(for: tool)).detect()
     }
     var suggestedSessionName: String {
         "\(selectedTool.displayName) — \(workingDirectory.lastPathComponent)"
@@ -417,13 +414,13 @@ final class AppModel: ObservableObject {
         }
         try credentialStore.write(trimmed, account: Keys.dshAPIKeyAccount)
         dshAPIKeyConfigured = true
-        Task { await publishAICapabilities() }
+        Task { await publishAICapabilities(); await publishRemoteWorkspaces() }
     }
 
     func removeDSHAPIKey() throws {
         try credentialStore.delete(account: Keys.dshAPIKeyAccount)
         dshAPIKeyConfigured = false
-        Task { await publishAICapabilities() }
+        Task { await publishAICapabilities(); await publishRemoteWorkspaces() }
     }
 
     func chooseExecutable(for tool: BuiltInTool) {
@@ -451,7 +448,12 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    func startLocalTerminal() -> UUID? {
+    func startLocalTerminal(
+        id: UUID = UUID(), directory: URL? = nil, tool: BuiltInTool? = nil,
+        name: String? = nil, publish: Bool = true
+    ) -> UUID? {
+        let selectedTool = tool ?? self.selectedTool
+        let workingDirectory = directory ?? self.workingDirectory
         do {
             guard selectedTool != .dsh, selectedTool != .copilot else {
                 throw ToolLaunchError.unsupportedMode("\(selectedTool.displayName) 当前仅支持 ACP 模式")
@@ -462,8 +464,9 @@ final class AppModel: ObservableObject {
                 errorMessage = validationMessage
                 return nil
             }
-            let displayName = normalizedSessionName
+            let displayName = name ?? normalizedSessionName
             let terminalSession = try LocalTerminalSession(
+                id: id,
                 directory: workingDirectory,
                 tool: selectedTool,
                 executableURL: configuredExecutableURL(for: selectedTool),
@@ -487,9 +490,9 @@ final class AppModel: ObservableObject {
             let workspaceID = workspaceID(for: workingDirectory)
             let directory = terminalSession.directory
             let toolKey = terminalSession.tool.rawValue
-            Task {
+            if publish { Task {
                 await remoteClient.setActiveSessionCount(activeSessionCount)
-                await remoteClient.publishWorkspace(id: workspaceID, directory: directory)
+                await publishWorkspace(directory)
                 await remoteClient.publishSession(
                     id: terminalSession.id,
                     workspaceId: workspaceID,
@@ -497,9 +500,9 @@ final class AppModel: ObservableObject {
                     displayName: displayName,
                     startedAt: terminalSession.startedAt
                 )
-            }
+            } }
             errorMessage = nil
-            sessionName = ""
+            if publish { sessionName = "" }
             return terminalSession.id
         } catch {
             errorMessage = error.localizedDescription
@@ -509,7 +512,6 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession(resuming savedSession: CopilotSavedSession? = nil) -> UUID? {
-        // TODO: Remove CodexInteractionMode and Codex PTY launch support after the ACP-only UI migration settles.
         if savedSession != nil && selectedTool != .copilot {
             errorMessage = "只能使用 Copilot 继续 Copilot 会话。"
             return nil
@@ -636,8 +638,12 @@ final class AppModel: ObservableObject {
     @discardableResult
     private func startStructuredSession(
         resuming savedSession: CopilotSavedSession? = nil,
-        initialContext: String? = nil
+        initialContext: String? = nil,
+        id: UUID = UUID(), directory: URL? = nil, tool: BuiltInTool? = nil,
+        name: String? = nil, publish: Bool = true
     ) -> UUID? {
+        let selectedTool = tool ?? self.selectedTool
+        let workingDirectory = directory ?? self.workingDirectory
         guard selectedTool == .codex || selectedTool == .copilot || selectedTool == .dsh,
               let remoteClient else {
             errorMessage = "该工具不支持结构化模式。"
@@ -661,7 +667,7 @@ final class AppModel: ObservableObject {
             errorMessage = "该 Copilot 会话已在 TermRelay 中运行。"
             return nil
         }
-        let displayName = normalizedSessionName
+        let displayName = name ?? normalizedSessionName
         let executableName = switch selectedTool {
         case .copilot: "copilot"
         case .dsh: "dsh"
@@ -672,7 +678,7 @@ final class AppModel: ObservableObject {
             errorMessage = "找不到 \(executableName) 可执行程序"
             return nil
         }
-        let sessionID = UUID()
+        let sessionID = id
         let sessionDirectory = workingDirectory
         var environment = TerminalEnvironment.make(proxy: proxy, executableURL: executableURL)
         let adapter: any StructuredAgentAdapter
@@ -728,9 +734,9 @@ final class AppModel: ObservableObject {
         ))
         let workspaceID = workspaceID(for: workingDirectory)
         let tool = selectedTool
-        Task {
+        if publish { Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)
-            await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+            await publishWorkspace(session.directory)
             await session.start()
             guard session.state == .ready else { return }
             await remoteClient.publishSession(
@@ -741,9 +747,9 @@ final class AppModel: ObservableObject {
                 runtimeMode: .acp,
                 startedAt: session.startedAt
             )
-        }
+        } }
         errorMessage = nil
-        sessionName = ""
+        if publish { sessionName = "" }
         return session.id
     }
 
@@ -938,9 +944,10 @@ final class AppModel: ObservableObject {
         let managedSessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
         Task {
             await remoteClient.setActiveSessionCount(activeSessionCount)
+            await publishRemoteWorkspaces()
             for session in activeSessions {
                 let workspaceID = workspaceID(for: session.directory)
-                await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+                await publishWorkspace(session.directory)
                 await remoteClient.publishSession(
                     id: session.id,
                     workspaceId: workspaceID,
@@ -952,7 +959,7 @@ final class AppModel: ObservableObject {
             }
             for session in activeStructured {
                 let workspaceID = workspaceID(for: session.directory)
-                await remoteClient.publishWorkspace(id: workspaceID, directory: session.directory)
+                await publishWorkspace(session.directory)
                 await remoteClient.publishSession(
                     id: session.id,
                     workspaceId: workspaceID,
@@ -976,6 +983,7 @@ final class AppModel: ObservableObject {
             guard let session = structuredSessions[sessionID] else {
                 return .rejected("unknown_session", "The requested structured session is not active.")
             }
+
             return await session.startTurn(text, idempotencyKey: commandID)
         case .setConfiguration(_, let sessionID, let id, let value):
             guard let session = structuredSessions[sessionID] else {
@@ -1023,6 +1031,107 @@ final class AppModel: ObservableObject {
         case .startTurn, .setConfiguration, .interruptTurn, .resolveApproval, .resolveUserInput:
             break
         }
+        return .completed
+    }
+
+    var remoteStartDirectories: [URL] {
+        let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
+        return identifiers.keys.filter { path in
+            identifiers[path].map { remoteWorkspaceIDs.contains($0) } ?? false
+        }.sorted().map { URL(fileURLWithPath: $0) }
+    }
+
+    func chooseRemoteStartDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        panel.prompt = "授权目录"
+        panel.message = "允许 Web / 手机在所选目录新建会话。不会创建会话或更改本地新建会话的工作目录。"
+        if panel.runModal() == .OK, let url = panel.url {
+            setWorkspaceRemoteStart(true, for: url)
+        }
+    }
+
+    func setWorkspaceRemoteStart(_ enabled: Bool, for directory: URL) {
+        let directory = directory.resolvingSymlinksInPath()
+        let id = workspaceID(for: directory)
+        if enabled { remoteWorkspaceIDs.insert(id) } else { remoteWorkspaceIDs.remove(id) }
+        defaults.set(Array(remoteWorkspaceIDs), forKey: "remoteWorkspaceIDs")
+        Task { await publishWorkspace(directory) }
+    }
+
+    private func remoteLaunchOptions(for directory: URL) -> [RelayLaunchOption] {
+        guard remoteWorkspaceIDs.contains(workspaceID(for: directory)) else { return [] }
+        var options: [RelayLaunchOption] = []
+        if toolAvailability(for: .shell).isAvailable {
+            options.append(RelayLaunchOption(toolKey: "shell", runtimeMode: "pty"))
+        }
+        for tool in [BuiltInTool.codex, .copilot, .dsh] {
+            if tool == .dsh && !dshAPIKeyConfigured { continue }
+            guard toolAvailability(for: tool).isAvailable else { continue }
+            options.append(RelayLaunchOption(toolKey: tool.rawValue, runtimeMode: "acp"))
+            if tool == .codex { options.append(RelayLaunchOption(toolKey: tool.rawValue, runtimeMode: "pty")) }
+        }
+        return options
+    }
+
+    private func publishRemoteWorkspaces() async {
+        let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
+        for (path, id) in identifiers where remoteWorkspaceIDs.contains(id) {
+            await publishWorkspace(URL(fileURLWithPath: path))
+        }
+    }
+
+    private func publishWorkspace(_ directory: URL) async {
+        await remoteClient?.publishWorkspace(id: workspaceID(for: directory), directory: directory,
+            launchOptions: remoteLaunchOptions(for: directory))
+    }
+
+    func startRemoteSession(_ request: RemoteSessionStart) async -> RemoteCommandResult {
+        let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
+        guard remoteWorkspaceIDs.contains(request.workspaceID),
+              let path = identifiers.first(where: { $0.value == request.workspaceID })?.key,
+              sessions.allSatisfy({ $0.id != request.sessionID }),
+              let tool = BuiltInTool(rawValue: request.toolKey) else {
+            return .rejected("unauthorized_workspace", "工作区未在本机授权远程创建，或会话 ID 已存在")
+        }
+        let directory = URL(fileURLWithPath: path)
+        var isDirectory: ObjCBool = false
+        guard directory.resolvingSymlinksInPath().path == path,
+              FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue,
+              remoteLaunchOptions(for: directory).contains(RelayLaunchOption(toolKey: request.toolKey, runtimeMode: request.runtimeMode)) else {
+            return .rejected("unavailable", "工作区路径已变化，或工具/模式不可用")
+        }
+        guard activeSessionCount < 8 else { return .rejected("limit", "最多同时运行 8 个会话") }
+        let name = request.displayName ?? "\(tool.displayName) — \(directory.lastPathComponent)"
+        if request.runtimeMode == "pty" {
+            guard startLocalTerminal(id: request.sessionID, directory: directory, tool: tool, name: name, publish: false) != nil,
+                  let terminal = terminalSessions[request.sessionID] else {
+                return .rejected("startup_failed", "PTY 启动失败；请检查 Mac 上的错误信息")
+            }
+            terminal.startIfNeeded()
+            terminal.resize(columns: request.columns, rows: request.rows)
+            guard terminal.state == .running else { return .rejected("startup_failed", "PTY 启动失败") }
+            await publishWorkspace(directory)
+            await remoteClient?.publishSession(id: terminal.id, workspaceId: request.workspaceID,
+                toolKey: tool.rawValue, displayName: name, startedAt: terminal.startedAt)
+        } else {
+            guard startStructuredSession(id: request.sessionID, directory: directory, tool: tool, name: name, publish: false) != nil,
+                  let session = structuredSessions[request.sessionID] else {
+                return .rejected("startup_failed", "ACP 启动失败；请检查 Mac 上的错误信息")
+            }
+            await session.start()
+            guard session.state == .ready else {
+                await session.stop()
+                return .rejected("startup_failed", "ACP 启动失败；请检查 Mac 上的错误信息")
+            }
+            await publishWorkspace(directory)
+            await remoteClient?.publishSession(id: session.id, workspaceId: request.workspaceID, toolKey: tool.rawValue,
+                displayName: name, runtimeMode: .acp, startedAt: session.startedAt)
+        }
+        updateActiveSessionCount()
         return .completed
     }
 
@@ -1106,11 +1215,9 @@ final class AppModel: ObservableObject {
 
     private enum Keys {
         static let serverURL = "serverURL"
-        static let deviceID = "deviceID"
         static let workspaceIDs = "workspaceIDs"
         static let proxyConfigurations = "toolProxyConfigurations"
         static let toolExecutablePaths = "toolExecutablePaths"
-        static let codexInteractionMode = "codexInteractionMode"
         static let acpSendShortcut = "acpSendShortcut"
         static let dshAPIKeyAccount = "deepseek.dsh.api-key"
         static let clientCredentialPrefix = "termrelay.client-credential."

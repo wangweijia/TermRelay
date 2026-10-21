@@ -2,21 +2,24 @@ import XCTest
 @testable import TermRelay
 
 final class ManagedSessionTests: XCTestCase {
-    func testHappyPathTransitions() throws {
-        var session = ManagedSession(directory: URL(fileURLWithPath: "/tmp/project"), toolID: "codex")
-        try session.transition(to: .running)
-        try session.transition(to: .stopping)
-        try session.transition(to: .finished)
-        XCTAssertEqual(session.state, .finished)
+    func testLocalSessionMetadataDefaultsToStartingPTY() {
+        let session = ManagedSession(directory: URL(fileURLWithPath: "/tmp/project"), toolID: "shell")
+        XCTAssertEqual(session.state, .starting)
+        XCTAssertEqual(session.runtimeMode, .pty)
+        XCTAssertNil(session.projectID)
     }
 
-    func testFinishedSessionCannotRestart() throws {
-        var session = ManagedSession(
+    func testArchivePreservesServerStateAndRuntimeMode() {
+        let session = ManagedSession(
             directory: URL(fileURLWithPath: "/tmp/project"),
             toolID: "codex",
-            state: .finished
+            runtimeMode: .acp,
+            state: .finished,
+            projectID: "project"
         )
-        XCTAssertThrowsError(try session.transition(to: .running))
+        XCTAssertEqual(session.state, .finished)
+        XCTAssertEqual(session.runtimeMode, .acp)
+        XCTAssertEqual(session.projectID, "project")
     }
 
     func testUsesCustomNameAndFallsBackToDirectoryName() {

@@ -7,6 +7,8 @@ for (const [name, path, next] of [
   ['toolEventSchema', './events/tool-event.schema.json', 'toolTurnStartSchema'],
   ['toolConfigSetSchema', './commands/tool-config-set.schema.json', 'toolTurnStartSchema'],
   ['sessionStartedSchema', './events/session-started.schema.json', 'sessionEndedSchema'],
+  ['sessionStartSchema', './commands/session-start.schema.json', 'terminalInputSchema'],
+  ['workspaceRegisteredSchema', './events/workspace-registered.schema.json', 'sessionStartedSchema'],
 ]) {
   const schema = JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
   const declaration = `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
@@ -20,6 +22,9 @@ for (const [name, path, next] of [
   }
 }
 const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', import.meta.url), 'utf8'));
+const toolEvent = JSON.parse(await readFile(new URL('./events/tool-event.schema.json', import.meta.url), 'utf8'));
+source = source.replace(/export type ToolEventKind =[\s\S]*?;/,
+  `export type ToolEventKind = ${toolEvent.properties.kind.enum.map(value => JSON.stringify(value)).join(' | ')};`);
 source = source.replace(/export interface DeviceRegisterPayload \{[\s\S]*?\n\}/, `export interface DeviceRegisterPayload {
   name: string;
   appVersion: string;
@@ -162,6 +167,24 @@ const historyDeclarations = await Promise.all(historySchemas.map(async ([name, f
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
 const marker = 'export interface SessionHistoryListPayload';
+const sessionStartType = `export interface SessionStartPayload {
+  workspaceId: string;
+  toolKey: string;
+  runtimeMode: SessionRuntimeMode;
+  rows?: number;
+  columns?: number;
+  displayName?: string;
+}`;
+source = source.includes('export interface SessionStartPayload')
+  ? source.replace(/export interface SessionStartPayload \{[\s\S]*?\n\}/, sessionStartType)
+  : source.replace('export interface SessionStartedPayload', sessionStartType + '\n\nexport interface SessionStartedPayload');
+source = source.replace(/export interface WorkspaceRegisteredPayload \{[\s\S]*?\n\}/, `export interface WorkspaceRegisteredPayload {
+  workspaceId: string;
+  displayName: string;
+  available: boolean;
+  remoteStartAllowed: boolean;
+  launchOptions?: { toolKey: string; runtimeMode: SessionRuntimeMode }[];
+}`);
 source = source.replace(/export interface SessionStartedPayload \{[\s\S]*?\n\}/, `export interface SessionStartedPayload {
   workspaceId: string;
   toolKey: string;
@@ -184,3 +207,31 @@ const filePreviewDeclarations = await Promise.all(filePreviewSchemas.map(async (
 }));
 await import('./generate-ai.mjs');
 await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('') + filePreviewTypes + filePreviewDeclarations.join('').trimEnd() + '\nexport * from "./ai.js";\n');
+
+const swiftURL = new URL('./generated/swift/ProtocolTypes.swift', import.meta.url);
+let swift = await readFile(swiftURL, 'utf8');
+swift = swift.replace(/public struct WorkspaceRegisteredPayload:[\s\S]*?\n\}/, `public struct WorkspaceRegisteredPayload: Codable, Sendable {
+    public let workspaceId: String
+    public let displayName: String
+    public let available: Bool
+    public let remoteStartAllowed: Bool
+    public let launchOptions: [SessionLaunchOption]?
+}`);
+const swiftStart = `public struct SessionLaunchOption: Codable, Sendable {
+    public let toolKey: String
+    public let runtimeMode: SessionRuntimeMode
+}
+
+public struct SessionStartPayload: Codable, Sendable {
+    public let workspaceId: String
+    public let toolKey: String
+    public let runtimeMode: SessionRuntimeMode
+    public let displayName: String?
+    public let rows: Int?
+    public let columns: Int?
+}
+
+`;
+swift = swift.replace(/public struct SessionLaunchOption:[\s\S]*?(?=public struct SessionStartedPayload)/, '');
+swift = swift.replace('public struct SessionStartedPayload', swiftStart + 'public struct SessionStartedPayload');
+await writeFile(swiftURL, swift);

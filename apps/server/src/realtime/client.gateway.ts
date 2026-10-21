@@ -24,6 +24,7 @@ import { SessionsService } from '../sessions/sessions.service';
 import { ShortcutsService } from '../shortcuts/shortcuts.service';
 import { FilePreviewService } from '../sessions/file-preview.service';
 import { AIService } from '../ai/ai.service';
+import { SessionStartService } from '../sessions/session-start.service';
 import { DeviceConnectionRegistry } from './device-connection.registry';
 import { CommandRelayService } from './command-relay.service';
 import {
@@ -56,6 +57,7 @@ function parseHistoryCursor(cursor: string): { updatedAt: Date; id: string } | u
 
 @WebSocketGateway({ path: '/ws/client' })
 export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  protected readonly isPublicGateway: boolean = false;
   private readonly logger = new Logger(ClientGateway.name);
 
   constructor(
@@ -67,10 +69,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly shortcuts?: ShortcutsService,
     @Optional() private readonly previews?: FilePreviewService,
     @Optional() private readonly ai?: AIService,
+    @Optional() private readonly starts?: SessionStartService,
   ) {}
 
   handleConnection(client: WebSocket): void {
-    if (this.isPublicGateway() && !this.authorizations?.get(client)) {
+    if (this.isPublicGateway && !this.authorizations?.get(client)) {
       client.close(1008, 'unauthorized');
       return;
     }
@@ -115,6 +118,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       if (this.registry.getClient(envelope.deviceId) && this.registry.getClient(envelope.deviceId) !== client) {
         await this.shortcuts?.disconnected(envelope.deviceId);
+        await this.starts?.disconnected(envelope.deviceId);
       }
       const device = this.registry.register(
         client,
@@ -161,12 +165,19 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     if (result.message.type === 'ai.capabilities' || result.message.type === 'ai.update') {
-      if (this.isPublicGateway()) return;
+      if (this.isPublicGateway) return;
       if (result.message.type === 'ai.capabilities') this.ai?.publishCapabilities(client,result.message.envelope.deviceId,result.message.envelope.payload);
       else await this.ai?.update(client,result.message.envelope.deviceId,result.message.envelope.payload);
       return;
     }
     if (result.message.type === 'command.ack') {
+      try {
+        if (await this.starts?.acknowledge(client, result.message.envelope)) return;
+      } catch (error) {
+        this.logger.error(`Failed to persist creation acknowledgement: ${String(error)}`);
+        this.sendProtocolError(client, 'conflict', 'Creation acknowledgement could not be accepted.', result.message.envelope.messageId);
+        return;
+      }
       const acknowledged = await this.commands?.acknowledge(
         client,
         result.message.envelope,
@@ -377,10 +388,6 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     return this.handleSessionEvent(client, result.message);
-  }
-
-  private isPublicGateway(): boolean {
-    return this.constructor.name === 'PublicClientGateway';
   }
 
   private async handleSessionEvent(

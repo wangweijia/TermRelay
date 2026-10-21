@@ -3,6 +3,70 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testRemoteStartCachesConcurrentRequestsAndFailuresWithoutRelaunching() async {
+        actor Counter {
+            var count = 0
+            func start() async -> RemoteCommandResult {
+                count += 1
+                try? await Task.sleep(for: .milliseconds(20))
+                return .rejected("startup_failed", "Synthetic startup failure")
+            }
+        }
+        let counter = Counter()
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in }, commandHandler: { _ in .completed },
+            sessionStartHandler: { _ in await counter.start() })
+        let id = UUID()
+        let request = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: "authorized",
+            toolKey: "codex", runtimeMode: "acp", displayName: nil, rows: 24, columns: 80)
+        async let first = client.executeSessionStart(request)
+        async let second = client.executeSessionStart(request)
+        let results = await [first, second]
+        XCTAssertTrue(results.allSatisfy { !$0.succeeded && $0.errorCode == "startup_failed" })
+        let replay = await client.executeSessionStart(request)
+        XCTAssertEqual(replay.errorCode, "startup_failed")
+        let count = await counter.count
+        XCTAssertEqual(count, 1)
+        let changed = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: "other",
+            toolKey: "codex", runtimeMode: "acp", displayName: nil, rows: 24, columns: 80)
+        let conflict = await client.executeSessionStart(changed)
+        XCTAssertEqual(conflict.errorCode, "conflict")
+    }
+
+    func testDecodesRemoteStartWithoutAnExistingSessionAndRejectsUnsafeFields() async {
+        let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in }, commandHandler: { _ in .completed })
+        let id = UUID()
+        let payload: [String: JSONValue] = [
+            "workspaceId": .string("workspace-1"), "toolKey": .string("codex"), "runtimeMode": .string("acp"),
+        ]
+        func envelope(_ input: [String: JSONValue], commandID: UUID? = nil) -> IncomingRelayEnvelope {
+            IncomingRelayEnvelope(type: "session.start", protocolVersion: "2", messageId: UUID(),
+                deviceId: "device", sessionId: id.uuidString, commandId: commandID ?? id, payload: .object(input))
+        }
+        let decoded = await client.decodeSessionStart(envelope(payload))
+        XCTAssertEqual(decoded?.sessionID, id)
+        XCTAssertEqual(decoded?.runtimeMode, "acp")
+        var pty = payload
+        pty["toolKey"] = .string("shell")
+        pty["runtimeMode"] = .string("pty")
+        pty["rows"] = .number(40)
+        pty["columns"] = .number(120)
+        let terminal = await client.decodeSessionStart(envelope(pty))
+        XCTAssertEqual(terminal?.rows, 40)
+        XCTAssertEqual(terminal?.columns, 120)
+        pty.removeValue(forKey: "rows")
+        let missingSize = await client.decodeSessionStart(envelope(pty))
+        XCTAssertNil(missingSize)
+        for (key, value) in [("path", JSONValue.string("/tmp")), ("initialPrompt", .string("run")),
+                             ("rows", .number(0)), ("runtimeMode", .string("invalid"))] {
+            var changed = payload
+            changed[key] = value
+            let rejected = await client.decodeSessionStart(envelope(changed))
+            XCTAssertNil(rejected)
+        }
+        let mismatched = await client.decodeSessionStart(envelope(payload, commandID: UUID()))
+        XCTAssertNil(mismatched)
+    }
+
     func testDecodesFilePreviewWithoutCommandOrSequence() async {
         let client = RemoteClient(deviceID: UUID(), stateHandler: { _, _ in },
                                   commandHandler: { _ in .completed })

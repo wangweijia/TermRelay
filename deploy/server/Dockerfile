@@ -8,7 +8,7 @@ COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY pnpm-lock.yaml ./
 RUN --mount=type=cache,id=termrelay-pnpm,target=/pnpm/store,sharing=locked \
-    pnpm install --frozen-lockfile --store-dir /pnpm/store
+    pnpm --filter @termrelay/server... --filter @termrelay/web... install --frozen-lockfile --store-dir /pnpm/store
 
 FROM build-dependencies AS contracts-build
 COPY packages/contracts packages/contracts

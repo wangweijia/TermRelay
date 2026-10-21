@@ -1,4 +1,5 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
+import type { WorkspaceRegisteredPayload } from '@termrelay/contracts';
 
 @Entity({ name: 'workspaces' })
 export class WorkspaceEntity {
@@ -16,6 +17,9 @@ export class WorkspaceEntity {
 
   @Column({ name: 'remote_start_allowed', type: 'boolean', default: false })
   remoteStartAllowed!: boolean;
+
+  @Column({ name: 'launch_options', type: 'json', nullable: true })
+  launchOptions!: WorkspaceRegisteredPayload['launchOptions'] | null;
 
   @Column({ name: 'created_at', type: 'datetime', precision: 3 })
   createdAt!: Date;

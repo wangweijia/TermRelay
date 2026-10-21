@@ -36,11 +36,26 @@ public struct WorkspaceRegisteredPayload: Codable, Sendable {
     public let displayName: String
     public let available: Bool
     public let remoteStartAllowed: Bool
+    public let launchOptions: [SessionLaunchOption]?
 }
 
 public enum SessionRuntimeMode: String, Codable, Sendable {
     case pty
     case acp
+}
+
+public struct SessionLaunchOption: Codable, Sendable {
+    public let toolKey: String
+    public let runtimeMode: SessionRuntimeMode
+}
+
+public struct SessionStartPayload: Codable, Sendable {
+    public let workspaceId: String
+    public let toolKey: String
+    public let runtimeMode: SessionRuntimeMode
+    public let displayName: String?
+    public let rows: Int?
+    public let columns: Int?
 }
 
 public struct SessionStartedPayload: Codable, Sendable {

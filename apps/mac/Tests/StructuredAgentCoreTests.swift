@@ -363,6 +363,10 @@ final class StructuredAgentCoreTests: XCTestCase {
     }
 }
 
+private extension AgentProviderID {
+    static let fake = Self(rawValue: "fake")
+}
+
 private struct FakeAgentAdapter: StructuredAgentAdapter {
     let providerID = AgentProviderID.fake
     let displayName = "Fake Agent"

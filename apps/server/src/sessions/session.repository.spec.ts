@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DataSource, EntityManager } from 'typeorm';
-import { SessionEventEntity } from './session-event.entity';
 import { SessionEntity } from './session.entity';
 import { SessionRepository } from './session.repository';
 

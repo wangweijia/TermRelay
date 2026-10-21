@@ -6,6 +6,8 @@ import type {
   ToolEventPayload,
 } from '@termrelay/contracts';
 import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
+import { readPositiveInteger } from '../common/config';
+import { canonicalJson } from '../common/json';
 import { SessionEventEntity } from './session-event.entity';
 import { SessionEntity, type SessionStatus } from './session.entity';
 
@@ -66,10 +68,6 @@ export class SessionRepository {
     @InjectDataSource()
     private readonly dataSource?: DataSource,
   ) {}
-
-  get enabled(): boolean {
-    return this.dataSource !== undefined;
-  }
 
   async registerStarted(
     deviceId: string,
@@ -540,20 +538,6 @@ function sameEvent(
   return event.type === type && canonicalJson(event.payload) === canonicalJson(payload);
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(sortJson(value));
-}
-
-function sortJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortJson);
-  if (typeof value !== 'object' || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, sortJson(item)]),
-  );
-}
-
 function toSessionRecord(session: SessionEntity): SessionRecord {
   return {
     id: session.id,
@@ -582,11 +566,4 @@ function toEventRecord(event: SessionEventEntity): SessionEventRecord {
     payload: event.payload,
     createdAt: event.createdAt.toISOString(),
   };
-}
-
-function readPositiveInteger(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

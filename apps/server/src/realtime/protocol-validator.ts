@@ -22,7 +22,6 @@ import {
   commandAckSchema,
   deviceHeartbeatSchema,
   deviceRegisterSchema,
-  envelopeSchema,
   sessionEndedSchema,
   sessionHistoryListSchema,
   sessionHistoryRequestSchema,
@@ -37,8 +36,8 @@ import {
   shortcutRunInputAckSchema,
   filePreviewResultSchema,
 } from '@termrelay/contracts';
-import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 import { aiCapabilitiesSchema, aiUpdateSchema, type AiCapabilities, type AiUpdate } from '@termrelay/contracts';
+import { ProtocolSchemaValidator, type SchemaValidationResult } from './protocol-schema-validator';
 
 export type ValidClientMessage =
   | { type: 'ai.capabilities'; envelope: Envelope<AiCapabilities> }
@@ -63,99 +62,45 @@ export type ValidClientMessage =
   | { type: 'shortcut.run.input.ack'; envelope: Envelope<ShortcutRunInputAckPayload> }
   | { type: 'file.preview.result'; envelope: Envelope<FilePreviewResultPayload> };
 
-export type ProtocolValidationResult =
-  | { ok: true; message: ValidClientMessage }
-  | {
-      ok: false;
-      code: 'invalid_message' | 'unsupported_version';
-      detail: string;
-      relatedMessageId?: string;
-    };
+export type ProtocolValidationResult = SchemaValidationResult<ValidClientMessage>;
 
 @Injectable()
 export class ProtocolValidator {
-  private readonly envelopeValidator: ValidateFunction;
-  private readonly payloadValidators: ReadonlyMap<string, ValidateFunction>;
-
-  constructor() {
-    const ajv = new Ajv2020({ allErrors: true, strict: true });
-    ajv.addFormat('uuid', UUID_PATTERN);
-    ajv.addFormat('date-time', (value: string) => {
-      return ISO_DATE_TIME_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
-    });
-    this.envelopeValidator = ajv.compile(envelopeSchema);
-    this.payloadValidators = new Map([
-      ['ai.capabilities', ajv.compile(aiCapabilitiesSchema)],
-      ['ai.update', ajv.compile(aiUpdateSchema)],
-      ['device.register', ajv.compile(deviceRegisterSchema)],
-      ['device.heartbeat', ajv.compile(deviceHeartbeatSchema)],
-      ['workspace.registered', ajv.compile(workspaceRegisteredSchema)],
-      ['session.started', ajv.compile(sessionStartedSchema)],
-      ['session.ended', ajv.compile(sessionEndedSchema)],
-      ['session.sync', ajv.compile({
-        ...sessionSyncSchema,
-        properties: { autoApproveEnabled: { type: 'boolean' } },
-        maxProperties: 1,
-      })],
-      ['session.history.list', ajv.compile(sessionHistoryListSchema)],
-      ['session.history.request', ajv.compile(sessionHistoryRequestSchema)],
-      ['session.history.delete', ajv.compile(sessionHistoryDeleteSchema)],
-      ['terminal.output', ajv.compile(terminalOutputSchema)],
-      ['tool.event', ajv.compile(toolEventSchema)],
-      ['command.ack', ajv.compile(commandAckSchema)],
-      ['shortcut.catalog', ajv.compile(shortcutCatalogSchema)],
-      ['shortcut.run.update', ajv.compile(shortcutRunUpdateSchema)],
-      ['shortcut.run.input.ack', ajv.compile(shortcutRunInputAckSchema)],
-      ['file.preview.result', ajv.compile(filePreviewResultSchema)],
-    ]);
-  }
+  private readonly schemas = new ProtocolSchemaValidator<ValidClientMessage>('client', {
+    'ai.capabilities': aiCapabilitiesSchema,
+    'ai.update': aiUpdateSchema,
+    'device.register': deviceRegisterSchema,
+    'device.heartbeat': deviceHeartbeatSchema,
+    'workspace.registered': workspaceRegisteredSchema,
+    'session.started': sessionStartedSchema,
+    'session.ended': sessionEndedSchema,
+    'session.sync': {
+      ...sessionSyncSchema,
+      properties: { autoApproveEnabled: { type: 'boolean' } },
+      maxProperties: 1,
+    },
+    'session.history.list': sessionHistoryListSchema,
+    'session.history.request': sessionHistoryRequestSchema,
+    'session.history.delete': sessionHistoryDeleteSchema,
+    'terminal.output': terminalOutputSchema,
+    'tool.event': toolEventSchema,
+    'command.ack': commandAckSchema,
+    'shortcut.catalog': shortcutCatalogSchema,
+    'shortcut.run.update': shortcutRunUpdateSchema,
+    'shortcut.run.input.ack': shortcutRunInputAckSchema,
+    'file.preview.result': filePreviewResultSchema,
+  });
 
   validate(input: unknown): ProtocolValidationResult {
-    const record = asRecord(input);
-    const relatedMessageId = readUuid(record?.messageId);
-
-    if (record && record.protocolVersion !== undefined && record.protocolVersion !== '2') {
-      return {
-        ok: false,
-        code: 'unsupported_version',
-        detail: 'Only protocol version 2 is supported.',
-        ...(relatedMessageId ? { relatedMessageId } : {}),
-      };
-    }
-
-    if (!this.envelopeValidator(input)) {
-      return {
-        ok: false,
-        code: 'invalid_message',
-        detail: formatErrors(this.envelopeValidator.errors),
-        ...(relatedMessageId ? { relatedMessageId } : {}),
-      };
-    }
-
-    const envelope = input as Envelope;
-    const payloadValidator = this.payloadValidators.get(envelope.type);
-    if (!payloadValidator) {
-      return {
-        ok: false,
-        code: 'invalid_message',
-        detail: `Unsupported client message type: ${envelope.type}`,
-        relatedMessageId: envelope.messageId,
-      };
-    }
-
-    if (!payloadValidator(envelope.payload)) {
-      return {
-        ok: false,
-        code: 'invalid_message',
-        detail: `${envelope.type} payload: ${formatErrors(payloadValidator.errors)}`,
-        relatedMessageId: envelope.messageId,
-      };
-    }
+    const result = this.schemas.validate(input);
+    if (!result.ok) return result;
+    const { message } = result;
+    const { envelope } = message;
 
     if (envelope.type === 'ai.capabilities' || envelope.type === 'ai.update') {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) return invalidContext(envelope,'AI messages must not include sessionId, seq or commandId.');
-      if (envelope.type === 'ai.capabilities') {
-        const providers = (envelope.payload as unknown as AiCapabilities).providers;
+      if (message.type === 'ai.capabilities') {
+        const providers = message.envelope.payload.providers;
         if (new Set(providers.map(p => p.provider)).size !== providers.length) return invalidContext(envelope,'AI providers must be unique.');
       }
     } else if (envelope.type === 'file.preview.result') {
@@ -167,8 +112,8 @@ export class ProtocolValidator {
       if (envelope.sessionId !== undefined || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, `${envelope.type} must not include sessionId, seq, or commandId.`);
       }
-      if (envelope.type === 'shortcut.catalog') {
-        const shortcuts = (envelope.payload as unknown as ShortcutCatalogPayload).shortcuts;
+      if (message.type === 'shortcut.catalog') {
+        const shortcuts = message.envelope.payload.shortcuts;
         if (new Set(shortcuts.map((shortcut) => shortcut.id.toLowerCase())).size !== shortcuts.length) {
           return invalidContext(envelope, 'shortcut.catalog contains duplicate IDs.');
         }
@@ -202,12 +147,12 @@ export class ProtocolValidator {
           `${envelope.type} requires sessionId and seq.`,
         );
       }
-      if (envelope.type === 'tool.event') {
-        const semanticError = validateToolEvent(envelope.payload as unknown as ToolEventPayload);
+      if (message.type === 'tool.event') {
+        const semanticError = validateToolEvent(message.envelope.payload);
         if (semanticError) return invalidContext(envelope, semanticError);
       }
-    } else if (envelope.type === 'command.ack') {
-      const payload = envelope.payload as unknown as CommandAckPayload;
+    } else if (message.type === 'command.ack') {
+      const payload = message.envelope.payload;
       if (!envelope.sessionId || !envelope.commandId || envelope.commandId !== payload.commandId) {
         return invalidContext(
           envelope,
@@ -216,12 +161,12 @@ export class ProtocolValidator {
       }
     }
 
-    return asValidClientMessage(envelope);
+    return result;
   }
 }
 
 function invalidContext(
-  envelope: Envelope,
+  envelope: Envelope<unknown>,
   detail: string,
 ): ProtocolValidationResult {
   return {
@@ -230,119 +175,6 @@ function invalidContext(
     detail,
     relatedMessageId: envelope.messageId,
   };
-}
-
-function asValidClientMessage(envelope: Envelope): ProtocolValidationResult {
-  switch (envelope.type) {
-    case 'ai.capabilities': return {ok:true,message:{type:envelope.type,envelope:envelope as unknown as Envelope<AiCapabilities>}};
-    case 'ai.update': return {ok:true,message:{type:envelope.type,envelope:envelope as unknown as Envelope<AiUpdate>}};
-    case 'device.register':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<DeviceRegisterPayload>,
-        },
-      };
-    case 'device.heartbeat':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<DeviceHeartbeatPayload>,
-        },
-      };
-    case 'workspace.registered':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<WorkspaceRegisteredPayload>,
-        },
-      };
-    case 'session.started':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionStartedPayload>,
-        },
-      };
-    case 'session.ended':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionEndedPayload>,
-        },
-      };
-    case 'session.sync':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionSyncPayload>,
-        },
-      };
-    case 'session.history.list':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionHistoryListPayload>,
-        },
-      };
-    case 'session.history.request':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionHistoryRequestPayload>,
-        },
-      };
-    case 'session.history.delete':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<SessionHistoryDeletePayload>,
-        },
-      };
-    case 'terminal.output':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<TerminalOutputPayload>,
-        },
-      };
-    case 'tool.event':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<ToolEventPayload>,
-        },
-      };
-    case 'command.ack':
-      return {
-        ok: true,
-        message: {
-          type: envelope.type,
-          envelope: envelope as unknown as Envelope<CommandAckPayload>,
-        },
-      };
-    case 'shortcut.catalog':
-      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutCatalogPayload> } };
-    case 'shortcut.run.update':
-      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunUpdatePayload> } };
-    case 'shortcut.run.input.ack':
-      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<ShortcutRunInputAckPayload> } };
-    case 'file.preview.result':
-      return { ok: true, message: { type: envelope.type, envelope: envelope as unknown as Envelope<FilePreviewResultPayload> } };
-    default:
-      throw new Error(`Payload validator missing for ${envelope.type}.`);
-  }
 }
 
 function validateToolEvent(payload: ToolEventPayload): string | undefined {
@@ -405,23 +237,4 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null
     ? (value as Record<string, unknown>)
     : undefined;
-}
-
-function readUuid(value: unknown): string | undefined {
-  return typeof value === 'string' && UUID_PATTERN.test(value)
-    ? value
-    : undefined;
-}
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const ISO_DATE_TIME_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
-
-function formatErrors(errors: ErrorObject[] | null | undefined): string {
-  if (!errors || errors.length === 0) return 'Schema validation failed.';
-  return errors
-    .map((error) => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`)
-    .join('; ')
-    .slice(0, 1_500);
 }

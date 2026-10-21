@@ -5,7 +5,7 @@ import XCTest
 final class DSHACPClientTests: XCTestCase {
     func testACPHandshakeFreshSessionTurnAndPermission() async throws {
         let transport = FakeACPTransport()
-        let client = DSHACPClient(transport: transport)
+        let client = ACPClient(transport: transport, providerName: "DSH")
         let sessionID = UUID()
         let runtimeHome = URL(fileURLWithPath: "/private/tmp/termrelay-dsh-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: runtimeHome, withIntermediateDirectories: true)

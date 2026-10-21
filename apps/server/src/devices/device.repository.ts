@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import type { DeviceSnapshot } from '../realtime/device-connection.registry';
 import { DeviceEntity } from './device.entity';
 
@@ -34,15 +34,7 @@ export class DeviceRepository implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     if (!this.dataSource) return;
     await this.repository.update(
-      { status: 'connected' },
-      { status: 'offline' },
-    );
-    await this.repository.update(
-      { status: 'degraded' },
-      { status: 'offline' },
-    );
-    await this.repository.update(
-      { status: 'connecting' },
+      { status: In(['connected', 'degraded', 'connecting']) },
       { status: 'offline' },
     );
   }
