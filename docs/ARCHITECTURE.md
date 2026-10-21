@@ -88,7 +88,7 @@ Mac 新会话同时进入本地 UI；Linux 无本地 UI 也应完成同样的交
 
 现已实现独立的 `/api/session-starts` 创建链路，不能复用“目标会话必须已存在”的命令路由：
 工作区发布 `remoteStartAllowed` 和可启动工具 / 模式的 `launchOptions`，旧客户端不公布该列表则不开放。
-Mac 在新建会话界面逐目录授权并保存在本地偏好；Linux 通过 CLI 配置，缺省均不授权。
+Mac 在“设置 → 工作区”中逐目录添加或取消授权并保存在本地偏好，与本地新建会话独立；Linux 通过 CLI 配置，缺省均不授权。
 Server 新增显式迁移，工作区只持久化能力元数据，`session_starts` 保存创建参数及结果，
 不保存工作目录真实路径。Web 提交 UUID 请求 ID，Server 先持久化，再以相同 session ID / command ID
 定向发送 `session.start`；PTY 必填尺寸，ACP 不接受尺寸，创建不提交首轮，不允许指定本地路径 / 脚本。

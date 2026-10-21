@@ -100,7 +100,7 @@ macOS 保留本地 UI，但也应支持从同一个 Web 入口远程创建会话
 Linux 对接 U-023 的会话管理，ACP 交付依赖 U-010 及对应 Provider。
 
 当前事实：公共 Schema、创建结果持久化及迁移、独立 Server REST / 设备路由、桌面 / 手机创建入口、
-Mac 本地会话工厂和 Linux Runtime 已接入。默认不授权，Mac 在新建会话界面逐目录选择，
+Mac 本地会话工厂和 Linux Runtime 已接入。默认不授权，Mac 在“设置 → 工作区”中逐目录管理授权，
 Linux 用 `workspace remote-start` 管理。合成 Provider / 本地 PTY 回归不替代目标环境与真实 Provider 验收。
 
 - [x] 在同一 Web 创建入口选择设备、已授权工作区、工具 / Provider 和运行模式，
@@ -119,7 +119,7 @@ Linux 用 `workspace remote-start` 管理。合成 Provider / 本地 PTY 回归�
   不从网络请求执行任意可执行文件、Shell 脚本或本地路径。
 - [x] 两端以同一语义发布 `session.started`、状态、事件和后续 ACK；
   macOS 新会话同步进入本地 UI，Linux 不需要任何 UI 才能运行。
-- [x] 明确本机授权远程创建的管理方式：macOS 使用新建会话中的目录授权，Linux 使用本地 CLI / 配置；
+- [x] 明确本机授权远程创建的管理方式：macOS 使用“设置 → 工作区”中的目录授权，Linux 使用本地 CLI / 配置；
   “支持该能力”不等于所有工作区默认放开远程执行。
 - [x] 将普通远程会话创建与现有外部 AI API 会话创建区分，复用适用的底层 Runtime，
   不改变 AI API 的外部归属、自动审批、隔离、容量及超时语义。

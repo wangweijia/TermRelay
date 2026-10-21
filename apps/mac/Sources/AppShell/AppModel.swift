@@ -1046,13 +1046,28 @@ final class AppModel: ObservableObject {
         return .completed
     }
 
-    var currentWorkspaceAllowsRemoteStart: Bool {
+    var remoteStartDirectories: [URL] {
         let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String] ?? [:]
-        return identifiers[workingDirectory.resolvingSymlinksInPath().path].map { remoteWorkspaceIDs.contains($0) } ?? false
+        return identifiers.keys.filter { path in
+            identifiers[path].map { remoteWorkspaceIDs.contains($0) } ?? false
+        }.sorted().map { URL(fileURLWithPath: $0) }
     }
 
-    func setCurrentWorkspaceRemoteStart(_ enabled: Bool) {
-        let directory = workingDirectory.resolvingSymlinksInPath()
+    func chooseRemoteStartDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        panel.prompt = "授权目录"
+        panel.message = "允许 Web / 手机在所选目录新建会话。不会创建会话或更改本地新建会话的工作目录。"
+        if panel.runModal() == .OK, let url = panel.url {
+            setWorkspaceRemoteStart(true, for: url)
+        }
+    }
+
+    func setWorkspaceRemoteStart(_ enabled: Bool, for directory: URL) {
+        let directory = directory.resolvingSymlinksInPath()
         let id = workspaceID(for: directory)
         if enabled { remoteWorkspaceIDs.insert(id) } else { remoteWorkspaceIDs.remove(id) }
         defaults.set(Array(remoteWorkspaceIDs), forKey: "remoteWorkspaceIDs")
