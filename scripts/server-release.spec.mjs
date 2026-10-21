@@ -8,6 +8,15 @@ import test from 'node:test';
 const root = new URL('../', import.meta.url);
 const imageId = `sha256:${'a'.repeat(64)}`;
 
+test('Docker build installs only Server, Web and their workspace dependencies', async () => {
+  const dockerfile = await readFile(new URL('deploy/server/Dockerfile', root), 'utf8');
+  const install = dockerfile.replace(/\\\r?\n\s*/g, ' ').split('\n')
+    .find(line => line.startsWith('RUN ') && /\bpnpm\b.*\binstall\b/.test(line));
+  assert.ok(install, 'Docker build must install dependencies');
+  assert.match(install, /\bpnpm --filter @termrelay\/server\.\.\. --filter @termrelay\/web\.\.\. install --frozen-lockfile\b/);
+  assert.doesNotMatch(install, /--ignore-scripts/);
+});
+
 async function fixture(t) {
   const parent = new URL('../dist/', import.meta.url);
   await mkdir(parent, { recursive: true });
