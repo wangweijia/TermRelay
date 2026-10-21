@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="TermRelay-AppIcon/TermRelay-AppIcon-1024.png" width="132" alt="TermRelay app icon">
+  <img src="apps/mac/packaging/AppIcon/TermRelay-AppIcon-1024.png" width="132" alt="TermRelay app icon">
 
   # TermRelay
 
@@ -234,7 +234,20 @@ pnpm mac:test
 
 # 构建全部 Node/Web 产物
 pnpm build
+
+# 各平台发布构建（需要对应的本机构建环境）
+pnpm release:mac
+pnpm release:linux
+pnpm release:server
+
+# 发布工具回归
+pnpm test:release
 ```
+
+发布构建入口统一在根目录 `scripts/build-*-release.sh`，产物位于
+`dist/termrelay-mac/`、`dist/termrelay-linux/`、`dist/termrelay-server/`。
+Linux `.deb` 需要在匹配架构的 Linux 主机上构建；原 `pnpm linux:deb` 保留为兼容入口。
+目录归属规则见 [工程结构与边界](docs/ARCHITECTURE.md#代码与工具放置规则)。
 
 Server 测试自动发现根目录和各模块编译后的 `*.spec.js`，包含远程创建会话测试；
 MySQL 探针默认跳过，仅在显式设置 `TERMRELAY_RUN_AI_MYSQL_PROBE=1` 时执行。

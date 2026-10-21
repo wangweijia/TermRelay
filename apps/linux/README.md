@@ -144,10 +144,15 @@ Provider 登录凭据仍由其 CLI 管理。
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm linux:deb
-sudo apt-get install "./apps/linux/dist/termrelay-linux_0.1.0_$(dpkg --print-architecture).deb"
+pnpm release:linux
+sudo apt-get install "./dist/termrelay-linux/termrelay-linux_0.1.0_$(dpkg --print-architecture).deb"
 termrelay-agent --version
 ```
+
+发布入口为根目录 `scripts/build-linux-release.sh`，暂存和私有运行时自检也归根目录
+`scripts/`；原 `pnpm linux:deb` 保留为兼容入口。包内 `scripts/build-native.cjs`
+只负责 supervisor 编译，launcher 和 systemd unit 保留在 `apps/linux/packaging/`。
+应用编译产物位于 `apps/linux/dist/`，发布 `.deb` 位于 `dist/termrelay-linux/`，二者分开。
 
 构建流程编译应用与 supervisor，在临时隔离 workspace 用 pnpm deploy 收集生产依赖，
 避免生产安装设置影响开发工作区；再复制当前 Node 可执行文件和

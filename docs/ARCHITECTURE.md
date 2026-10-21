@@ -13,12 +13,14 @@ termrelay/
 │   │   │   ├── Session/             # 会话状态机与进程编排
 │   │   │   ├── Remote/              # WebSocket、重连、消息路由
 │   │   │   └── Tools/               # CLI 工具适配器
-│   │   └── Tests/
+│   │   ├── Tests/
+│   │   └── packaging/AppIcon/        # macOS 发布图标，不属于 SwiftPM 源码
 │   ├── linux/                       # CLI / headless Agent（Ubuntu / Xubuntu）
 │   │   ├── src/                     # TypeScript CLI、服务、Codex stdio、PTY 与协议
 │   │   ├── native/                  # 小型 OS 进程归属 / flock supervisor
 │   │   ├── tests/                   # Node 合成 Provider、真实 PTY、WebSocket 闭环
-│   │   └── packaging/              # 内置 Node 的 Debian launcher 与 systemd 用户 unit
+│   │   ├── scripts/                 # 包内原生 supervisor 编译
+│   │   └── packaging/               # Debian launcher 与 systemd 用户 unit
 │   ├── server/
 │   │   └── src/
 │   │       ├── database/             # TypeORM 配置与显式 migration
@@ -36,11 +38,34 @@ termrelay/
 │       ├── envelope.schema.json      # 通用信封
 │       ├── commands/                 # Server → Mac payload
 │       ├── events/                   # Mac → Server payload
+│       ├── scripts/                  # 包内 TypeScript / Swift 协议生成器
 │       └── generated/                # 仅生成，不手工维护
 ├── deploy/server/                     # Docker 和本地依赖
-├── docs/                              # 评估、架构和 ADR
-└── scripts/                           # 仓库级自动检查
+├── docs/                              # 当前设计、使用说明和 ADR；archive/ 保存历史设计
+├── scripts/                           # 跨包验证、平台发布构建和发布自检
+└── dist/termrelay-{mac,linux,server}/   # 发布产物，忽略入库
 ```
+
+## 代码与工具放置规则
+
+按职责和依赖范围归属，不因为语言或平台不同另设例外：
+
+| 内容 | 放置位置 | 当前例子 |
+| --- | --- | --- |
+| 应用业务代码、平台运行时和应用测试 | `apps/<应用>/` | Mac SwiftPM、Linux CLI、Server、Web |
+| 多应用共享的协议源和生成产物 | `packages/contracts/` | JSON Schema、TypeScript / Swift DTO |
+| 仅服务单个包的编译、生成或诊断脚本 | 所属包的 `scripts/` | Linux `build-native.cjs`、Contracts 生成器、Server 联调探针 |
+| 仓库级发布构建、发布自检和跨包联调 | 根目录 `scripts/` | `build-*-release.sh`、Linux / Server 事件与远程创建验证 |
+| 随应用打包的静态资源 | `apps/<应用>/packaging/` | Mac 图标、Linux launcher 与 systemd unit |
+| 服务端部署配置和目标机部署脚本 | `deploy/server/` | Dockerfile、Compose、随离线包分发的 `deploy-release.sh` |
+| 当前文档与历史设计 | `docs/`、`docs/archive/` | 架构、ADR、早期 v1.2 设计归档 |
+
+根目录 `package.json` 提供统一命令入口，具体实现仍留在上述职责目录。
+`pnpm release:mac`、`pnpm release:linux`、`pnpm release:server` 均调用根目录发布脚本；
+`pnpm linux:deb` 仅是 Linux 发布命令的兼容别名，不保留旧位置的脚本副本。
+各包 `dist/` 保存编译产物，根目录 `dist/termrelay-*` 保存发布包，不能混用。
+普通应用测试保留在各自包内；跨应用验证留在根目录工具中，不让 Linux 测试目录承担 Server 的依赖。
+协议解析、进程与本地路径的所有权不因目录整理而迁移。
 
 ## 依赖方向
 

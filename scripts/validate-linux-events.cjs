@@ -1,5 +1,5 @@
 const { readFileSync } = require('node:fs');
-const { ProtocolValidator } = require('../../server/dist/realtime/protocol-validator.js');
+const { ProtocolValidator } = require('../apps/server/dist/realtime/protocol-validator.js');
 
 const packets = JSON.parse(readFileSync(0, 'utf8'));
 const validator = new ProtocolValidator();

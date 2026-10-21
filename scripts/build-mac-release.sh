@@ -206,7 +206,7 @@ while IFS= read -r -d '' resource_bundle; do
   ditto "$resource_bundle" "$resources_dir/$(basename "$resource_bundle")"
 done < <(find "$bin_dir" -maxdepth 1 -type d -name '*.bundle' -print0)
 
-icon_master="$repo_root/TermRelay-AppIcon/TermRelay-AppIcon-1024.png"
+icon_master="$package_dir/packaging/AppIcon/TermRelay-AppIcon-1024.png"
 [ -f "$icon_master" ] || { echo "App icon master not found: $icon_master" >&2; exit 1; }
 iconset_dir="$release_tmp/$product_name.iconset"
 mkdir -p "$iconset_dir"

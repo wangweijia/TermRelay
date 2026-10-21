@@ -17,6 +17,9 @@
 
 ## Area Conventions
 
+- Keep repository release builds, release checks, and cross-package integration tools in root `scripts/`; package-only compilation, generation, and diagnostics stay in the owning package's `scripts/`.
+- Keep application packaging resources in `apps/<app>/packaging/`, server deployment resources in `deploy/server/`, and release artifacts in root `dist/termrelay-<app>/`; package `dist/` is for compiled code.
+- Expose platform release builds through root `release:mac`, `release:linux`, and `release:server` commands. Do not add a second implementation at a legacy script path.
 - `apps/mac` is a Swift Package Manager app, not an Xcode project. Mac builds require a full Xcode toolchain with `metal`; Command Line Tools alone are insufficient. Preserve actor isolation: UI state belongs on `@MainActor`, while remote and structured-agent runtimes use actors and `Sendable` boundaries.
 - Mac process changes must preserve ownership-based cleanup, PTY fallback when structured startup fails, ordered session/event IDs, and bounded output buffering.
 - `apps/server` is NestJS with Fastify, native WebSockets, TypeORM, CommonJS output, and Node's built-in test runner. Tests are colocated as `*.spec.ts`.

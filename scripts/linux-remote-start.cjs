@@ -5,7 +5,8 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { createRequire } = require('node:module');
 const { setTimeout: delay } = require('node:timers/promises');
-const serverRequire = createRequire(join(__dirname, '../../server/package.json'));
+const serverRequire = createRequire(join(__dirname, '../apps/server/package.json'));
+const linuxRequire = createRequire(join(__dirname, '../apps/linux/package.json'));
 const { Module } = serverRequire('@nestjs/common');
 const { NestFactory } = serverRequire('@nestjs/core');
 const { FastifyAdapter } = serverRequire('@nestjs/platform-fastify');
@@ -16,10 +17,10 @@ const { DeviceConnectionRegistry } = serverRequire('./dist/realtime/device-conne
 const { SessionsService } = serverRequire('./dist/sessions/sessions.service');
 const { SessionStartService } = serverRequire('./dist/sessions/session-start.service');
 const { SessionStartController } = serverRequire('./dist/sessions/session-start.controller');
-const { ConfigStore } = require('../dist/src/config');
-const { AgentService } = require('../dist/src/service');
-const { CodexRuntime } = require('../dist/src/codex');
-const { JsonLineClient } = require('../dist/src/rpc');
+const { ConfigStore } = linuxRequire('./dist/src/config');
+const { AgentService } = linuxRequire('./dist/src/service');
+const { CodexRuntime } = linuxRequire('./dist/src/codex');
+const { JsonLineClient } = linuxRequire('./dist/src/rpc');
 
 async function until(check) {
   for (let i = 0; i < 1000; i++) {
@@ -108,7 +109,7 @@ async function main() {
       codex: (_path, cwd, emit) => {
         launches++;
         return new CodexRuntime('synthetic', cwd, emit, (_argv, directory, receive, fail) =>
-          new JsonLineClient([process.execPath, join(__dirname, '../dist/tests/fixtures/fake-codex.js')], directory, receive, fail));
+          new JsonLineClient([process.execPath, linuxRequire.resolve('./dist/tests/fixtures/fake-codex.js')], directory, receive, fail));
       },
     });
     running = agent.run();

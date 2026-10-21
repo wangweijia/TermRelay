@@ -1,5 +1,7 @@
 # TermRelay：开发实现文档
 
+> 历史设计归档。当前工程结构、能力与配置以根目录 [README](../../README.md) 和 [架构文档](../ARCHITECTURE.md) 为准。
+>
 > 版本：v1.2  
 > 用途：直接指导建仓、编码、联调和验收  
 > 产品定位：通用 AI CLI 终端与远程控制平台，Codex 只是首个适配工具
@@ -333,7 +335,7 @@ enum IntegrationType: String, Codable {
 | 工具调用与审批语义 | 不保证 | 适配器提供 |
 | 精确任务完成事件 | 不保证 | 适配器提供 |
 
-阶段 0 验证时，Codex 0.151.0 没有 ACP CLI 入口，但提供 `codex app-server` 结构化协议以及连接它的 `codex --remote` TUI 模式。项目已决定直接使用官方 App Server Protocol 实现 Codex 结构化增强，不通过 `codex-acp`；完整决策见 [`docs/ADR-001-CODEX-APP-SERVER.md`](docs/ADR-001-CODEX-APP-SERVER.md)，通用智能体接口和接入流程见 [`docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md`](docs/STRUCTURED_AGENT_ADAPTER_DESIGN.md)。App Server 是 CodexAdapter 的可选增强，不是 App 核心协议。MVP 先使用已经验证的 PTY 完成远程镜像和输入；之后以 Mac 本地 stdio 子进程实现 App Server Adapter，将原生事件转换成 TermRelay Contract，并保留 PTY 回退。
+阶段 0 验证时，Codex 0.151.0 没有 ACP CLI 入口，但提供 `codex app-server` 结构化协议以及连接它的 `codex --remote` TUI 模式。项目已决定直接使用官方 App Server Protocol 实现 Codex 结构化增强，不通过 `codex-acp`；完整决策见 [`ADR-001-CODEX-APP-SERVER.md`](../ADR-001-CODEX-APP-SERVER.md)，通用智能体接口和接入流程见 [`STRUCTURED_AGENT_ADAPTER_DESIGN.md`](../STRUCTURED_AGENT_ADAPTER_DESIGN.md)。App Server 是 CodexAdapter 的可选增强，不是 App 核心协议。MVP 先使用已经验证的 PTY 完成远程镜像和输入；之后以 Mac 本地 stdio 子进程实现 App Server Adapter，将原生事件转换成 TermRelay Contract，并保留 PTY 回退。
 
 ### 3.12 环境管理
 

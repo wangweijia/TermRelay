@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
-const root = new URL('./', import.meta.url);
+const root = new URL('../', import.meta.url);
 const schema = JSON.parse(await readFile(new URL('ai.schema.json', root), 'utf8'));
 const sharedDefinitions = structuredClone(schema.$defs);
 for (const name of ['AiConversationRequest','AiTurnRequest']) {

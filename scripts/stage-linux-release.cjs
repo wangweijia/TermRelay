@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { tmpdir } = require('node:os');
 
 function stageRelease(destination) {
-  const root = resolve(__dirname, '..', '..', '..');
+  const root = resolve(__dirname, '..');
   const output = resolve(destination);
   if (existsSync(output)) throw new Error('Release destination must not already exist');
   const node = process.execPath;
@@ -38,13 +38,13 @@ function stageRelease(destination) {
     version: pkg.version, node: process.version, platform: process.platform, arch: process.arch,
   }, null, 2));
   execFileSync(join(output, 'runtime/bin/node'), [join(output, 'app/dist/src/cli.js'), '--version'], { cwd: output, stdio: 'inherit' });
-  execFileSync(join(output, 'runtime/bin/node'), [join(__dirname, 'smoke-release.cjs'), output], {
+  execFileSync(join(output, 'runtime/bin/node'), [join(__dirname, 'smoke-linux-release.cjs'), output], {
     cwd: output, stdio: 'inherit', env: { ...process.env, PATH: '/nonexistent' }, timeout: 15000,
   });
 }
 
 module.exports = { stageRelease };
 if (require.main === module) {
-  if (!process.argv[2]) throw new Error('Usage: stage-release.cjs NEW_OUTPUT_DIRECTORY');
+  if (!process.argv[2]) throw new Error('Usage: stage-linux-release.cjs NEW_OUTPUT_DIRECTORY');
   stageRelease(process.argv[2]);
 }

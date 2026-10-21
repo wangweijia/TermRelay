@@ -14,10 +14,12 @@
     "linux:dev": "pnpm --filter @termrelay/linux cli run",
     "linux:cli": "pnpm --filter @termrelay/linux cli",
     "linux:test": "pnpm --filter @termrelay/linux test",
-    "linux:contracts": "pnpm --filter @termrelay/linux build && pnpm --filter @termrelay/server build && bash -o pipefail -c 'node apps/linux/dist/tests/fixtures/export-events.js | node apps/linux/tests/validate-events.cjs' && node apps/linux/tests/remote-start.cjs",
-    "linux:deb": "bash apps/linux/build-deb.sh",
+    "linux:contracts": "pnpm --filter @termrelay/linux build && pnpm --filter @termrelay/server build && bash -o pipefail -c 'node apps/linux/dist/tests/fixtures/export-events.js | node scripts/validate-linux-events.cjs' && node scripts/linux-remote-start.cjs",
+    "linux:deb": "pnpm release:linux",
     "mac:test": "CLANG_MODULE_CACHE_PATH=$PWD/apps/mac/.build/clang-cache SWIFTPM_MODULECACHE_OVERRIDE=$PWD/apps/mac/.build/swiftpm-cache swift test --disable-sandbox --package-path apps/mac",
+    "release:mac": "bash scripts/build-mac-release.sh",
+    "release:linux": "bash scripts/build-linux-release.sh",
     "release:server": "bash scripts/build-server-release.sh",
-    "test:release": "node --test scripts/server-release.spec.mjs"
+    "test:release": "node --test scripts/*.spec.mjs"
   }
 }

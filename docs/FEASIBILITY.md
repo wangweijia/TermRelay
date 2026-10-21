@@ -1,6 +1,6 @@
 # TermRelay 可行性评估
 
-评估对象：`TermRelay_开发实现文档.md` v1.2。
+评估对象：[早期开发实现文档 v1.2](archive/DEVELOPMENT_V1_2.md)。
 
 ## 结论
 

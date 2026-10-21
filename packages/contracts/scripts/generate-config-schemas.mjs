@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
-const indexURL = new URL('./generated/typescript/index.ts', import.meta.url);
+const root = new URL('../', import.meta.url);
+const indexURL = new URL('./generated/typescript/index.ts', root);
 let source = await readFile(indexURL, 'utf8');
 for (const [name, path, next] of [
   ['deviceRegisterSchema', './events/device-register.schema.json', 'deviceHeartbeatSchema'],
@@ -10,7 +11,7 @@ for (const [name, path, next] of [
   ['sessionStartSchema', './commands/session-start.schema.json', 'terminalInputSchema'],
   ['workspaceRegisteredSchema', './events/workspace-registered.schema.json', 'sessionStartedSchema'],
 ]) {
-  const schema = JSON.parse(await readFile(new URL(path, import.meta.url), 'utf8'));
+  const schema = JSON.parse(await readFile(new URL(path, root), 'utf8'));
   const declaration = `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
   const start = source.indexOf(`export const ${name} = `);
   const end = source.indexOf(`export const ${next} = `);
@@ -21,8 +22,8 @@ for (const [name, path, next] of [
     source = source.slice(0, end) + declaration + source.slice(end);
   }
 }
-const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', import.meta.url), 'utf8'));
-const toolEvent = JSON.parse(await readFile(new URL('./events/tool-event.schema.json', import.meta.url), 'utf8'));
+const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', root), 'utf8'));
+const toolEvent = JSON.parse(await readFile(new URL('./events/tool-event.schema.json', root), 'utf8'));
 source = source.replace(/export type ToolEventKind =[\s\S]*?;/,
   `export type ToolEventKind = ${toolEvent.properties.kind.enum.map(value => JSON.stringify(value)).join(' | ')};`);
 source = source.replace(/export interface DeviceRegisterPayload \{[\s\S]*?\n\}/, `export interface DeviceRegisterPayload {
@@ -163,7 +164,7 @@ export interface SessionHistoryDeletedPayload {
 
 `;
 const historyDeclarations = await Promise.all(historySchemas.map(async ([name, file]) => {
-  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, import.meta.url), 'utf8'));
+  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, root), 'utf8'));
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
 const marker = 'export interface SessionHistoryListPayload';
@@ -198,17 +199,17 @@ source = source.replace(/export interface SessionStartedPayload \{[\s\S]*?\n\}/,
 const start = source.indexOf(marker);
 if (start >= 0) source = source.slice(0, start);
 const shortcutDeclarations = await Promise.all(shortcutSchemas.map(async ([name, file]) => {
-  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, import.meta.url), 'utf8'));
+  const schema = JSON.parse(await readFile(new URL(`./events/${file}.schema.json`, root), 'utf8'));
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
 const filePreviewDeclarations = await Promise.all(filePreviewSchemas.map(async ([name, file]) => {
-  const schema = JSON.parse(await readFile(new URL(`./${file}.schema.json`, import.meta.url), 'utf8'));
+  const schema = JSON.parse(await readFile(new URL(`./${file}.schema.json`, root), 'utf8'));
   return `export const ${name} = ${JSON.stringify(schema, null, 2)} as const;\n\n`;
 }));
 await import('./generate-ai.mjs');
 await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') + shortcutTypes + shortcutDeclarations.join('') + filePreviewTypes + filePreviewDeclarations.join('').trimEnd() + '\nexport * from "./ai.js";\n');
 
-const swiftURL = new URL('./generated/swift/ProtocolTypes.swift', import.meta.url);
+const swiftURL = new URL('./generated/swift/ProtocolTypes.swift', root);
 let swift = await readFile(swiftURL, 'utf8');
 swift = swift.replace(/public struct WorkspaceRegisteredPayload:[\s\S]*?\n\}/, `public struct WorkspaceRegisteredPayload: Codable, Sendable {
     public let workspaceId: String

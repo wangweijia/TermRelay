@@ -7,6 +7,7 @@ on:
       - packages/contracts/**
       - apps/server/**
       - apps/web/**
+      - scripts/**
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
@@ -17,6 +18,7 @@ on:
       - packages/contracts/**
       - apps/server/**
       - apps/web/**
+      - scripts/**
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
@@ -45,10 +47,12 @@ jobs:
         run: env -u DISPLAY -u WAYLAND_DISPLAY pnpm linux:test
       - name: Validate Linux events through Server
         run: pnpm linux:contracts
+      - name: Check repository release tooling
+        run: pnpm test:release
       - name: Build and install private-runtime package
         run: |
-          pnpm linux:deb
-          sudo apt-get install -y ./apps/linux/dist/termrelay-linux_0.1.0_amd64.deb
+          pnpm release:linux
+          sudo apt-get install -y ./dist/termrelay-linux/termrelay-linux_0.1.0_amd64.deb
           cd /tmp
           # Restrict PATH: no setup-node, pnpm or Python is needed by the installed CLI.
           PATH=/nonexistent /usr/bin/termrelay-agent --help
@@ -60,4 +64,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: termrelay-linux-${{ matrix.os }}-amd64
-          path: apps/linux/dist/*.deb
+          path: dist/termrelay-linux/*.deb
