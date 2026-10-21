@@ -4,6 +4,7 @@ import {
   Entity,
   PrimaryColumn,
 } from 'typeorm';
+import type { DeviceRegisterPayload } from '@termrelay/contracts';
 
 export type DeviceDatabaseStatus =
   | 'connected'
@@ -12,7 +13,7 @@ export type DeviceDatabaseStatus =
   | 'degraded';
 
 export interface DeviceCapabilities {
-  platform: 'macOS';
+  platform: DeviceRegisterPayload['platform'];
   tools: string[];
   activeSessionCount: number;
   registeredAt: string;

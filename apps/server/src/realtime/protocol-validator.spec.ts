@@ -46,6 +46,17 @@ test('accepts a valid heartbeat', () => {
   if (result.ok) assert.equal(result.message.type, 'device.heartbeat');
 });
 
+test('accepts Linux devices without loosening platform validation', () => {
+  for (const platform of ['macOS', 'linux']) {
+    assert.equal(validator.validate(envelope('device.register', {
+      name: 'Desktop', appVersion: '0.1.0', platform, tools: ['shell'],
+    })).ok, true);
+  }
+  assert.equal(validator.validate(envelope('device.register', {
+    name: 'Desktop', appVersion: '0.1.0', platform: 'windows', tools: ['shell'],
+  })).ok, false);
+});
+
 test('accepts command acknowledgements with matching command context', () => {
   const commandId = randomUUID();
   const result = validator.validate({

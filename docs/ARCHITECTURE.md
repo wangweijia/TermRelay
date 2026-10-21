@@ -14,6 +14,10 @@ termrelay/
 │   │   │   ├── Remote/              # WebSocket、重连、消息路由
 │   │   │   └── Tools/               # CLI 工具适配器
 │   │   └── Tests/
+│   ├── linux/                       # 独立 GTK 3 / VTE 桌面客户端（Ubuntu / Xubuntu）
+│   │   ├── termrelay/               # 本地 PTY supervisor、协议、配对、桌面 UI
+│   │   ├── tests/                   # 协议、PTY 生命周期与 GTK 冒烟检查
+│   │   └── packaging/              # Debian launcher 与桌面入口
 │   ├── server/
 │   │   └── src/
 │   │       ├── database/             # TypeORM 配置与显式 migration
@@ -43,6 +47,7 @@ JSON Schema ──generate──> Swift DTO ──> Mac Remote 层
       └──────generate──> TypeScript DTO ──> Server / Web
 
 Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY──> AI CLI
+                              └─/ws/client──> Linux ──PTY──> Shell / AI CLI
 ```
 
 约束如下：
@@ -52,6 +57,13 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 3. 本地终端渲染不依赖网络成功；远端输出走有界批处理和有界 Journal。
 4. Web 不直接连接 Mac，不持有工作区真实路径，也不单独部署。
 5. Server 只保存工作区不透明 ID；Mac 是本地路径授权的最终裁决者。
+
+Linux 是独立的本地进程 / 路径所有者，不经过 Mac；也可使用现有
+`/ws/client-public` + 设备配对凭据接入。设备注册平台允许 `macOS` 和 `linux`，
+存储沿用设备 JSON capabilities，不改变表结构。Linux 首版只公布 Shell PTY，
+不公布 ACP、快捷任务或 AI API Provider 能力；Server / Web 不增加 Linux 专用协议解析。
+界面使用 GTK 3 + VTE，独立 supervisor 通过 Linux subreaper 跟踪和清理后代进程。
+边界、内存上限、安装与验收说明见 [`apps/linux/README.md`](../apps/linux/README.md)。
 
 ACP Web 的工作区 Markdown 文件预览使用独立的 HTTP → Server → Mac WebSocket 请求/响应链路，
 不经过 PTY 命令或持久化的会话事件。Server 用会话 ID 路由到设备，只临时转发文件内容；

@@ -1,0 +1,60 @@
+name: Linux desktop
+
+on:
+  push:
+    paths:
+      - apps/linux/**
+      - .github/workflows/linux.yml
+  pull_request:
+    paths:
+      - apps/linux/**
+      - .github/workflows/linux.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        desktop: [gtk, xfce]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system desktop dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91 python3-websocket xvfb dbus-x11
+          if [ "${{ matrix.desktop }}" = "xfce" ]; then
+            sudo apt-get install -y xfwm4 xfconf
+          fi
+      - name: Exercise desktop and real PTY
+        env:
+          TERMRELAY_GUI_TEST: "1"
+          PYTHONPATH: ${{ github.workspace }}/apps/linux
+          DESKTOP: ${{ matrix.desktop }}
+        run: |
+          xvfb-run -a dbus-run-session -- bash -c '
+            if [ "$DESKTOP" = "xfce" ]; then
+              xfwm4 --daemon
+            fi
+            /usr/bin/python3 -m unittest discover -s apps/linux/tests -v
+          '
+      - name: Build and install Debian package
+        run: |
+          bash apps/linux/build-deb.sh
+          sudo apt-get install -y ./apps/linux/dist/termrelay-linux_0.1.0_all.deb
+          dpkg-query -W termrelay-linux
+          xvfb-run -a dbus-run-session -- /usr/bin/python3 -c '
+          import os, subprocess
+          process = subprocess.Popen(["termrelay-linux"])
+          try:
+              process.wait(timeout=3)
+              raise SystemExit("Desktop launcher exited before smoke check")
+          except subprocess.TimeoutExpired:
+              process.terminate()
+              process.wait(timeout=5)
+          '

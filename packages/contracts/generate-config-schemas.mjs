@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 const indexURL = new URL('./generated/typescript/index.ts', import.meta.url);
 let source = await readFile(indexURL, 'utf8');
 for (const [name, path, next] of [
+  ['deviceRegisterSchema', './events/device-register.schema.json', 'deviceHeartbeatSchema'],
   ['toolEventSchema', './events/tool-event.schema.json', 'toolTurnStartSchema'],
   ['toolConfigSetSchema', './commands/tool-config-set.schema.json', 'toolTurnStartSchema'],
   ['sessionStartedSchema', './events/session-started.schema.json', 'sessionEndedSchema'],
@@ -18,6 +19,13 @@ for (const [name, path, next] of [
     source = source.slice(0, end) + declaration + source.slice(end);
   }
 }
+const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', import.meta.url), 'utf8'));
+source = source.replace(/export interface DeviceRegisterPayload \{[\s\S]*?\n\}/, `export interface DeviceRegisterPayload {
+  name: string;
+  appVersion: string;
+  platform: ${deviceRegister.properties.platform.enum.map(value => JSON.stringify(value)).join(' | ')};
+  tools: string[];
+}`);
 const historySchemas = [
   ['sessionHistoryListSchema', 'session-history-list'],
   ['sessionHistoryListedSchema', 'session-history-listed'],

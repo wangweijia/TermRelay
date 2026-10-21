@@ -7,9 +7,8 @@
   "properties": {
     "name": { "type": "string", "minLength": 1, "maxLength": 128 },
     "appVersion": { "type": "string", "minLength": 1 },
-    "platform": { "const": "macOS" },
+    "platform": { "enum": ["macOS", "linux"] },
     "tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
   },
   "additionalProperties": false
 }
-

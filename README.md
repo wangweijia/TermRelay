@@ -34,6 +34,14 @@ PTY 与 ACP 是两条严格分离的链路：ACP 不接受终端输入 / resize�
 
 ## 支持的智能体
 
+### Linux 桌面客户端（首版）
+
+新增独立的 **Ubuntu / Xubuntu** 客户端 `apps/linux`，使用 GTK 3 + VTE，
+无需 macOS App。支持本地多标签 Shell PTY、现有 Server / Web 远程终端、公网设备配对与断线补传，
+提供 `.deb` 打包；首版不含下述 macOS ACP、快捷任务及 AI API Provider 能力。
+安装、兼容范围与限制见 [Linux 客户端说明](apps/linux/README.md)。
+待补功能及验收计划见 [Ubuntu / Xubuntu App TODO](docs/UBUNTU_APP_TODO.md)。
+
 | 智能体 | 交互模式 | 说明 |
 |---|---|---|
 | **Shell** | PTY | 你日常使用的登录 Shell（`$SHELL`），完整终端体验 |

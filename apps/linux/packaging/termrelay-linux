@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH="/usr/lib/termrelay-linux${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m termrelay "$@"

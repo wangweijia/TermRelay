@@ -9,7 +9,7 @@ export interface DeviceSnapshot {
   deviceId: string;
   name: string;
   appVersion: string;
-  platform: 'macOS';
+  platform: DeviceRegisterPayload['platform'];
   tools: string[];
   presence: DevicePresence;
   connectionState: DeviceHeartbeatPayload['connectionState'];

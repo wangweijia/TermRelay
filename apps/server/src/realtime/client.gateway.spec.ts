@@ -69,6 +69,20 @@ test('rejects heartbeat before registration', () => {
   assert.equal(socket.closed[0]?.code, 1008);
 });
 
+test('registers Linux shell devices using the existing client gateway', async () => {
+  const { gateway, registry } = makeGateway();
+  const socket = new FakeSocket();
+  const client = socket.asWebSocket();
+  gateway.handleConnection(client);
+  await gateway.handleMessage(client, envelope('linux-device', 'device.register', {
+    name: 'Xubuntu', appVersion: '0.1.0', platform: 'linux', tools: ['shell'],
+  }));
+  assert.equal(registry.getDevice('linux-device')?.platform, 'linux');
+  assert.deepEqual(registry.getDevice('linux-device')?.tools, ['shell']);
+  assert.equal(socket.messages[0]?.data.type, 'device.registered');
+  assert.equal(socket.closed.length, 0);
+});
+
 test('rejects registration that does not match the authenticated device', () => {
   const { gateway, authorizations } = makeGateway();
   const socket = new FakeSocket();

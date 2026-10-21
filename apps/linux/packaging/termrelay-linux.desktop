@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=TermRelay Linux
+Comment=Local and remote PTY sessions
+Exec=termrelay-linux
+Icon=utilities-terminal
+Terminal=false
+Categories=Development;System;TerminalEmulator;
+StartupNotify=true
+StartupWMClass=io.github.termrelay.Linux

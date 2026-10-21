@@ -16,7 +16,7 @@ export interface Envelope<TPayload = Record<string, unknown>> {
 export interface DeviceRegisterPayload {
   name: string;
   appVersion: string;
-  platform: 'macOS';
+  platform: "macOS" | "linux";
   tools: string[];
 }
 
@@ -100,22 +100,41 @@ export const envelopeSchema = {
 } as const;
 
 export const deviceRegisterSchema = {
-  $schema: 'https://json-schema.org/draft/2020-12/schema',
-  $id: 'https://termrelay.local/contracts/events/device-register.schema.json',
-  title: 'device.register payload',
-  type: 'object',
-  required: ['name', 'appVersion', 'platform', 'tools'],
-  properties: {
-    name: { type: 'string', minLength: 1, maxLength: 128 },
-    appVersion: { type: 'string', minLength: 1 },
-    platform: { const: 'macOS' },
-    tools: {
-      type: 'array',
-      items: { type: 'string' },
-      uniqueItems: true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/device-register.schema.json",
+  "title": "device.register payload",
+  "type": "object",
+  "required": [
+    "name",
+    "appVersion",
+    "platform",
+    "tools"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
     },
+    "appVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "enum": [
+        "macOS",
+        "linux"
+      ]
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
   },
-  additionalProperties: false,
+  "additionalProperties": false
 } as const;
 
 export const deviceHeartbeatSchema = {

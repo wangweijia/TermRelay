@@ -9,7 +9,7 @@ export interface DeviceRecord {
   name: string;
   status: DeviceEntity['status'];
   appVersion: string | null;
-  platform: 'macOS';
+  platform: DeviceSnapshot['platform'];
   tools: string[];
   activeSessionCount: number;
   registeredAt: string;
