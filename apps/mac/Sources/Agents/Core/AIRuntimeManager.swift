@@ -255,7 +255,3 @@ actor AIRuntimeManager {
         guard online else { return }; await updateHandler(u)
     }
 }
-
-private extension ISO8601DateFormatter {
-    static var fractional: ISO8601DateFormatter { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime,.withFractionalSeconds]; return f }
-}

@@ -6,10 +6,10 @@
 termrelay/
 ├── apps/
 │   ├── mac/
-│   │   ├── Package.swift            # M0 可编译入口；阶段 0 后生成 Xcode 工程
+│   │   ├── Package.swift            # SwiftPM App 与测试入口，不使用 Xcode 工程
 │   │   ├── Sources/
 │   │   │   ├── AppShell/            # SwiftUI 生命周期、窗口、设置
-│   │   │   ├── Terminal/            # 渲染抽象和后续 SwiftTerm/PTY 实现
+│   │   │   ├── Terminal/            # SwiftTerm/PTY、输出批处理
 │   │   │   ├── Session/             # 会话状态机与进程编排
 │   │   │   ├── Remote/              # WebSocket、重连、消息路由
 │   │   │   └── Tools/               # CLI 工具适配器
@@ -59,6 +59,14 @@ Web ──HTTP + /ws/web──> Server ──/ws/client──> Mac ──PTY─�
 3. 本地终端渲染不依赖网络成功；远端输出走有界批处理和有界 Journal。
 4. Web 不直接连接 Mac，不持有工作区真实路径，也不单独部署。
 5. Server 只保存工作区不透明 ID；Mac 是本地路径授权的最终裁决者。
+
+Mac 的 `ManagedSession` 只保存会话元数据和历史状态快照；实时状态由
+`LocalTerminalSession` / `StructuredSessionCoordinator` 管理，不维护第二套元数据状态机。
+Copilot 与 DSH 复用 `Agents/Core/ACPClient.swift` 的 ACP JSON-RPC 通信、请求超时和响应关联；
+会话恢复、权限映射、配置和退出流程仍由各自的 Provider runtime 负责。
+Codex App Server 使用独立客户端，不与标准 ACP 混用。
+`AppSettingsView` 是应用级设置入口，包含连接、工作区、AI 服务和工具凭据；
+本地新建会话仍以 ACP 启动智能体，Shell 使用 PTY，远程创建保留 Codex PTY 选项。
 
 Linux 是独立的本地进程 / 路径所有者，不经过 Mac；也可使用现有
 `/ws/client-public` + 设备配对凭据接入。设备注册平台允许 `macOS` 和 `linux`，

@@ -38,7 +38,7 @@ final class CopilotACPClientTests: XCTestCase {
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
             providerVersion: "1.0.0", initialContext: "Previous work: fixed parser",
-            client: CopilotACPClient(transport: transport)
+            client: ACPClient(transport: transport, providerName: "Copilot")
         )
         let starting = Task {
             try await runtime.start()
@@ -95,7 +95,7 @@ final class CopilotACPClientTests: XCTestCase {
         let sessionID = UUID()
         let coordinator = StructuredSessionCoordinator(runtime: CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
-            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+            providerVersion: "1.0.88", client: ACPClient(transport: transport, providerName: "Copilot")
         ))
         let replayed = Task {
             var events: [ToolEvent] = []
@@ -164,7 +164,7 @@ final class CopilotACPClientTests: XCTestCase {
         let sessionID = UUID()
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
-            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+            providerVersion: "1.0.88", client: ACPClient(transport: transport, providerName: "Copilot")
         )
         let starting = Task { try await runtime.start() }
         transport.respond(to: try await transport.waitForSentMessage(at: 0), result: [
@@ -200,7 +200,7 @@ final class CopilotACPClientTests: XCTestCase {
         let sessionID = UUID()
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
-            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+            providerVersion: "1.0.88", client: ACPClient(transport: transport, providerName: "Copilot")
         )
         let starting = Task {
             try await runtime.start()
@@ -237,7 +237,7 @@ final class CopilotACPClientTests: XCTestCase {
         let sessionID = UUID()
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
-            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+            providerVersion: "1.0.88", client: ACPClient(transport: transport, providerName: "Copilot")
         )
         let starting = Task {
             try await runtime.start()
@@ -294,7 +294,7 @@ final class CopilotACPClientTests: XCTestCase {
         let sessionID = UUID()
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp"),
-            providerVersion: "1.0.88", client: CopilotACPClient(transport: transport)
+            providerVersion: "1.0.88", client: ACPClient(transport: transport, providerName: "Copilot")
         )
         let starting = Task {
             try await runtime.start()
@@ -338,7 +338,7 @@ final class CopilotACPClientTests: XCTestCase {
 
     func testCopilotACPHandshakeTurnPermissionAndShutdown() async throws {
         let transport = FakeCopilotACPTransport()
-        let client = CopilotACPClient(transport: transport)
+        let client = ACPClient(transport: transport, providerName: "Copilot")
         let sessionID = UUID()
         let runtime = CopilotStructuredRuntime(
             sessionID: sessionID,
@@ -431,12 +431,121 @@ final class CopilotACPClientTests: XCTestCase {
     }
 }
 
-private final class FakeCopilotACPTransport: @unchecked Sendable, CopilotACPTransport {
+final class ACPClientTests: XCTestCase {
+    func testLoadCompletionFollowsReplayNotificationsForBothProviders() async throws {
+        for provider in ["Copilot", "DSH"] {
+            let (client, transport) = try await startedClient(provider: provider)
+            let messages = Task {
+                var received: [String] = []
+                for await message in client.messages {
+                    switch message {
+                    case .notification(let method, _): received.append(method)
+                    case .requestCompleted(let method): received.append("completed:\(method)")
+                    case .request: XCTFail("Unexpected server request")
+                    }
+                }
+                return received
+            }
+            let loading = Task {
+                try await client.request(method: "session/load", params: .object([:]), timeout: nil)
+            }
+            let request = try await transport.waitForSentMessage(at: 1)
+            transport.receive(["jsonrpc": "2.0", "method": "session/update", "params": [:]])
+            transport.respond(to: request, result: ["sessionId": "saved"])
+            _ = try await loading.value
+            await client.stop()
+            let received = await messages.value
+            XCTAssertEqual(received, ["session/update", "completed:session/load"], provider)
+        }
+    }
+
+    func testRPCErrorsAndTimeoutsRemainExplicitForBothProviders() async throws {
+        for provider in ["Copilot", "DSH"] {
+            let (client, transport) = try await startedClient(provider: provider)
+            let prompting = Task {
+                try await client.request(method: "session/prompt", params: .object([:]), timeout: nil)
+            }
+            let request = try await transport.waitForSentMessage(at: 1)
+            transport.receive([
+                "jsonrpc": "2.0", "id": try XCTUnwrap(request["id"]),
+                "error": ["code": -32601, "message": "unsupported"],
+            ])
+            do {
+                _ = try await prompting.value
+                XCTFail("RPC error must reject the pending request")
+            } catch {
+                XCTAssertEqual(error as? AgentError, .protocolFailure("-32601: unsupported"))
+            }
+            do {
+                _ = try await client.request(method: "session/list", params: .object([:]),
+                                             timeout: .milliseconds(5))
+                XCTFail("Request must time out")
+            } catch {
+                XCTAssertEqual(error as? AgentError, .protocolFailure("\(provider) ACP 请求超时：session/list"))
+            }
+            await client.stop()
+        }
+    }
+
+    func testTransportExitFailsEveryPendingRequestForBothProviders() async throws {
+        for provider in ["Copilot", "DSH"] {
+            let (client, transport) = try await startedClient(provider: provider)
+            let first = Task {
+                try await client.request(method: "session/prompt", params: .object([:]), timeout: nil)
+            }
+            _ = try await transport.waitForSentMessage(at: 1)
+            let second = Task {
+                try await client.request(method: "session/list", params: .object([:]), timeout: nil)
+            }
+            _ = try await transport.waitForSentMessage(at: 2)
+            transport.stop()
+            for pending in [first, second] {
+                do {
+                    _ = try await pending.value
+                    XCTFail("Transport exit must fail all pending requests")
+                } catch {
+                    XCTAssertEqual(error as? AgentError, .providerUnavailable("\(provider) ACP 进程已退出"))
+                }
+            }
+        }
+    }
+
+    func testSendFailureDoesNotLeaveAPendingContinuation() async throws {
+        for provider in ["Copilot", "DSH"] {
+            let (client, transport) = try await startedClient(provider: provider)
+            let failure = AgentError.protocolFailure("synthetic send failure")
+            transport.failSends(with: failure)
+            do {
+                _ = try await client.request(method: "session/prompt", params: .object([:]), timeout: nil)
+                XCTFail("Send failure must reject the request immediately")
+            } catch {
+                XCTAssertEqual(error as? AgentError, failure)
+            }
+            await client.stop()
+        }
+    }
+
+    private func startedClient(provider: String) async throws -> (ACPClient, FakeCopilotACPTransport) {
+        let transport = FakeCopilotACPTransport()
+        let client = ACPClient(transport: transport, providerName: provider)
+        let starting = Task { try await client.start() }
+        let initialize = try await transport.waitForSentMessage(at: 0)
+        XCTAssertEqual(initialize["jsonrpc"] as? String, "2.0")
+        XCTAssertEqual(initialize["method"] as? String, "initialize")
+        XCTAssertEqual((initialize["params"] as? [String: Any])?["protocolVersion"] as? Int, 1)
+        transport.respond(to: initialize, result: ["protocolVersion": 1])
+        _ = try await starting.value
+        return (client, transport)
+    }
+}
+
+private final class FakeCopilotACPTransport: @unchecked Sendable, ACPTransport {
     let lines: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private let lock = NSLock()
     private var sent: [Data] = []
     private var stopped = false
+    private var sendFailure: AgentError?
 
     var sentMethods: [String] {
         lock.withLock {
@@ -464,7 +573,14 @@ private final class FakeCopilotACPTransport: @unchecked Sendable, CopilotACPTran
     func diagnosticTail() -> String { "" }
 
     func send(_ line: Data) throws {
-        lock.withLock { sent.append(line) }
+        try lock.withLock {
+            if let sendFailure { throw sendFailure }
+            sent.append(line)
+        }
+    }
+
+    func failSends(with error: AgentError) {
+        lock.withLock { sendFailure = error }
     }
 
     func receive(_ object: [String: Any]) {

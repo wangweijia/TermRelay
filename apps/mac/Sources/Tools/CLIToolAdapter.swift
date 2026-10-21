@@ -9,8 +9,6 @@ struct LaunchConfiguration: Sendable {
 }
 
 protocol CLIToolAdapter: Sendable {
-    var toolID: String { get }
-    var displayName: String { get }
     func detect() -> ToolAvailability
     func makeLaunchConfiguration(
         directory: URL,
@@ -20,7 +18,6 @@ protocol CLIToolAdapter: Sendable {
 
 struct ToolAvailability: Sendable, Equatable {
     let isAvailable: Bool
-    let executablePath: String?
     let detail: String
 }
 
@@ -41,91 +38,70 @@ enum BuiltInTool: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var iconName: String {
+        switch self {
+        case .shell: "terminal"
+        case .codex: "sparkles"
+        case .copilot: "chevron.left.forwardslash.chevron.right"
+        case .dsh: "brain.head.profile"
+        }
+    }
+
     func makeAdapter(executableURL: URL? = nil) -> any CLIToolAdapter {
         switch self {
         case .shell: LoginShellAdapter(configuredExecutableURL: executableURL)
-        case .codex: CodexAdapter(configuredExecutableURL: executableURL)
-        case .copilot: CopilotCLIAdapter(configuredExecutableURL: executableURL)
-        case .dsh: DSHAdapter(configuredExecutableURL: executableURL)
+        case .codex, .copilot, .dsh: ExecutableToolAdapter(tool: self, configuredExecutableURL: executableURL)
         }
     }
-
-    var adapter: any CLIToolAdapter { makeAdapter() }
 }
 
-struct CopilotCLIAdapter: CLIToolAdapter {
-    let toolID = BuiltInTool.copilot.rawValue
-    let displayName = BuiltInTool.copilot.displayName
+private struct ExecutableToolAdapter: CLIToolAdapter {
+    let tool: BuiltInTool
     let configuredExecutableURL: URL?
 
-    init(configuredExecutableURL: URL? = nil) {
-        self.configuredExecutableURL = configuredExecutableURL
-    }
-
     func detect() -> ToolAvailability {
-        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "copilot") else {
+        guard let url = executableURL else {
             return ToolAvailability(
                 isAvailable: false,
-                executablePath: nil,
-                detail: "未在 PATH 或常用安装目录找到 copilot"
+                detail: tool == .codex
+                    ? "未在 PATH、~/.local/bin、/opt/homebrew/bin 或 /usr/local/bin 找到 codex"
+                    : "未在 PATH 或常用安装目录找到 \(tool.rawValue)"
             )
         }
         guard FileManager.default.isExecutableFile(atPath: url.path) else {
             return ToolAvailability(
                 isAvailable: false,
-                executablePath: url.path,
                 detail: "文件不存在或不可执行：\(url.path)"
             )
         }
-        return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
+        return ToolAvailability(isAvailable: true, detail: url.path)
     }
 
     func makeLaunchConfiguration(
         directory: URL,
         proxy: ToolProxyConfiguration = .inherited
     ) throws -> LaunchConfiguration {
-        throw ToolLaunchError.unsupportedMode("GitHub Copilot 当前仅支持 ACP 模式")
-    }
-}
-
-struct DSHAdapter: CLIToolAdapter {
-    let toolID = BuiltInTool.dsh.rawValue
-    let displayName = BuiltInTool.dsh.displayName
-    let configuredExecutableURL: URL?
-
-    init(configuredExecutableURL: URL? = nil) {
-        self.configuredExecutableURL = configuredExecutableURL
-    }
-
-    func detect() -> ToolAvailability {
-        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "dsh") else {
-            return ToolAvailability(
-                isAvailable: false,
-                executablePath: nil,
-                detail: "未在 PATH 或常用安装目录找到 dsh"
-            )
+        guard tool == .codex else {
+            throw ToolLaunchError.unsupportedMode("\(tool.displayName) 当前仅支持 ACP 模式")
         }
-        guard FileManager.default.isExecutableFile(atPath: url.path) else {
-            return ToolAvailability(
-                isAvailable: false,
-                executablePath: url.path,
-                detail: "文件不存在或不可执行：\(url.path)"
-            )
+        guard let executableURL else {
+            throw ToolLaunchError.notFound(tool.rawValue)
         }
-        return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
+        return LaunchConfiguration(
+            executableURL: executableURL,
+            arguments: [],
+            directory: directory,
+            environment: TerminalEnvironment.make(proxy: proxy, executableURL: executableURL),
+            executableName: nil
+        )
     }
 
-    func makeLaunchConfiguration(
-        directory: URL,
-        proxy: ToolProxyConfiguration = .inherited
-    ) throws -> LaunchConfiguration {
-        throw ToolLaunchError.unsupportedMode("DeepSeek DSH 当前仅支持 ACP 模式")
+    private var executableURL: URL? {
+        configuredExecutableURL ?? ExecutableLocator.find(named: tool.rawValue)
     }
 }
 
 struct LoginShellAdapter: CLIToolAdapter {
-    let toolID = BuiltInTool.shell.rawValue
-    let displayName = BuiltInTool.shell.displayName
     let configuredExecutableURL: URL?
 
     init(configuredExecutableURL: URL? = nil) {
@@ -136,7 +112,6 @@ struct LoginShellAdapter: CLIToolAdapter {
         let path = shellURL.path
         return ToolAvailability(
             isAvailable: FileManager.default.isExecutableFile(atPath: path),
-            executablePath: path,
             detail: path
         )
     }
@@ -163,51 +138,6 @@ struct LoginShellAdapter: CLIToolAdapter {
         let configured = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         return URL(fileURLWithPath: configured)
     }
-}
-
-struct CodexAdapter: CLIToolAdapter {
-    let toolID = BuiltInTool.codex.rawValue
-    let displayName = BuiltInTool.codex.displayName
-    let configuredExecutableURL: URL?
-
-    init(configuredExecutableURL: URL? = nil) {
-        self.configuredExecutableURL = configuredExecutableURL
-    }
-
-    func detect() -> ToolAvailability {
-        guard let url = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
-            return ToolAvailability(
-                isAvailable: false,
-                executablePath: nil,
-                detail: "未在 PATH、~/.local/bin、/opt/homebrew/bin 或 /usr/local/bin 找到 codex"
-            )
-        }
-        guard FileManager.default.isExecutableFile(atPath: url.path) else {
-            return ToolAvailability(
-                isAvailable: false,
-                executablePath: url.path,
-                detail: "文件不存在或不可执行：\(url.path)"
-            )
-        }
-        return ToolAvailability(isAvailable: true, executablePath: url.path, detail: url.path)
-    }
-
-    func makeLaunchConfiguration(
-        directory: URL,
-        proxy: ToolProxyConfiguration = .inherited
-    ) throws -> LaunchConfiguration {
-        guard let executable = configuredExecutableURL ?? ExecutableLocator.find(named: "codex") else {
-            throw ToolLaunchError.notFound("codex")
-        }
-        return LaunchConfiguration(
-            executableURL: executable,
-            arguments: [],
-            directory: directory,
-            environment: TerminalEnvironment.make(proxy: proxy, executableURL: executable),
-            executableName: nil
-        )
-    }
-
 }
 
 enum ToolLaunchError: LocalizedError, Equatable {

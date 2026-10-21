@@ -1,12 +1,12 @@
 import Foundation
 
-enum CopilotACPMessage: Sendable {
+enum ACPMessage: Sendable {
     case notification(method: String, params: JSONValue)
     case request(id: JSONValue, method: String, params: JSONValue)
     case requestCompleted(method: String)
 }
 
-protocol CopilotACPTransport: Sendable {
+protocol ACPTransport: Sendable {
     var lines: AsyncThrowingStream<Data, Error> { get }
     func start() throws
     func send(_ line: Data) throws
@@ -14,8 +14,8 @@ protocol CopilotACPTransport: Sendable {
     func diagnosticTail() -> String
 }
 
-actor CopilotACPClient {
-    nonisolated let messages: AsyncStream<CopilotACPMessage>
+actor ACPClient {
+    nonisolated let messages: AsyncStream<ACPMessage>
 
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
@@ -23,16 +23,18 @@ actor CopilotACPClient {
         let method: String
     }
 
-    private let transport: any CopilotACPTransport
-    private let messageContinuation: AsyncStream<CopilotACPMessage>.Continuation
+    private let transport: any ACPTransport
+    private let providerName: String
+    private let messageContinuation: AsyncStream<ACPMessage>.Continuation
     private var readerTask: Task<Void, Never>?
     private var nextRequestID = 1
     private var pending: [Int: PendingRequest] = [:]
     private var started = false
 
-    init(transport: any CopilotACPTransport) {
+    init(transport: any ACPTransport, providerName: String) {
         self.transport = transport
-        let stream = AsyncStream<CopilotACPMessage>.makeStream()
+        self.providerName = providerName
+        let stream = AsyncStream<ACPMessage>.makeStream()
         messages = stream.stream
         messageContinuation = stream.continuation
     }
@@ -72,7 +74,7 @@ actor CopilotACPClient {
         params: JSONValue,
         timeout: Duration? = .seconds(20)
     ) async throws -> JSONValue {
-        guard started else { throw AgentError.providerUnavailable("Copilot ACP 尚未初始化") }
+        guard started else { throw AgentError.providerUnavailable("\(providerName) ACP 尚未初始化") }
         let id = nextRequestID
         nextRequestID += 1
         return try await withCheckedThrowingContinuation { continuation in
@@ -85,7 +87,7 @@ actor CopilotACPClient {
             }
             pending[id] = PendingRequest(continuation: continuation, timeoutTask: timeoutTask, method: method)
             do {
-                try send(CopilotACPOutboundRequest(id: id, method: method, params: params))
+                try send(ACPOutboundRequest(id: id, method: method, params: params))
             } catch {
                 pending.removeValue(forKey: id)?.timeoutTask?.cancel()
                 continuation.resume(throwing: error)
@@ -94,13 +96,13 @@ actor CopilotACPClient {
     }
 
     func notify(method: String, params: JSONValue) throws {
-        guard started else { throw AgentError.providerUnavailable("Copilot ACP 尚未初始化") }
-        try send(CopilotACPOutboundNotification(method: method, params: params))
+        guard started else { throw AgentError.providerUnavailable("\(providerName) ACP 尚未初始化") }
+        try send(ACPOutboundNotification(method: method, params: params))
     }
 
     func respond(id: JSONValue, result: JSONValue) throws {
-        guard started else { throw AgentError.providerUnavailable("Copilot ACP 尚未初始化") }
-        try send(CopilotACPOutboundResponse(id: id, result: result))
+        guard started else { throw AgentError.providerUnavailable("\(providerName) ACP 尚未初始化") }
+        try send(ACPOutboundResponse(id: id, result: result))
     }
 
     func stop() {
@@ -109,13 +111,13 @@ actor CopilotACPClient {
         readerTask?.cancel()
         readerTask = nil
         transport.stop()
-        failPending(AgentError.providerUnavailable("Copilot ACP 已停止"))
+        failPending(AgentError.providerUnavailable("\(providerName) ACP 已停止"))
         messageContinuation.finish()
     }
 
     private func receive(_ line: Data) {
         do {
-            let envelope = try JSONDecoder().decode(CopilotACPInboundEnvelope.self, from: line)
+            let envelope = try JSONDecoder().decode(ACPInboundEnvelope.self, from: line)
             if let method = envelope.method {
                 let params = envelope.params ?? .object([:])
                 if let id = envelope.id {
@@ -134,12 +136,13 @@ actor CopilotACPClient {
                 ))
             } else {
                 if request.method == "session/load" {
+                    // Keep replay notifications ahead of the load-completion barrier.
                     messageContinuation.yield(.requestCompleted(method: request.method))
                 }
                 request.continuation.resume(returning: envelope.result ?? .null)
             }
         } catch {
-            transportEnded(AgentError.protocolFailure("无法解析 Copilot ACP JSON：\(error)"))
+            transportEnded(AgentError.protocolFailure("无法解析 \(providerName) ACP JSON：\(error)"))
         }
     }
 
@@ -148,7 +151,7 @@ actor CopilotACPClient {
         let diagnostic = transport.diagnosticTail().trimmingCharacters(in: .whitespacesAndNewlines)
         let suffix = diagnostic.isEmpty ? "" : "：\(diagnostic)"
         request.continuation.resume(throwing: AgentError.protocolFailure(
-            "Copilot ACP 请求超时：\(method)\(suffix)"
+            "\(providerName) ACP 请求超时：\(method)\(suffix)"
         ))
     }
 
@@ -157,7 +160,7 @@ actor CopilotACPClient {
         started = false
         let diagnostic = transport.diagnosticTail().trimmingCharacters(in: .whitespacesAndNewlines)
         let failure = error ?? AgentError.providerUnavailable(
-            diagnostic.isEmpty ? "Copilot ACP 进程已退出" : "Copilot ACP 进程已退出：\(diagnostic)"
+            diagnostic.isEmpty ? "\(providerName) ACP 进程已退出" : "\(providerName) ACP 进程已退出：\(diagnostic)"
         )
         failPending(failure)
         messageContinuation.finish()
@@ -177,34 +180,34 @@ actor CopilotACPClient {
     }
 }
 
-private struct CopilotACPOutboundRequest: Encodable {
+private struct ACPOutboundRequest: Encodable {
     let jsonrpc = "2.0"
     let id: Int
     let method: String
     let params: JSONValue
 }
 
-private struct CopilotACPOutboundNotification: Encodable {
+private struct ACPOutboundNotification: Encodable {
     let jsonrpc = "2.0"
     let method: String
     let params: JSONValue
 }
 
-private struct CopilotACPOutboundResponse: Encodable {
+private struct ACPOutboundResponse: Encodable {
     let jsonrpc = "2.0"
     let id: JSONValue
     let result: JSONValue
 }
 
-private struct CopilotACPInboundEnvelope: Decodable {
+private struct ACPInboundEnvelope: Decodable {
     let id: JSONValue?
     let method: String?
     let params: JSONValue?
     let result: JSONValue?
-    let error: CopilotACPRPCError?
+    let error: ACPRPCError?
 }
 
-private struct CopilotACPRPCError: Decodable {
+private struct ACPRPCError: Decodable {
     let code: Int
     let message: String
 }

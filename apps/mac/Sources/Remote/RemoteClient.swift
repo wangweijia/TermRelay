@@ -300,7 +300,7 @@ actor RemoteClient {
         if nextSequenceBySession[id] == nil { nextSequenceBySession[id] = 1 }
         if projectID != nil { externalSessions.insert(id) }
         sessionsAwaitingSync.insert(id)
-        let sent = await send(
+        await send(
             type: "session.started",
             sessionId: id.uuidString.lowercased(),
             seq: 0,
@@ -315,7 +315,6 @@ actor RemoteClient {
                 aiResourceId: projectID == nil ? nil : id.uuidString.lowercased()
             )
         )
-        guard sent else { return }
     }
 
     func publishSessionEnded(id: UUID, status: SessionState, finishedAt: String) async {

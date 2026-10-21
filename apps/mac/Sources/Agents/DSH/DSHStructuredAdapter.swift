@@ -57,7 +57,7 @@ struct DSHStructuredAdapter: StructuredAgentAdapter {
             sessionID: configuration.sessionID,
             workspaceURL: configuration.workspaceURL,
             providerVersion: installation.version,
-            client: DSHACPClient(transport: transport),
+            client: ACPClient(transport: transport, providerName: "DSH"),
             runtimeHome: runtimeHome
         )
     }
@@ -96,7 +96,7 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
 
     private let sessionID: UUID
     private let workspaceURL: URL
-    private let client: DSHACPClient
+    private let client: ACPClient
     private let runtimeHome: URL
     private let continuation: AsyncStream<ToolEvent>.Continuation
     private var messageTask: Task<Void, Never>?
@@ -112,7 +112,7 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
         sessionID: UUID,
         workspaceURL: URL,
         providerVersion: String,
-        client: DSHACPClient,
+        client: ACPClient,
         runtimeHome: URL
     ) {
         self.sessionID = sessionID
@@ -293,6 +293,8 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
 
     private func receive(_ message: ACPMessage) async {
         switch message {
+        case .requestCompleted:
+            break
         case .notification(let method, let params):
             if method == "session/update" { receiveSessionUpdate(params) }
         case .request(let id, let method, let params):

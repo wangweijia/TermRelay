@@ -7,7 +7,7 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
     let displayName: String
     let runtimeMode: SessionRuntimeMode
     let projectID: String?
-    private(set) var state: SessionState
+    let state: SessionState
 
     init(
         id: UUID = UUID(),
@@ -27,21 +27,9 @@ struct ManagedSession: Identifiable, Equatable, Sendable {
         self.projectID = projectID
         self.state = state
     }
-
-    mutating func transition(to next: SessionState) throws {
-        guard state.canTransition(to: next) else {
-            throw SessionTransitionError.invalid(from: state, to: next)
-        }
-        state = next
-    }
 }
 
 enum SessionRuntimeMode: String, Codable, Sendable {
-    case pty
-    case acp
-}
-
-enum CodexInteractionMode: String, Codable, CaseIterable, Sendable {
     case pty
     case acp
 }
@@ -72,19 +60,4 @@ enum SessionState: String, Codable, Sendable {
     case stopping
     case finished
     case failed
-
-    func canTransition(to next: SessionState) -> Bool {
-        switch (self, next) {
-        case (.starting, .running), (.starting, .failed),
-             (.running, .stopping), (.running, .finished), (.running, .failed),
-             (.stopping, .finished), (.stopping, .failed):
-            true
-        default:
-            false
-        }
-    }
-}
-
-enum SessionTransitionError: Error, Equatable {
-    case invalid(from: SessionState, to: SessionState)
 }

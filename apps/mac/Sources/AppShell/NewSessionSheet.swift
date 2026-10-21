@@ -11,6 +11,7 @@ struct NewSessionSheet: View {
     @State private var selectedSavedSessionID: String?
 
     var body: some View {
+        let availability = appModel.selectedToolAvailability
         VStack(alignment: .leading, spacing: 22) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -81,14 +82,14 @@ struct NewSessionSheet: View {
                 .pickerStyle(.segmented)
 
                 Label(
-                    appModel.selectedToolAvailability.detail,
-                    systemImage: appModel.selectedToolAvailability.isAvailable
+                    availability.detail,
+                    systemImage: availability.isAvailable
                         ? "checkmark.circle"
                         : "exclamationmark.triangle"
                 )
                 .font(.caption)
                 .foregroundStyle(
-                    appModel.selectedToolAvailability.isAvailable ? Color.secondary : Color.orange
+                    availability.isAvailable ? Color.secondary : Color.orange
                 )
             }
 
@@ -223,7 +224,7 @@ struct NewSessionSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(
-                    !appModel.selectedToolAvailability.isAvailable
+                    !availability.isAvailable
                         || (appModel.selectedTool == .dsh && !appModel.dshAPIKeyConfigured)
                 )
             }
@@ -255,17 +256,6 @@ struct NewSessionSheet: View {
             if sessions.isEmpty { savedSessionsError = "当前工作目录没有可继续的 Copilot 会话。" }
         } catch {
             savedSessionsError = error.localizedDescription
-        }
-    }
-}
-
-private extension BuiltInTool {
-    var iconName: String {
-        switch self {
-        case .shell: "terminal"
-        case .codex: "sparkles"
-        case .copilot: "chevron.left.forwardslash.chevron.right"
-        case .dsh: "brain.head.profile"
         }
     }
 }

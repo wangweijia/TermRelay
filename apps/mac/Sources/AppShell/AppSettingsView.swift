@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct ServerSettingsView: View {
+struct AppSettingsView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var selectedTool: BuiltInTool = .codex
 
@@ -230,36 +230,24 @@ private struct ToolExecutableSettingsSection: View {
     @EnvironmentObject private var appModel: AppModel
     let tool: BuiltInTool
 
-    private var path: Binding<String> {
-        Binding(
-            get: { appModel.executablePath(for: tool) },
-            set: { appModel.setExecutablePath($0, for: tool) }
-        )
-    }
-
     var body: some View {
+        let path = appModel.executablePath(for: tool)
+        let availability = appModel.toolAvailability(for: tool)
         Section("\(tool.displayName) 可执行文件") {
             HStack {
-                Text(path.wrappedValue.isEmpty ? "自动查找":path.wrappedValue)
+                Text(path.isEmpty ? "自动查找":path)
                     .textSelection(.enabled).lineLimit(2)
                 Button("选择…") { appModel.chooseExecutable(for: tool) }
-                if !path.wrappedValue.isEmpty {
+                if !path.isEmpty {
                     Button("自动查找") { appModel.setExecutablePath("", for: tool) }
                 }
             }
-            Text(path.wrappedValue.isEmpty
+            Text(path.isEmpty
                  ? "留空时自动从 PATH 和常用安装目录查找。"
-                 : tool.makeAdapter(executableURL: expandedURL).detect().detail)
+                 : availability.detail)
                 .font(.caption)
-                .foregroundStyle(tool.makeAdapter(executableURL: expandedURL).detect().isAvailable
-                                 ? Color.secondary : Color.orange)
+                .foregroundStyle(availability.isAvailable ? Color.secondary : Color.orange)
         }
-    }
-
-    private var expandedURL: URL? {
-        let value = path.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        return URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
     }
 }
 

@@ -29,9 +29,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var clientAuthorizationState: ClientAuthorizationState = .notRequired
     @Published var selectedTool: BuiltInTool = .shell
     @Published var copilotReasoningEffort: CopilotReasoningEffort = .automatic
-    @Published var codexInteractionMode: CodexInteractionMode {
-        didSet { defaults.set(codexInteractionMode.rawValue, forKey: Keys.codexInteractionMode) }
-    }
     @Published var acpSendShortcut: ACPSendShortcut {
         didSet { defaults.set(acpSendShortcut.rawValue, forKey: Keys.acpSendShortcut) }
     }
@@ -113,7 +110,6 @@ final class AppModel: ObservableObject {
         }
         proxyConfigurations = Self.loadProxyConfigurations(from: defaults)
         toolExecutablePaths = defaults.dictionary(forKey: Keys.toolExecutablePaths) as? [String: String] ?? [:]
-        codexInteractionMode = .acp
         acpSendShortcut = defaults.string(forKey: Keys.acpSendShortcut)
             .flatMap(ACPSendShortcut.init(rawValue:)) ?? .commandEnter
         workingDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -187,8 +183,6 @@ final class AppModel: ObservableObject {
             }
         )
     }
-
-    func beginConnecting() { connectionState = .connecting }
 
     private func aiLaunch(configuration: AIExecutionConfiguration, root: URL, directory: URL) throws -> AILaunchContext {
         guard serverURL.hasSuffix("/ws/client"), let tool = BuiltInTool(rawValue:configuration.provider),
@@ -278,9 +272,6 @@ final class AppModel: ObservableObject {
             await remoteClient?.publishSessionEnded(id:id,status:.finished,finishedAt:RelayDate.now())
         }
     }
-    func markConnected() { connectionState = .connected }
-    func markOffline() { connectionState = .offline }
-
     func connectToServer() {
         guard !connectionStarted else { return }
         connectionStarted = true
@@ -387,14 +378,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addSession(directory: URL, toolID: String, displayName: String? = nil) {
-        sessions.append(
-            ManagedSession(directory: directory, toolID: toolID, displayName: displayName)
-        )
+    var selectedToolAvailability: ToolAvailability {
+        toolAvailability(for: selectedTool)
     }
 
-    var selectedToolAvailability: ToolAvailability {
-        selectedTool.makeAdapter(executableURL: configuredExecutableURL(for: selectedTool)).detect()
+    func toolAvailability(for tool: BuiltInTool) -> ToolAvailability {
+        tool.makeAdapter(executableURL: configuredExecutableURL(for: tool)).detect()
     }
     var suggestedSessionName: String {
         "\(selectedTool.displayName) — \(workingDirectory.lastPathComponent)"
@@ -523,7 +512,6 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func startLocalSession(resuming savedSession: CopilotSavedSession? = nil) -> UUID? {
-        // TODO: Remove CodexInteractionMode and Codex PTY launch support after the ACP-only UI migration settles.
         if savedSession != nil && selectedTool != .copilot {
             errorMessage = "只能使用 Copilot 继续 Copilot 会话。"
             return nil
@@ -1077,12 +1065,12 @@ final class AppModel: ObservableObject {
     private func remoteLaunchOptions(for directory: URL) -> [RelayLaunchOption] {
         guard remoteWorkspaceIDs.contains(workspaceID(for: directory)) else { return [] }
         var options: [RelayLaunchOption] = []
-        if BuiltInTool.shell.makeAdapter(executableURL: configuredExecutableURL(for: .shell)).detect().isAvailable {
+        if toolAvailability(for: .shell).isAvailable {
             options.append(RelayLaunchOption(toolKey: "shell", runtimeMode: "pty"))
         }
         for tool in [BuiltInTool.codex, .copilot, .dsh] {
             if tool == .dsh && !dshAPIKeyConfigured { continue }
-            guard tool.makeAdapter(executableURL: configuredExecutableURL(for: tool)).detect().isAvailable else { continue }
+            guard toolAvailability(for: tool).isAvailable else { continue }
             options.append(RelayLaunchOption(toolKey: tool.rawValue, runtimeMode: "acp"))
             if tool == .codex { options.append(RelayLaunchOption(toolKey: tool.rawValue, runtimeMode: "pty")) }
         }
@@ -1227,11 +1215,9 @@ final class AppModel: ObservableObject {
 
     private enum Keys {
         static let serverURL = "serverURL"
-        static let deviceID = "deviceID"
         static let workspaceIDs = "workspaceIDs"
         static let proxyConfigurations = "toolProxyConfigurations"
         static let toolExecutablePaths = "toolExecutablePaths"
-        static let codexInteractionMode = "codexInteractionMode"
         static let acpSendShortcut = "acpSendShortcut"
         static let dshAPIKeyAccount = "deepseek.dsh.api-key"
         static let clientCredentialPrefix = "termrelay.client-credential."

@@ -29,7 +29,6 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     private let eventHandler: @Sendable (ToolEvent) -> Void
     private let approvalHandler: @MainActor (ToolEvent) -> Void
     private let stateHandler: @MainActor (UUID, StructuredSessionState) -> Void
-    private let runtimeReadyHandler: @MainActor @Sendable () throws -> Void
     let isExternal: Bool
     private let externalActionHandler: (@Sendable (ToolAction) async -> RemoteCommandResult)?
     private var coordinator: StructuredSessionCoordinator?
@@ -48,7 +47,6 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         eventHandler: @escaping @Sendable (ToolEvent) -> Void,
         approvalHandler: @escaping @MainActor (ToolEvent) -> Void = { _ in },
         stateHandler: @escaping @MainActor (UUID, StructuredSessionState) -> Void,
-        runtimeReadyHandler: @escaping @MainActor @Sendable () throws -> Void = {},
         externalActionHandler: (@Sendable (ToolAction) async -> RemoteCommandResult)? = nil
     ) {
         self.id = id
@@ -60,7 +58,6 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         self.eventHandler = eventHandler
         self.approvalHandler = approvalHandler
         self.stateHandler = stateHandler
-        self.runtimeReadyHandler = runtimeReadyHandler
         self.externalActionHandler = externalActionHandler
         isExternal = externalActionHandler != nil
         autoApproveEnabled = isExternal
@@ -108,7 +105,7 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
                 sessionID: id,
                 workspaceURL: directory,
                 providerSessionID: providerSessionID
-            ), afterRuntimeStart: runtimeReadyHandler)
+            ))
             providerReference = await coordinator.snapshot().reference
             await refreshState()
             if var options = try? await coordinator.configurationOptions(), !options.isEmpty {

@@ -18,7 +18,7 @@ enum DeviceIdentity {
         // In the packaged app, .standard already reads/writes our fixed domain.
         let fixed = bundleIdentifier == preferenceDomain ? standard : (makeSuite(preferenceDomain) ?? standard)
         if !fixed.bool(forKey:"fixedPreferencesMigrated") {
-            for key in ["deviceID","serverURL","workspaceIDs","codexInteractionMode","acpSendShortcut","toolExecutablePaths","toolProxyConfigurations"] {
+            for key in ["deviceID","serverURL","workspaceIDs","acpSendShortcut","toolExecutablePaths","toolProxyConfigurations"] {
                 if fixed.object(forKey:key) == nil, let value = standard.object(forKey:key) { fixed.set(value,forKey:key) }
             }
             fixed.set(true,forKey:"fixedPreferencesMigrated")
