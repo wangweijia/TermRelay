@@ -65,6 +65,23 @@ Linux 是独立的本地进程 / 路径所有者，不经过 Mac；也可使用�
 界面使用 GTK 3 + VTE，独立 supervisor 通过 Linux subreaper 跟踪和清理后代进程。
 边界、内存上限、安装与验收说明见 [`apps/linux/README.md`](../apps/linux/README.md)。
 
+### 已确认的演进方向：无界面 Linux 与通用远程创建
+
+后续 Linux 主线为 CLI 管理 + 后台 Agent，不再要求本地 GTK / VTE UI。
+沿用现有设备主动出站连接 Server 的拓扑和鉴权、路由、持久化、审批及问答语义，
+用户继续通过同一个 Web / 手机入口交互；不新增 Provider 原始 ACP / JSON-RPC 公网入口。
+这是后续规划，当前 Linux 实现仍依赖 GTK，不能据此声明无界面服务已经可用。
+
+远程创建会话应是 macOS / Linux 共用能力：Web 提交目标设备、授权工作区、
+工具和模式，Server 校验并路由，设备按自身 Runtime 创建，再统一上报会话及事件。
+Mac 新会话同时进入本地 UI；Linux 无本地 UI 也应完成同样的交互闭环。
+不改变普通会话与外部 AI API 会话各自的归属、审批和生命周期规则。
+
+现有 `session.start` 仅有 PTY 导向的 Schema 草案，Mac / Linux 工作区当前均未开放远程启动，
+尚不能视为端到端已实现。需要统一补齐模式校验、幂等创建、结果关联、
+启动失败和未知结果处理，不能复用“目标会话必须已存在”的命令路由而跳过创建阶段。
+计划和完成标准见 [U-023 / U-024](UBUNTU_APP_TODO.md)。
+
 ACP Web 的工作区 Markdown 文件预览使用独立的 HTTP → Server → Mac WebSocket 请求/响应链路，
 不经过 PTY 命令或持久化的会话事件。Server 用会话 ID 路由到设备，只临时转发文件内容；
 Mac 同时验证会话、工作区 ID、真实路径边界和文件大小，拒绝工作区外的文件。

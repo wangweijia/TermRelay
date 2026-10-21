@@ -24,6 +24,14 @@ Server 必须同时更新到接受 `platform: linux` 的版本。平台保存在
 
 完整缺口、优先级、依赖与验收标准见 [Ubuntu / Xubuntu App TODO](../../docs/UBUNTU_APP_TODO.md)。
 
+## 后续方向：无界面 Agent
+
+已确认后续以 CLI 管理 + 后台常驻服务为主，连接、鉴权、路由、持久化和交互语义沿用现有 App，
+只是取消 Linux 本地 UI，日常操作继续通过现有 Web / 手机完成。
+远程创建会话作为 macOS / Linux 通用能力共同补齐，不设计 Linux 专用交互协议。
+当前代码尚未完成该改造；下列启动和安装说明仍对应现有 GTK 首版。
+具体任务见 TODO 的 U-023 / U-024，可选桌面 UI 不作为 headless 交付前置。
+
 ## 从源码运行
 
 在 Ubuntu / Xubuntu 的桌面会话中：
