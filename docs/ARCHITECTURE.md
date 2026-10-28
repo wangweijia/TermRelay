@@ -94,6 +94,15 @@ Codex App Server 使用独立客户端，不与标准 ACP 混用。
 `AppSettingsView` 是应用级设置入口，包含连接、工作区、AI 服务和工具凭据；
 本地新建会话仍以 ACP 启动智能体，Shell 使用 PTY，远程创建保留 Codex PTY 选项。
 
+Mac 普通 ACP 会话提供实验性的“共享预览与反馈”原生面板。
+`PreviewSharingController` 负责启动与停止所属 Node helper、校验固定会话 / 设备 / 工作区绑定，
+并通过仅 loopback 的管理 API 展示反馈和处理开发者确认；会话结束、断连与 App 退出时联动关闭。
+`apps/chrome-extension` 中的 helper 提供受限 CONNECT 代理与验收者反馈 API，
+经既有 `/ws/web` 向原会话发送结构化文字轮次，不创建外部 AI API 会话，不直接控制 CLI。
+反馈及凭据留在 Mac 的 Application Support，Server 不增加本地路径或反馈存储。
+此实验入口仅适用受信局域网，浏览器扩展并非现有 Web 应用的新部署方式。
+流程与限制见 [Chrome 预览反馈](../apps/chrome-extension/README.md)。
+
 Linux 是独立的本地进程 / 路径所有者，不经过 Mac；也可使用现有
 `/ws/client-public` + 设备配对凭据接入。设备注册平台允许 `macOS` 和 `linux`，
 存储沿用设备 JSON capabilities，不改变表结构。Linux CLI / 服务使用 TypeScript，

@@ -141,12 +141,12 @@ final class PreviewSharingController: ObservableObject {
     @Published private(set) var feedback: [PreviewFeedback] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var previewURLs: [String] = []
+    @Published private(set) var configuration: PreviewSharingConfiguration?
     @Published var nodePath = ""
 
     private var process: Process?
     private var generation: UUID?
     private var credentials: PreviewCredentials?
-    private var configuration: PreviewSharingConfiguration?
     private var expectedDeviceID = ""
     private var expectedWorkspaceID = ""
     private var output = ""

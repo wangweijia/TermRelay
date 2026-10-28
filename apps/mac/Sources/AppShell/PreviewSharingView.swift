@@ -76,7 +76,17 @@ private struct PreviewSharingView: View {
         }
         .padding(24)
         .frame(width: 720, height: 680)
-        .onAppear { shareHost = addresses.first ?? "" }
+        .onAppear {
+            if isBoundHere, let configuration = sharing.configuration {
+                ports = configuration.ports.map(String.init).joined(separator: ",")
+                publicPort = String(configuration.publicPort)
+                ownerPort = String(configuration.ownerPort)
+                shareHost = configuration.shareHost
+                if !addresses.contains(shareHost) { addresses.append(shareHost) }
+            } else {
+                shareHost = addresses.first ?? ""
+            }
+        }
         .alert("把此反馈交给当前项目会话？", isPresented: Binding(
             get: { pendingDelivery != nil }, set: { if !$0 { pendingDelivery = nil } }
         )) {
@@ -84,6 +94,10 @@ private struct PreviewSharingView: View {
             Button("确认修改") {
                 guard let record = pendingDelivery else { return }
                 pendingDelivery = nil
+                guard isBoundHere, session.state == .ready else {
+                    error = "当前会话尚未空闲，请核实会话状态后再发送。"
+                    return
+                }
                 Task { await sharing.deliver(record) }
             }
         } message: {
@@ -260,7 +274,7 @@ private struct PreviewFeedbackCard: View {
                     HStack {
                         Button("已完成，交业务方验收") { resolutionFailed = false; confirmResolution = true }
                         Button("已核实失败 / 未执行") { resolutionFailed = true; confirmResolution = true }
-                    }.disabled(!sharing.isRunning || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(!canExecute || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 if record.status == "changes_requested" {
                     Text("请在项目会话中继续处理；当前版本不会自动再次发送。").font(.caption).foregroundStyle(.secondary)
@@ -270,6 +284,7 @@ private struct PreviewFeedbackCard: View {
         .alert("确认已在会话中核实执行结束？", isPresented: $confirmResolution) {
             Button("取消", role: .cancel) {}
             Button("确认") { Task { await sharing.resolve(record, summary: summary, failed: resolutionFailed) } }
+                .disabled(!canExecute)
         } message: {
             Text(resolutionFailed ? "记录将标为失败，不会自动重发。" : "记录将交业务方验收，不代表已经验收通过。")
         }

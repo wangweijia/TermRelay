@@ -125,13 +125,21 @@ final class PreviewSharingTests: XCTestCase {
             struct Ports: Decodable { let relay: Int; let publicPort: Int; let ownerPort: Int }
             let ports = try JSONDecoder().decode(Ports.self, from: Data(contentsOf: configurationFile))
             let configuration = try PreviewSharingConfiguration(
-                serverURL: "ws://127.0.0.1:\(ports.relay)/ws/client", ports: "8080",
+                serverURL: "ws://127.0.0.1:\(ports.relay)/ws/client", ports: "8080,8081",
                 publicPort: String(ports.publicPort), ownerPort: String(ports.ownerPort), shareHost: "10.1.2.3")
             let managed = ManagedSession(id: sessionID, directory: directory, toolID: "codex",
                                          displayName: "Synthetic UI project", runtimeMode: .acp)
             await controller.start(session: managed, deviceID: deviceID, workspaceID: "workspace-opaque-project", configuration: configuration)
             XCTAssertTrue(controller.isRunning, controller.errorMessage ?? "Sharing did not start.")
             XCTAssertEqual(controller.sessionID, sessionID)
+            XCTAssertEqual(controller.configuration?.ports, [8080, 8081])
+            XCTAssertEqual(controller.configuration?.publicPort, ports.publicPort)
+            XCTAssertEqual(controller.configuration?.ownerPort, ports.ownerPort)
+            XCTAssertEqual(controller.configuration?.shareHost, "10.1.2.3")
+            XCTAssertEqual(controller.previewURLs, [
+                "https://page-gateway-local.nioint.com:8080/",
+                "https://page-gateway-local.nioint.com:8081/",
+            ])
             let json = try JSONSerialization.jsonObject(with: Data(controller.pairingJSON().utf8))
             let pairing = try XCTUnwrap(json as? [String: String])
             XCTAssertEqual(pairing["companionURL"], "http://10.1.2.3:\(ports.publicPort)")

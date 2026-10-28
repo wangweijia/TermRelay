@@ -1,20 +1,24 @@
 # Chrome 预览与反馈：进展与待办
 
 > 更新日期：2026-10-28。
-> 当前阶段：独立实验版已实现，完成合成环境验证，尚未完成真实业务项目端到端验收。
+> 当前阶段：已从独立 CLI 实验版接入 Mac App 原生 UI，完成合成环境验证，尚未完成真实业务项目端到端验收。
 > 使用方法见 [README](README.md)，产品交互与未决策项见 [需求草案](../../docs/CHROME_PREVIEW_FEEDBACK_REQUIREMENTS.md)。
 
 ## 1. 当前实现路线
 
-代码独立放在 `apps/chrome-extension`，暂未加入根 pnpm workspace，
-没有修改 TermRelay Server / Mac 核心逻辑、数据库或协议生成文件。
+扩展和桥接代码放在 `apps/chrome-extension`，暂未加入根 pnpm workspace；
+Mac 原生入口、托管进程与反馈管理已接入 `apps/mac`。
+没有修改 TermRelay Server、数据库或协议生成文件。
 
 ```text
 预览访问：
 Chrome 插件 -> 本机受限 CONNECT 代理 -> 127.0.0.1:项目原端口
 
+App 控制：
+项目会话 -> 共享预览与反馈 -> 开启共享 / 复制配对 / 查看反馈 / 停止共享
+
 反馈执行：
-Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
+Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
     -> TermRelay Server /ws/web -> 已有普通 ACP 会话
     -> 开发者核实修改结果 -> 业务方验收
 ```
@@ -22,6 +26,8 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 本机桥接是现有 Server 浏览器协议的客户端，不直接操作 CLI，
 不调用通用外部 AI API，也不自动创建专用会话。
 “优先绑定已有会话”已用于本实验版，不代表专用会话等后续产品选项已经定案。
+用户不再需要运行 CLI、查 UUID、阅读 Token 文件或打开独立管理页；
+旧命令行入口和 Web 管理页只保留作开发诊断。
 
 ## 2. 已完成
 
@@ -43,6 +49,14 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 | 未知结果保护 | 断线、超时或发送中重启标记未知；核实前阻止本桥接继续发送其他反馈 | `companion/relay.mjs`、`store.mjs`、`server.mjs` |
 | 人工验收闭环 | 开发者核实后标记待验收，业务方选择通过或填写继续修改意见 | `companion/owner.js`、`extension/content.js` |
 | 本地持久化 | 私有凭据文件、JSON 反馈记录、单数据目录进程锁、正常停止清理锁 | `companion/main.mjs`、`store.mjs` |
+| Mac 会话入口 | 会话顶部打开“共享预览与反馈”，固定绑定此会话，不跟随主窗口切换 | `apps/mac/Sources/AppShell/ContentView.swift`、`PreviewSharingView.swift` |
+| 原生共享面板 | “共享与配对 / 页面反馈”页签，端口与本机 IP 配置、启停、显示插件目录、复制配对 JSON | `apps/mac/Sources/AppShell/PreviewSharingView.swift` |
+| App 托管服务 | 自动取 Server、设备和工作区，启动 Node helper，验证就绪，轮询反馈；只终止所属进程 | `apps/mac/Sources/Preview/PreviewSharingController.swift` |
+| 原生反馈处理 | 查看记录、人工确认发送、核实完成后填写摘要或标记失败，不要求使用 Web 管理页 | `PreviewSharingView.swift`、`PreviewSharingController.swift` |
+| 插件配置导入 | 一次粘贴 App 配对 JSON，仅含验收与代理凭据，不含 adminToken 或会话 ID | `extension/options.*` |
+| 生命周期联动 | 会话结束、关闭、断连、改 Server、App 正常退出时停共享；helper 监测 App 父进程退出 | `AppModel.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
+| Mac 打包资源 | 将 companion 与 extension 放进 App 资源目录，Node 运行时仍需本机安装 | `scripts/build-mac-release.sh` |
+| 工作区兼容修正 | 接受 Mac 实际使用的 `workspace-...` 不透明工作区 ID，不再误按 UUID 拒绝 | `companion/relay.mjs`、`tests/companion.test.mjs` |
 
 ### 当前明确不是自动化的部分
 
@@ -61,7 +75,9 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 | `npm run check` | 通过 | JavaScript 语法、Manifest V3 及扩展入口文件 |
 | `npm test` | 10 项通过 | 反馈校验、鉴权、幂等、人工确认、未知结果、重启恢复、真实 WebSocket 握手及协议发送、CONNECT 转发、CLI 启停 |
 | `npm run test:browser` | 通过 | 独立临时 Chrome Profile 加载实际扩展，设置与连接、代理启停、元素选取、业务点击隔离、真实插件到桥接的反馈提交、URL 过滤、整页反馈 |
-| 仓库根目录 `pnpm check` | 通过 | 现有协议与包检查、Linux 检查、Mac 测试；不自动包含此独立项目的检查 |
+| `pnpm mac:test --filter PreviewSharingTests` | 7 项通过 | 原生配置、资源定位、错误提示、PTY 拒绝、实际 App 控制器启动与停止 helper、绑定及配对权限 |
+| 仓库根目录 `pnpm check` | 通过 | 协议、TypeScript、Linux 检查及 Mac 135 项测试（6 项按条件跳过）；不自动包含扩展独立检查 |
+| `pnpm test:release` | 12 项通过 | 现有发布脚本回归；Mac 打包脚本另通过 `bash -n`，未实际生成 Mac Release 包 |
 
 验证边界：
 
@@ -70,6 +86,7 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 - CONNECT 测试验证认证、限制及字节转发，没有替代真实业务 HTTPS / WSS / HMR 验收。
 - 开发时 `127.0.0.1:3007` 没有运行中的 Relay，尚未连接真实 Mac 项目会话修改代码。
 - 未在另一台业务方电脑上验证公司网络、防火墙及实际 Chrome 管理策略。
+- App 控制器测试使用合成 Relay，没有替代真实业务 SSO、真实模型修改及人工原生 UI 验收。
 
 ## 4. 下一步：按顺序完成真实试用验收
 
@@ -96,8 +113,8 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 | 编号 | 优先级 | 待办 | 当前缺口 / 完成标准 |
 | --- | --- | --- | --- |
 | D-01 | 优先 | 代理与反馈控制链路的传输保护 | 当前 HTTP + Basic 仅限受信 LAN；扩大使用前明确加密、接入与威胁边界，不改变项目原 HTTPS |
-| D-02 | 优先 | 配对、凭据撤销与轮换 | 当前复制三个用途不同的 Token，撤销需停服换数据目录；需简化且可独立撤销验收方权限 |
-| D-03 | 优先 | 会话选择、绑定与失效处理 UI | 当前启动需手动填写 UUID，换会话需新目录；应支持核对与显式迁移，旧反馈不得静默重绑 |
+| D-02 | 部分完成 | 配对、凭据撤销与轮换 | 已在 App 一键复制仅供验收者的配对 JSON；仍缺原生撤销 / 轮换，停服再开启会恢复原凭据 |
+| D-03 | 部分完成 | 会话选择、绑定与失效处理 UI | 已在当前会话一键绑定和启停，不再填写 UUID；后续仍需历史反馈查看、异常锁恢复与显式迁移设计 |
 | D-04 | 优先 | 可靠的轮次关联和完成跟踪 | 当前仅跟踪命令 ACK；需关联真实 turn，区分执行中、审批、完成、失败和未知，避免误认人工轮次 |
 | D-05 | 优先 | DOM 选取兼容与失效提示 | 验证页面早期事件、滚动、SPA 路由及 HMR；增强目标失效处理，不依赖固定旧坐标 |
 | D-06 | 后续 | 查询与 hash 路由的精细过滤 | 当前全部丢弃；在不带出凭据的前提下保留必要路由和复现条件 |
@@ -107,7 +124,7 @@ Chrome 插件 -> 本机反馈桥接 -> 开发者在本机管理页确认
 | D-10 | 后续 | 草稿恢复与反馈体验 | 当前草稿只在页面内存，列表按 origin 过滤；补充跨刷新恢复、路由筛选与可靠元素重定位 |
 | D-11 | 后续 | 数据管理 | 当前本机 JSON、最多 1000 条；明确保留期限、归档、导出、清理及异常文件恢复 |
 | D-12 | 后续 | 企业代理兼容 | 当前非目标域名 DIRECT，仅适用于独立 Profile；若扩大使用，设计既有代理的保留与冲突处理 |
-| D-13 | 待决策 | 正式 Server 反馈模块与 App 集成 | 当前依赖独立桥接和管理页；是否迁移到 Server、由 App 管理代理及反馈需另行决定 |
+| D-13 | 部分完成 | 正式 Server 反馈模块与 App 集成 | App 已管理代理、配对及反馈；是否迁移本机反馈存储到 Server 仍待决定 |
 | D-14 | 待决策 | 专用反馈会话 | 当前绑定已有会话；如引入专用会话，须先解决上下文、生命周期、审批及共享工作区冲突 |
 
 ## 6. 本期明确不做
