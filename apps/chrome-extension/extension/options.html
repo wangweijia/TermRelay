@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>TermRelay 预览配对</title><link rel="stylesheet" href="options.css"></head>
+<body>
+  <h1>TermRelay 预览配对</h1>
+  <p>从开发者获取配置。不要填写通用 AI API Key 或 adminToken。</p>
+  <details>
+    <summary>从 App 导入配对配置</summary>
+    <p>将开发者在 App 中复制的 JSON 粘贴到这里，无需逐项填写地址和 Token。</p>
+    <textarea id="import-config" rows="6" placeholder="粘贴 App 复制的配对配置"></textarea>
+    <button id="import">导入并保存</button>
+  </details>
+  <form id="settings">
+    <label>开发者本机桥接地址<input id="url" type="url" placeholder="http://10.x.x.x:18420" required></label>
+    <label>reviewerToken<input id="reviewer" type="password" autocomplete="off" required></label>
+    <label>proxyToken<input id="proxy" type="password" autocomplete="off" required></label>
+    <button>保存（更换配置会停用原代理）</button>
+  </form>
+  <button id="test">测试反馈连接</button>
+  <hr>
+  <p>可选域名代理：仅将 page-gateway-local.nioint.com 发往开发者电脑，保留原端口和 HTTPS。</p>
+  <p><strong>此版本 PAC 对其他域名使用 DIRECT，不会合并公司现有代理规则。仅在获准且无需其他代理的独立 Chrome Profile 使用。</strong></p>
+  <label><input id="consent" type="checkbox">我已确认这个 Profile 可以使用上述代理规则；切换后会关闭旧预览标签页再重新打开。</label>
+  <button id="enable">启用域名代理</button><button id="disable">停用并释放代理设置</button>
+  <p id="status" role="status"></p>
+  <p>反馈 UI 仅在配对环境授权的预览端口出现。共享 Token 的验收者可看到该配对环境的全部反馈。</p>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

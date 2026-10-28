@@ -201,6 +201,11 @@ resources_dir="$contents_dir/Resources"
 mkdir -p "$macos_dir" "$resources_dir"
 install -m 755 "$executable" "$macos_dir/$product_name"
 
+preview_resources="$resources_dir/ChromeFeedback"
+mkdir -p "$preview_resources"
+ditto "$repo_root/apps/chrome-extension/companion" "$preview_resources/companion"
+ditto "$repo_root/apps/chrome-extension/extension" "$preview_resources/extension"
+
 # SwiftPM dependencies may emit resource bundles beside the executable.
 while IFS= read -r -d '' resource_bundle; do
   ditto "$resource_bundle" "$resources_dir/$(basename "$resource_bundle")"

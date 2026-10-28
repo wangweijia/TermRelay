@@ -385,6 +385,9 @@ private struct StructuredAgentSessionView: View {
                 Label("ACP \(session.state.rawValue)", systemImage: "sparkles")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
+                if !session.isExternal {
+                    PreviewSharingButton(sharing: appModel.previewSharing, session: session, displayName: displayName)
+                }
                 Button("停止", role: .destructive) { appModel.stopLocalTerminal(id: session.id) }
                     .disabled([.finished, .failed].contains(session.state))
             }

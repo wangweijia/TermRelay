@@ -66,6 +66,9 @@ final class AppModel: ObservableObject {
     }
     @Published var serverURL: String {
         didSet {
+            if oldValue != serverURL, previewSharing.isRunning || previewSharing.isStarting {
+                Task { await previewSharing.stop(reason: "Server 地址已改变，共享已停止，请重新确认绑定。") }
+            }
             defaults.set(serverURL, forKey: Keys.serverURL)
             pairingTask?.cancel()
             refreshClientAuthorizationState()
@@ -73,6 +76,7 @@ final class AppModel: ObservableObject {
     }
 
     let deviceID: UUID
+    let previewSharing = PreviewSharingController()
     private let defaults: UserDefaults
     private let credentialStore: any CredentialStoring
     private let pairingClient: ClientPairingClient
@@ -140,6 +144,9 @@ final class AppModel: ObservableObject {
                         Task { await self.refreshCopilotHistory() }
                     } else if state == .offline || state == .connecting {
                         Task {
+                            if self.previewSharing.isRunning || self.previewSharing.isStarting {
+                                await self.previewSharing.stop(reason: "Server 连接已断开，共享已停止。")
+                            }
                             let externalIDs = self.sessions.filter({$0.projectID != nil}).map(\.id)
                             await self.aiRuntime.disconnected()
                             for id in externalIDs { self.closeLocalTerminal(id:id) }
@@ -898,6 +905,7 @@ final class AppModel: ObservableObject {
     }
 
     func stopLocalTerminal(id: UUID) {
+        previewSharing.stopIfBound(to: id)
         pendingApprovals.clear(sessionID: id)
         terminalSessions[id]?.terminate()
         if let structured = structuredSessions[id] {
@@ -907,6 +915,7 @@ final class AppModel: ObservableObject {
     }
 
     func closeLocalTerminal(id: UUID) {
+        previewSharing.stopIfBound(to: id)
         pendingAutoApproveSync[id] = nil
         if sessions.contains(where: {$0.id == id && $0.projectID != nil}) {
             Task { await aiRuntime.close(id.uuidString.lowercased()) }
@@ -922,6 +931,7 @@ final class AppModel: ObservableObject {
     }
 
     func terminateAllSessions() async {
+        await previewSharing.stop()
         await aiRuntime.disconnected()
         let hadQuickRuns = quickActionRunner.hasRunningProcesses
         quickActionRunner.terminateAll()
@@ -1169,6 +1179,7 @@ final class AppModel: ObservableObject {
 
     private func handleStructuredSessionState(id: UUID, state: StructuredSessionState) {
         updateActiveSessionCount()
+        if state == .finished || state == .failed { previewSharing.stopIfBound(to: id) }
         guard state == .finished || state == .failed, let remoteClient else { return }
         pendingApprovals.clear(sessionID: id)
         if state == .failed {
@@ -1204,6 +1215,16 @@ final class AppModel: ObservableObject {
         identifiers[directory.path] = identifier
         defaults.set(identifiers, forKey: Keys.workspaceIDs)
         return identifier
+    }
+
+    func startPreviewSharing(sessionID: UUID, configuration: PreviewSharingConfiguration) async throws {
+        guard connectionState == .connected,
+              let session = sessions.first(where: { $0.id == sessionID && $0.projectID == nil }),
+              let structured = structuredSessions[sessionID], !structured.isExternal, structured.state == .ready else {
+            throw PreviewSharingError("请先连接 Server，并选择已就绪的本机 ACP 项目会话。")
+        }
+        await previewSharing.start(session: session, deviceID: deviceID,
+                                   workspaceID: workspaceID(for: session.directory), configuration: configuration)
     }
 
     private func filePreviewWorkspace(sessionID: UUID, workspaceID: String) -> URL? {

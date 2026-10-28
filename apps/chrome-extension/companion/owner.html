@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TermRelay 反馈管理</title><link rel="stylesheet" href="/owner.css"></head>
+<body>
+  <h1>TermRelay 页面反馈</h1>
+  <p>仅本机管理。先确认绑定项目，再决定是否把反馈交给 AI；此处不自动审批或自动重试。</p>
+  <form id="login"><label>本机 adminToken <input id="token" type="password" required autocomplete="off"></label><button>连接</button></form>
+  <p id="error" role="alert"></p>
+  <section id="workspace" hidden>
+    <h2 id="binding"></h2>
+    <p>执行前请确认此会话属于被预览项目，并确保没有其他会话同时修改同一工作目录。</p>
+    <details><summary>插件配对配置（只分享给授权验收者）</summary><pre id="pairing"></pre></details>
+    <button id="refresh">刷新反馈</button>
+    <div id="records"></div>
+  </section>
+  <script type="module" src="/owner.js"></script>
+</body>
+</html>

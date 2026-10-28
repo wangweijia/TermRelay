@@ -1,0 +1,2 @@
+body{font:15px/1.6 system-ui,sans-serif;max-width:760px;margin:32px auto;padding:0 20px}label{display:block;margin:14px 0}input:not([type=checkbox]){display:block;width:95%;padding:8px;font:inherit}button{padding:9px;margin:6px;cursor:pointer}#status{white-space:pre-wrap;overflow-wrap:anywhere}
+textarea{width:95%;font:inherit;padding:8px}
