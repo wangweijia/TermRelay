@@ -19,12 +19,15 @@ struct PreviewFeedback: Decodable, Identifiable, Sendable {
 
     var statusLabel: String {
         switch status {
-        case "pending": "待处理"
-        case "sending": "发送中"
+        case "pending": "已排队，等待 Chat 空闲"
+        case "sending": "正在启动修改"
+        case "running": "AI 正在修改"
+        case "awaiting_approval": "等待 Chat 工具审批"
+        case "awaiting_input": "等待 Chat 问题回复"
         case "delivered": "已送达会话，待核实"
         case "unknown": "结果未知，需核实"
         case "failed": "处理失败"
-        case "awaiting_review": "待业务验收"
+        case "awaiting_review": "本轮修改完成，待验收"
         case "verified": "已验收"
         case "changes_requested": "需继续修改"
         default: "未知状态：\(status)"
@@ -105,6 +108,9 @@ private struct PreviewCredentials: Decodable {
 }
 
 private struct PreviewOwnerState: Decodable {
+    struct Connection: Decodable {
+        let clientId: String
+    }
     struct Binding: Decodable {
         let sessionId: String
         let deviceId: String
@@ -112,6 +118,7 @@ private struct PreviewOwnerState: Decodable {
     }
     let binding: Binding
     let records: [PreviewFeedback]
+    let connection: Connection?
 }
 
 private struct PreviewDispatch: Decodable {
@@ -124,6 +131,28 @@ private struct PreviewResponseFailure: Decodable {
     let error: String
 }
 
+private struct PreviewExecution {
+    let recordID: String
+    let commandID: UUID
+    var turnID: String?
+    var status = "sending"
+    var note = ""
+    var revision = 0
+    var synchronizedRevision = 0
+    var bufferedEvents: [ToolEvent] = []
+    var approvals = Set<String>()
+    var questions = Set<String>()
+
+    var isTerminal: Bool { ["awaiting_review", "failed", "unknown"].contains(status) }
+
+    mutating func update(_ status: String, note: String = "") {
+        guard self.status != status || self.note != note else { return }
+        self.status = status
+        self.note = note
+        revision += 1
+    }
+}
+
 @MainActor
 final class PreviewSharingController: ObservableObject {
     @Published private(set) var sessionID: UUID?
@@ -132,6 +161,7 @@ final class PreviewSharingController: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var isStopping = false
     @Published private(set) var isSending = false
+    @Published private(set) var pluginConnected = false
     @Published private(set) var feedback: [PreviewFeedback] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var previewURLs: [String] = []
@@ -146,6 +176,9 @@ final class PreviewSharingController: ObservableObject {
     private var output = ""
     private var pollTask: Task<Void, Never>?
     private var startLocalTurn: (@MainActor (String, UUID) async -> RemoteCommandResult)?
+    private var canStartLocalTurn: (@MainActor () -> Bool)?
+    private var execution: PreviewExecution?
+    private var isSynchronizingExecution = false
     private let network: URLSession
     private let dataRoot: URL
 
@@ -175,11 +208,12 @@ final class PreviewSharingController: ObservableObject {
     }
 
     var hasUnresolvedExecution: Bool {
-        feedback.contains { ["sending", "delivered", "unknown"].contains($0.status) }
+        execution != nil || feedback.contains { ["sending", "running", "awaiting_approval", "awaiting_input", "delivered", "unknown"].contains($0.status) }
     }
 
     func start(
         session: ManagedSession, deviceID: UUID, workspaceID: String, configuration: PreviewSharingConfiguration,
+        canStartLocalTurn: @escaping @MainActor () -> Bool = { true },
         startLocalTurn: @escaping @MainActor (String, UUID) async -> RemoteCommandResult
     ) async {
         guard process == nil, !isStarting, !isStopping else {
@@ -201,6 +235,8 @@ final class PreviewSharingController: ObservableObject {
         sessionName = session.displayName
         self.configuration = configuration
         self.startLocalTurn = startLocalTurn
+        self.canStartLocalTurn = canStartLocalTurn
+        execution = nil
         expectedDeviceID = deviceID.uuidString.lowercased()
         expectedWorkspaceID = workspaceID
         defer { if generation == operation { isStarting = false } }
@@ -263,9 +299,9 @@ final class PreviewSharingController: ObservableObject {
                     previewURLs = configuration.ports.map { "https://page-gateway-local.nioint.com:\($0)/" }
                     pollTask = Task { [weak self] in
                         while !Task.isCancelled {
-                            do { try await Task.sleep(for: .seconds(3)) } catch { break }
+                            do { try await Task.sleep(for: .seconds(1)) } catch { break }
                             guard let self, self.generation == operation else { break }
-                            do { try await self.refresh() }
+                            do { try await self.synchronize() }
                             catch {
                                 if self.generation == operation { self.errorMessage = "反馈同步失败：\(error.localizedDescription)" }
                             }
@@ -288,10 +324,20 @@ final class PreviewSharingController: ObservableObject {
     func stop(reason: String? = nil) async {
         guard !isStopping else { return }
         isStopping = true
-        generation = nil
         pollTask?.cancel()
         pollTask = nil
+        var stopMessage = reason
+        for _ in 0..<30 where isSynchronizingExecution {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if execution != nil, isRunning {
+            if execution?.isTerminal == false { execution?.update("unknown") }
+            do { try await synchronizeExecution() }
+            catch { stopMessage = "\(reason ?? "共享已停止。") 最后执行状态同步失败：\(error.localizedDescription)" }
+        }
+        generation = nil
         isRunning = false
+        pluginConnected = false
         isStarting = false
         if let child = process, child.isRunning {
             child.terminate()
@@ -303,9 +349,11 @@ final class PreviewSharingController: ObservableObject {
         process = nil
         credentials = nil
         startLocalTurn = nil
+        canStartLocalTurn = nil
+        execution = nil
         isSending = false
         isStopping = false
-        if let reason { errorMessage = reason }
+        if let stopMessage { errorMessage = stopMessage }
     }
 
     func stopIfBound(to id: UUID) {
@@ -326,6 +374,90 @@ final class PreviewSharingController: ObservableObject {
             throw PreviewSharingError("共享服务绑定与 App 会话不一致，已拒绝读取或执行。")
         }
         feedback = state.records
+        pluginConnected = state.connection != nil
+    }
+
+    func synchronize() async throws {
+        try await synchronizeExecution()
+        try await refresh()
+        guard isRunning, !isStopping, !isSending, !hasUnresolvedExecution, canStartLocalTurn?() == true,
+              let next = feedback.last(where: { $0.status == "pending" }) else { return }
+        await deliver(next)
+    }
+
+    func observe(_ event: ToolEvent) {
+        guard isRunning, event.sessionID == sessionID, var current = execution, !current.isTerminal else { return }
+        let command = current.commandID.uuidString.lowercased()
+        if current.turnID == nil {
+            if case .userMessage(let messageID, _) = event.payload,
+               messageID.lowercased() == command, let turnID = event.correlation.turnID {
+                current.turnID = turnID
+                current.revision += 1
+            } else if case .turnStarted(let turnID) = event.payload, turnID.lowercased() == command {
+                current.turnID = turnID
+                current.revision += 1
+            } else if case .failed = event.payload {
+                current.update("unknown")
+            } else if current.bufferedEvents.count < 256 {
+                current.bufferedEvents.append(event)
+            } else {
+                current.update("unknown")
+            }
+            if current.turnID != nil {
+                let buffered = current.bufferedEvents
+                current.bufferedEvents = []
+                for item in buffered { apply(item, to: &current) }
+            }
+        }
+        apply(event, to: &current)
+        execution = current
+    }
+
+    private func apply(_ event: ToolEvent, to current: inout PreviewExecution) {
+        guard !current.isTerminal else { return }
+        if case .failed = event.payload, event.correlation.turnID == nil {
+            current.update("unknown")
+            return
+        }
+        guard let turnID = current.turnID, event.correlation.turnID == turnID else { return }
+        switch event.payload {
+        case .turnStarted:
+            current.update("running")
+        case .approvalRequested(let approval):
+            current.approvals.insert(approval.approvalID)
+            current.update("awaiting_approval")
+        case .approvalResolved(let id, _, _):
+            current.approvals.remove(id)
+            current.update(current.approvals.isEmpty ? (current.questions.isEmpty ? "running" : "awaiting_input") : "awaiting_approval")
+        case .userInputRequested(let question) where question.isBlocking:
+            current.questions.insert(question.requestID)
+            current.update("awaiting_input")
+        case .userInputResolved(let id, _, _):
+            current.questions.remove(id)
+            current.update(current.approvals.isEmpty ? (current.questions.isEmpty ? "running" : "awaiting_input") : "awaiting_approval")
+        case .turnCompleted(_, let status):
+            current.update(status == .completed ? "awaiting_review" : "failed",
+                           note: status == .completed ? "AI 本轮修改已完成，请刷新业务页面核实并验收；执行完成不代表验收通过。" : "")
+        case .failed:
+            current.update("unknown")
+        default: break
+        }
+    }
+
+    private func synchronizeExecution() async throws {
+        guard !isSynchronizingExecution else { return }
+        let operation = generation
+        isSynchronizingExecution = true
+        defer { isSynchronizingExecution = false }
+        while let current = execution, current.revision > current.synchronizedRevision {
+            let _: PreviewFeedback = try await request("/api/feedback/\(current.recordID)/result", body: [
+                "commandId": current.commandID.uuidString.lowercased(), "revision": current.revision,
+                "turnId": current.turnID.map { $0 as Any } ?? NSNull(), "status": current.status, "note": current.note,
+            ])
+            guard generation == operation, execution?.commandID == current.commandID else { return }
+            execution?.synchronizedRevision = current.revision
+            if execution?.revision == current.revision, current.isTerminal { execution = nil }
+        }
     }
 
     func deliver(_ record: PreviewFeedback) async {
@@ -343,13 +475,18 @@ final class PreviewSharingController: ObservableObject {
                   dispatch.binding.deviceId == expectedDeviceID, dispatch.binding.workspaceId == expectedWorkspaceID else {
                 throw PreviewSharingError("反馈执行绑定与本机会话不一致，已拒绝执行。")
             }
+            execution = PreviewExecution(recordID: record.id, commandID: dispatch.commandId)
             let result = await startLocalTurn(dispatch.text, dispatch.commandId)
             guard generation == operation, isRunning else { return }
-            let status = result.succeeded ? "delivered" : (result.errorCode == "agent_action_failed" ? "unknown" : "failed")
-            let note = result.succeeded ? "本地会话已接收，开发者仍需核实 AI 执行结果。" : (result.message ?? "本地会话拒绝执行。")
-            let _: PreviewFeedback = try await request("/api/feedback/\(record.id)/result", body: [
-                "commandId": dispatch.commandId.uuidString.lowercased(), "status": status, "note": String(note.prefix(2000)),
-            ])
+            if execution?.isTerminal == false {
+                if result.succeeded {
+                    if execution?.status == "sending" { execution?.update("running") }
+                } else {
+                    execution?.update(result.errorCode == "agent_action_failed" ? "unknown" : "failed",
+                                      note: String(decoding: (result.message ?? "本地 Chat 拒绝执行。").utf16.prefix(2000), as: UTF16.self))
+                }
+            }
+            try await synchronizeExecution()
             guard generation == operation else { return }
             try await refresh()
             errorMessage = nil
@@ -359,7 +496,7 @@ final class PreviewSharingController: ObservableObject {
     }
 
     func resolve(_ record: PreviewFeedback, summary: String, failed: Bool) async {
-        guard isRunning, !isSending, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard isRunning, !isSending, !isSynchronizingExecution, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             errorMessage = "请核实会话执行结束，并填写给验收者看的结果摘要。"
             return
         }
@@ -369,6 +506,7 @@ final class PreviewSharingController: ObservableObject {
                 "checked": true, "note": summary, "outcome": failed ? "failed" : "completed",
             ])
             guard generation == operation else { return }
+            if execution?.recordID == record.id { execution = nil }
             try await refresh()
             errorMessage = nil
         } catch {

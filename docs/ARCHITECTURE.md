@@ -96,13 +96,19 @@ Codex App Server 使用独立客户端，不与标准 ACP 混用。
 
 Mac 普通 ACP 会话提供实验性的“共享预览与反馈”原生面板。
 `PreviewSharingController` 负责启动与停止所属 Node helper、校验固定会话 / 设备 / 工作区绑定，
-并通过仅 loopback 的管理 API 展示反馈和处理开发者确认；会话结束与 App 退出时联动关闭。
+并通过仅 loopback 的管理 API 展示反馈、自动派发排队任务及同步执行状态；会话结束与 App 退出时联动关闭。
 `apps/chrome-extension` 中的 helper 提供受限 CONNECT 代理与验收者反馈 API，
 代理严格匹配 `page-gateway-local.nioint.com`，所有合法端口均转发到本机原端口，
 不使用项目端口允许列表；App 输入的入口端口只用于生成链接。代理凭据意味着对本地全部 TCP 端口的访问，
 仅供受信局域网中的可信验收者使用。
-将执行意图持久化后交给 App，由 App 直接调用绑定的本地 ACP 会话启动文字轮次，
-再向 helper 回写接收结果；helper 不连接 Server、不直接控制 CLI、不创建外部 AI API 会话。
+反馈执行意图持久化后交给 App，由 App 在绑定 Chat 空闲时自动启动本地 ACP 文字轮次，
+不再要求逐条反馈确认，但不改变 Chat 的 AI 工具审批和用户问题策略。
+App 将命令关联到 Provider 的真实轮次，通过事件同步运行、等待审批 / 问答及最终完成 / 失败状态；
+只有关联轮次成功结束才交验收，未知结果阻止后续派发，重启不重放执行中任务。
+helper 不连接 Server、不直接控制 CLI、不创建外部 AI API 会话。
+整个 App 的共享控制器只运行一个绑定，helper 使用可续约的 90 秒独占租约接入一个插件实例；
+同一 Chrome Profile 的多页面共用实例 ID。反馈接口和动态代理凭据都校验该连接，
+断开 / 过期关闭既有隧道，第二个实例不能抢占；插件约 30 秒续约、页面约 3 秒更新状态。
 反馈及凭据留在 Mac 的 Application Support，Server 不增加本地路径或反馈存储。
 网页访问、反馈提交和验收均在本机 / 受信局域网内闭环，无需 Server 连接；
 App 的公网配对、Server 断线和地址变更不影响共享。浏览器扩展并非现有 Web 应用的新部署方式。

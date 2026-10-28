@@ -34,7 +34,6 @@ private struct PreviewSharingView: View {
     @State private var selectedTab = "setup"
     @State private var error: String?
     @State private var notice: String?
-    @State private var pendingDelivery: PreviewFeedback?
     @State private var isConfirmingStop = false
 
     private var isBoundHere: Bool { sharing.sessionID == session.id }
@@ -87,22 +86,6 @@ private struct PreviewSharingView: View {
                 shareHost = addresses.first ?? ""
             }
         }
-        .alert("把此反馈交给当前项目会话？", isPresented: Binding(
-            get: { pendingDelivery != nil }, set: { if !$0 { pendingDelivery = nil } }
-        )) {
-            Button("取消", role: .cancel) { pendingDelivery = nil }
-            Button("确认修改") {
-                guard let record = pendingDelivery else { return }
-                pendingDelivery = nil
-                guard isBoundHere, session.state == .ready else {
-                    error = "当前会话尚未空闲，请核实会话状态后再发送。"
-                    return
-                }
-                Task { await sharing.deliver(record) }
-            }
-        } message: {
-            Text("目标：\(displayName)。请确认没有其他会话同时修改这个项目。工具权限沿用此会话的审批设置，不会自动重试。")
-        }
         .alert("停止共享？", isPresented: $isConfirmingStop) {
             Button("取消", role: .cancel) {}
             Button("停止共享", role: .destructive) {
@@ -122,6 +105,13 @@ private struct PreviewSharingView: View {
                         Text("会话：\(displayName) · \(session.state.rawValue)").font(.caption)
                         Text("此窗口绑定创建时的会话，不会跟随主窗口切换。一次只共享一个项目。")
                             .font(.caption).foregroundStyle(.secondary)
+                        Text("开启共享即允许插件反馈自动进入此 Chat；AI 工具审批沿用此会话设置。整个 App 同时只接受一个插件实例。")
+                            .font(.caption).foregroundStyle(.orange)
+                        if isBoundHere && sharing.isRunning {
+                            Label(sharing.pluginConnected ? "插件已连接" : "等待插件连接",
+                                  systemImage: sharing.pluginConnected ? "link" : "link.badge.plus")
+                                .font(.caption)
+                        }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
                 GroupBox("2. 开放本机预览") {
@@ -216,10 +206,10 @@ private struct PreviewSharingView: View {
     private var feedback: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("插件提交后出现在这里；点击确认才发送给当前会话。").font(.caption)
+                Text("插件反馈自动排队进入此 Chat；AI 工具审批保持原设置。").font(.caption)
                 Spacer()
                 Button("刷新") {
-                    Task { do { try await sharing.refresh() } catch { self.error = error.localizedDescription } }
+                    Task { do { try await sharing.synchronize() } catch { self.error = error.localizedDescription } }
                 }.disabled(!isBoundHere || !sharing.isRunning)
             }
             if !isBoundHere || sharing.feedback.isEmpty {
@@ -230,13 +220,12 @@ private struct PreviewSharingView: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(sharing.feedback) { record in
                             PreviewFeedbackCard(record: record, sharing: sharing,
-                                                canExecute: session.state == .ready && sharing.isRunning,
-                                                requestExecution: { pendingDelivery = record })
+                                                canExecute: session.state == .ready && sharing.isRunning)
                         }
                     }
                 }
             }
-            Text("“已送达”不是 AI 完成。请回到会话查看审批及修改结果，核实轮次结束后再交付验收。")
+            Text("开始、等待审批与完成状态自动同步到插件；完成仅代表本轮执行结束，不代表验收通过。未知结果须人工核实，不自动重发。")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -246,7 +235,6 @@ private struct PreviewFeedbackCard: View {
     let record: PreviewFeedback
     @ObservedObject var sharing: PreviewSharingController
     let canExecute: Bool
-    let requestExecution: () -> Void
     @State private var summary = ""
     @State private var confirmResolution = false
     @State private var resolutionFailed = false
@@ -266,10 +254,6 @@ private struct PreviewFeedbackCard: View {
                 }
                 if !record.steps.isEmpty { Text("复现：\(record.steps)").font(.caption) }
                 if !record.note.isEmpty { Text(record.note).font(.caption).textSelection(.enabled) }
-                if record.status == "pending" {
-                    Button("确认交给此会话修改", action: requestExecution)
-                        .disabled(!canExecute || sharing.isSending || sharing.hasUnresolvedExecution)
-                }
                 if ["sending", "delivered", "unknown"].contains(record.status) {
                     TextField("核实结果后，填写给业务方看的摘要", text: $summary, axis: .vertical)
                         .lineLimit(2...4)

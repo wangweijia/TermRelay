@@ -85,10 +85,11 @@ final class PreviewSharingTests: XCTestCase {
             let runtime = PreviewTestRuntime()
             let local = LocalStructuredAgentSession(
                 id: managed.id, directory: managed.directory, adapter: PreviewTestAdapter(runtime: runtime),
-                eventHandler: { _ in }, stateHandler: { _, _ in })
+                eventHandler: { _ in }, approvalHandler: { controller.observe($0) }, stateHandler: { _, _ in })
             await local.start()
             XCTAssertEqual(local.state, .ready)
-            await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-local", configuration: configuration) { text, commandID in
+            await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-local", configuration: configuration,
+                                   canStartLocalTurn: { local.state == .ready }) { text, commandID in
                 await local.startTurn(text, idempotencyKey: commandID)
             }
             XCTAssertTrue(controller.isRunning, controller.errorMessage ?? "Sharing did not start.")
@@ -109,9 +110,10 @@ final class PreviewSharingTests: XCTestCase {
             let id = try await submitFeedback(configuration, pairing)
             try await controller.refresh()
             let record = try XCTUnwrap(controller.feedback.first { $0.id == id })
-            await controller.deliver(record)
+            try await controller.synchronize()
             XCTAssertNil(controller.errorMessage)
-            XCTAssertEqual(controller.feedback.first?.status, "delivered")
+            XCTAssertEqual(controller.feedback.first?.status, "running")
+            XCTAssertTrue(controller.pluginConnected)
             let actions = await runtime.actions
             XCTAssertEqual(actions.count, 1)
             guard case .startTurn(let input, let key) = actions.first else { return XCTFail("Expected a local turn.") }
@@ -122,8 +124,27 @@ final class PreviewSharingTests: XCTestCase {
             await controller.deliver(record)
             let count = await runtime.actions.count
             XCTAssertEqual(count, 1, "Duplicate feedback must not execute a second turn.")
-            await controller.resolve(try XCTUnwrap(controller.feedback.first), summary: "Checked the local result.", failed: false)
-            XCTAssertEqual(controller.feedback.first?.status, "awaiting_review")
+            let turnID = runtime.turnID
+            XCTAssertNotEqual(turnID, key.uuidString.lowercased(), "Provider turn IDs must not be assumed to equal command IDs.")
+            let approval = ApprovalRequest(approvalID: "approval", turnID: turnID, itemID: nil, kind: "command",
+                risk: .low, title: "Test approval", detail: nil, availableDecisions: [.allowOnce, .deny],
+                expiresAt: Date().addingTimeInterval(60))
+            await runtime.emit(.approvalRequested(approval))
+            try await waitForStatus("awaiting_approval", controller: controller)
+            XCTAssertFalse(local.autoApproveEnabled, "Feedback auto-dispatch must not change AI tool approval policy.")
+            let approvalActions = await runtime.actions
+            XCTAssertEqual(approvalActions.count, 1, "The feedback workflow must not approve tools.")
+            await runtime.emit(.approvalResolved(approvalID: "approval", turnID: turnID, decision: .allowOnce))
+            try await waitForStatus("running", controller: controller)
+            let question = UserInputRequest(requestID: "question", turnID: turnID, itemID: "item",
+                questions: [], isBlocking: true, expiresAt: nil)
+            await runtime.emit(.userInputRequested(question))
+            try await waitForStatus("awaiting_input", controller: controller)
+            await runtime.emit(.userInputResolved(requestID: "question", turnID: turnID, answers: [:]))
+            try await waitForStatus("running", controller: controller)
+            await runtime.emit(.turnCompleted(turnID: turnID, status: .completed))
+            try await waitForStatus("awaiting_review", controller: controller)
+            XCTAssertFalse(controller.hasUnresolvedExecution)
             await local.stop()
             controller.stopIfBound(to: managed.id)
             for _ in 0..<100 where controller.isRunning || controller.isStopping {
@@ -151,13 +172,70 @@ final class PreviewSharingTests: XCTestCase {
                 let id = try await submitFeedback(configuration, pairing(controller))
                 try await controller.refresh()
                 let record = try XCTUnwrap(controller.feedback.first { $0.id == id })
-                await controller.deliver(record)
+                try await controller.synchronize()
                 XCTAssertNil(controller.errorMessage)
                 XCTAssertEqual(controller.feedback.first?.status, expected)
                 await controller.deliver(record)
                 XCTAssertEqual(calls, 1)
             }
         }
+    }
+
+    @MainActor
+    func testFeedbackQueuesWithoutConfirmationAndNeverConfusesOtherTurnsWithCompletion() async throws {
+        try await withSharing { controller, managed, configuration in
+            var ready = false
+            var commands: [UUID] = []
+            await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-local", configuration: configuration,
+                                   canStartLocalTurn: { ready }) { _, id in
+                commands.append(id)
+                ready = false
+                return .completed
+            }
+            let config = try pairing(controller)
+            let first = try await submitFeedback(configuration, config)
+            let second = try await submitFeedback(configuration, config)
+            try await controller.synchronize()
+            XCTAssertTrue(commands.isEmpty, "A busy Chat must not discard queued feedback or start another turn.")
+            ready = true
+            try await controller.synchronize()
+            XCTAssertEqual(commands.count, 1)
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == first })?.status, "running")
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == second })?.status, "pending")
+            func event(_ payload: ToolEventPayload, turn: String, sequence: UInt64) -> ToolEvent {
+                ToolEvent(sessionID: managed.id, sequence: sequence, occurredAt: Date(),
+                    correlation: AgentCorrelation(turnID: turn, itemID: nil, approvalID: nil), payload: payload)
+            }
+            controller.observe(event(.turnCompleted(turnID: "unrelated", status: .completed), turn: "unrelated", sequence: 0))
+            try await controller.synchronize()
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == first })?.status, "running")
+            // Codex can emit turn notifications before its command-correlated user message.
+            controller.observe(event(.turnStarted(turnID: "provider-turn"), turn: "provider-turn", sequence: 1))
+            controller.observe(event(.turnCompleted(turnID: "provider-turn", status: .completed), turn: "provider-turn", sequence: 2))
+            controller.observe(event(.userMessage(messageID: commands[0].uuidString.lowercased(), text: ""), turn: "provider-turn", sequence: 3))
+            try await controller.synchronize()
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == first })?.status, "awaiting_review")
+            XCTAssertEqual(commands.count, 1)
+            ready = true
+            try await controller.synchronize()
+            XCTAssertEqual(commands.count, 2)
+            let command = commands[1].uuidString.lowercased()
+            controller.observe(event(.turnStarted(turnID: command), turn: command, sequence: 4))
+            controller.observe(event(.turnCompleted(turnID: command, status: .interrupted), turn: command, sequence: 5))
+            try await controller.synchronize()
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == second })?.status, "failed")
+            XCTAssertEqual(commands.count, 2)
+        }
+    }
+
+    @MainActor
+    private func waitForStatus(_ status: String, controller: PreviewSharingController) async throws {
+        for _ in 0..<100 {
+            try await controller.synchronize()
+            if controller.feedback.first?.status == status { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Expected \(status), got \(controller.feedback.first?.status ?? "missing").")
     }
 
     @MainActor
@@ -210,9 +288,21 @@ final class PreviewSharingTests: XCTestCase {
 
     @MainActor
     private func submitFeedback(_ configuration: PreviewSharingConfiguration, _ pairing: [String: String]) async throws -> String {
+        var connect = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:\(configuration.publicPort)/v1/connect")))
+        connect.httpMethod = "POST"
+        connect.setValue("Bearer \(try XCTUnwrap(pairing["reviewerToken"]))", forHTTPHeaderField: "Authorization")
+        connect.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        connect.httpBody = try JSONSerialization.data(withJSONObject: [
+            "clientId": "00000000-0000-4000-8000-000000000001", "proxyToken": try XCTUnwrap(pairing["proxyToken"]),
+        ])
+        let (connected, connectionResponse) = try await URLSession.shared.data(for: connect)
+        XCTAssertEqual((connectionResponse as? HTTPURLResponse)?.statusCode, 200)
+        let lease = try XCTUnwrap(JSONSerialization.jsonObject(with: connected) as? [String: Any])
         let id = UUID().uuidString.lowercased()
         var request = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:\(configuration.publicPort)/v1/feedback")))
         request.httpMethod = "POST"
+        request.setValue(try XCTUnwrap(lease["clientId"] as? String), forHTTPHeaderField: "X-TermRelay-Client-ID")
+        request.setValue(try XCTUnwrap(lease["connectionToken"] as? String), forHTTPHeaderField: "X-TermRelay-Connection-Token")
         request.setValue("Bearer \(try XCTUnwrap(pairing["reviewerToken"]))", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -251,6 +341,9 @@ private actor PreviewTestRuntime: StructuredAgentRuntime {
     let descriptor = AgentDescriptor(providerID: AgentProviderID(rawValue: "preview-test"),
         providerVersion: "1", protocolName: "fake", protocolVersion: "1", capabilities: [])
     private(set) var actions: [ToolAction] = []
+    private var sessionID = UUID()
+    private var sequence: UInt64 = 0
+    let turnID = "provider-\(UUID().uuidString)"
 
     init() {
         let stream = AsyncStream<ToolEvent>.makeStream()
@@ -259,8 +352,20 @@ private actor PreviewTestRuntime: StructuredAgentRuntime {
     }
     func start() async throws {}
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference {
-        AgentSessionReference(providerID: descriptor.providerID, opaqueID: request.sessionID.uuidString)
+        sessionID = request.sessionID
+        return AgentSessionReference(providerID: descriptor.providerID, opaqueID: request.sessionID.uuidString)
     }
-    func send(_ action: ToolAction) async throws { actions.append(action) }
+    func send(_ action: ToolAction) async throws {
+        actions.append(action)
+        if case .startTurn(let input, let key) = action {
+            emit(.userMessage(messageID: key.uuidString.lowercased(), text: input.text))
+            emit(.turnStarted(turnID: turnID))
+        }
+    }
+    func emit(_ payload: ToolEventPayload) {
+        continuation.yield(ToolEvent(sessionID: sessionID, sequence: sequence, occurredAt: Date(),
+            correlation: AgentCorrelation(turnID: turnID, itemID: nil, approvalID: nil), payload: payload))
+        sequence += 1
+    }
     func stop() async { continuation.finish() }
 }

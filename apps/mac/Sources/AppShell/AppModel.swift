@@ -1192,6 +1192,7 @@ final class AppModel: ObservableObject {
     }
 
     private func recordApprovalEvent(_ event: ToolEvent) {
+        previewSharing.observe(event)
         switch event.payload {
         case .approvalRequested:
             pendingApprovals.apply(event)
@@ -1219,7 +1220,8 @@ final class AppModel: ObservableObject {
             throw PreviewSharingError("请选择已就绪的本机 ACP 项目会话，无需连接 Server。")
         }
         await previewSharing.start(session: session, deviceID: deviceID,
-                                   workspaceID: workspaceID(for: session.directory), configuration: configuration) { [weak self, weak structured] text, commandID in
+                                   workspaceID: workspaceID(for: session.directory), configuration: configuration,
+                                   canStartLocalTurn: { [weak structured] in structured?.state == .ready }) { [weak self, weak structured] text, commandID in
             guard let self, let structured, self.structuredSessions[sessionID] === structured,
                   self.sessions.contains(where: { $0.id == sessionID && $0.projectID == nil && $0.directory == session.directory }),
                   !structured.isExternal, structured.state == .ready else {

@@ -4,7 +4,13 @@ const allowedPage = value => {
   try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === HOST; }
   catch { return false; }
 };
-const storageReady = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const HEARTBEAT = 'termrelay-app-heartbeat';
+const storageReady = (async () => {
+  await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  const { clientId } = await chrome.storage.local.get('clientId');
+  if (!clientId) await chrome.storage.local.set({ clientId: crypto.randomUUID() });
+})();
+let connecting;
 
 function validateConfig(config) {
   if (!config || typeof config !== 'object') throw new Error('配对配置必须是 App 复制的 JSON 对象。');
@@ -26,16 +32,53 @@ async function configOf() {
   if (!config) throw new Error('请先从扩展设置配对开发者环境。');
   return validateConfig(config);
 }
-async function request(path, body) {
-  const config = await configOf();
+async function fetchJSON(config, path, body, connection) {
   const response = await fetch(`${config.companionURL}${path}`, {
-    headers: { Authorization: `Bearer ${config.reviewerToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { Authorization: `Bearer ${config.reviewerToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(connection ? { 'X-TermRelay-Client-ID': connection.clientId, 'X-TermRelay-Connection-Token': connection.connectionToken } : {}) },
     ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(10_000), redirect: 'error', credentials: 'omit',
   });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `请求失败 (${response.status})`);
   return result;
+}
+async function connectApp(explicit = false) {
+  await storageReady;
+  if (explicit) await chrome.storage.local.set({ connectionEnabled: true });
+  const { connectionEnabled } = await chrome.storage.local.get('connectionEnabled');
+  if (connectionEnabled !== true) throw new Error('尚未连接 App，请在点点改设置中粘贴配置并连接，或点击“开启预览”。');
+  if (connecting) return connecting;
+  connecting = (async () => {
+    await storageReady;
+    const config = await configOf();
+    const { clientId } = await chrome.storage.local.get('clientId');
+    const connection = await fetchJSON(config, '/v1/connect', { clientId, proxyToken: config.proxyToken });
+    if (connection.clientId !== clientId || !/^[0-9a-f]{64}$/.test(connection.connectionToken)
+      || !/^[0-9a-f]{64}$/.test(connection.proxyToken)) throw new Error('App 返回的插件连接无效。');
+    await chrome.storage.local.set({ connection, connectionError: '' });
+    await chrome.alarms.create(HEARTBEAT, { periodInMinutes: 0.5 });
+    return { config, connection };
+  })();
+  try { return await connecting; }
+  finally { connecting = undefined; }
+}
+async function request(path, body) {
+  const { config, connection } = await connectApp();
+  return fetchJSON(config, path, body, connection);
+}
+async function disconnectApp() {
+  await chrome.storage.local.set({ connectionEnabled: false });
+  if (connecting) await connecting;
+  const config = await configOf();
+  const { connection } = await chrome.storage.local.get('connection');
+  await setProxy(false);
+  try {
+    if (connection) await fetchJSON(config, '/v1/disconnect', {}, connection);
+  } finally {
+    await chrome.storage.local.remove('connection');
+    await chrome.alarms.clear(HEARTBEAT);
+  }
 }
 async function setProxy(enabled) {
   const effective = await chrome.proxy.settings.get({ incognito: false });
@@ -47,6 +90,7 @@ async function setProxy(enabled) {
     await chrome.storage.local.set({ proxyEnabled: false });
     return;
   }
+  await connectApp(true);
   const config = await configOf();
   const url = new URL(config.companionURL);
   const proxy = `${url.hostname}:${url.port || 80}`;
@@ -61,24 +105,32 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const options = sender.url === chrome.runtime.getURL('options.html');
     if (options) {
       if (message.type === 'settings.get') {
-        const values = await chrome.storage.local.get(['config', 'proxyEnabled']);
+        const values = await chrome.storage.local.get(['config', 'proxyEnabled', 'connection', 'connectionError']);
         const effective = await chrome.proxy.settings.get({ incognito: false });
-        return { ...values, levelOfControl: effective.levelOfControl };
+        return { config: values.config, proxyEnabled: values.proxyEnabled, connected: !!values.connection && !values.connectionError,
+          connectionError: values.connectionError, levelOfControl: effective.levelOfControl };
       }
       if (message.type === 'settings.save') {
         const config = validateConfig(message.config);
-        const { proxyEnabled } = await chrome.storage.local.get('proxyEnabled');
-        if (proxyEnabled) await setProxy(false);
-        await chrome.storage.local.set({ config });
+        const { config: prior } = await chrome.storage.local.get('config');
+        if (prior) await disconnectApp();
+        await chrome.storage.local.set({ config, connectionEnabled: false });
         return { saved: true };
       }
       if (message.type === 'proxy.set') {
         await setProxy(message.enabled === true);
         return { enabled: message.enabled === true };
       }
-      if (message.type === 'connection.test') return request('/v1/meta');
+      if (message.type === 'connection.test') {
+        await connectApp(true);
+        return request('/v1/meta');
+      }
+      if (message.type === 'connection.disconnect') {
+        await disconnectApp();
+        return { disconnected: true };
+      }
     }
-    if (!sender.tab || !allowedPage(sender.url) || sender.frameId !== 0) throw new Error('只允许授权预览页面提交反馈。');
+    if (!sender.tab || !allowedPage(sender.url) || sender.frameId !== 0) throw new Error('只允许在授权预览页面使用点点改。');
     const meta = await request('/v1/meta');
     const page = new URL(sender.url);
     if (message.type === 'preview.meta') return meta;
@@ -88,7 +140,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.type === 'feedback.create') {
       const target = new URL(message.feedback.page);
-      if (target.origin !== page.origin) throw new Error('反馈页面与当前环境不匹配。');
+      if (target.origin !== page.origin) throw new Error('这个想法对应的页面与当前环境不匹配。');
       return request('/v1/feedback', message.feedback);
     }
     if (message.type === 'feedback.verify' && UUID.test(message.id)) {
@@ -102,14 +154,21 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.webRequest.onAuthRequired.addListener((details, callback) => {
   (async () => {
     if (!details.isProxy || !allowedPage(details.url)) return {};
-    const config = await configOf();
+    const { config, connection } = await connectApp();
     const proxy = new URL(config.companionURL);
     if (details.challenger.host !== proxy.hostname || details.challenger.port !== Number(proxy.port || 80)) return {};
-    return { authCredentials: { username: 'preview', password: config.proxyToken } };
+    return { authCredentials: { username: 'preview', password: connection.proxyToken } };
   })().then(callback, () => callback({ cancel: true }));
 }, { urls: [`https://${HOST}/*`] }, ['asyncBlocking']);
 
 chrome.proxy.onProxyError.addListener(error => console.error('TermRelay preview proxy:', error.error, error.details));
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name !== HEARTBEAT) return;
+  request('/v1/meta').catch(async error => {
+    console.error('TermRelay App heartbeat:', error.message);
+    await chrome.storage.local.set({ connectionError: error.message });
+  });
+});
 chrome.action.onClicked.addListener(async tab => {
   if (allowedPage(tab.url)) {
     try { await chrome.tabs.sendMessage(tab.id, { type: 'panel.toggle' }); }

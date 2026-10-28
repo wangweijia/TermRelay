@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "TermRelay 页面反馈",
+  "name": "点点改 · TermRelay",
   "version": "0.1.0",
-  "description": "访问授权的本地预览环境，选取页面元素并向 TermRelay 项目会话提交文字反馈。",
+  "description": "在受信局域网预览页面，点选位置、说出想法，让绑定的 TermRelay 会话修改并同步进度。",
   "minimum_chrome_version": "120",
-  "permissions": ["storage", "proxy", "webRequest", "webRequestAuthProvider"],
+  "permissions": ["storage", "proxy", "webRequest", "webRequestAuthProvider", "alarms"],
   "host_permissions": ["https://page-gateway-local.nioint.com/*", "http://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "options_page": "options.html",
-  "action": { "default_title": "打开 TermRelay 页面反馈；非预览页面打开设置" },
+  "action": { "default_title": "打开点点改；非预览页面打开配对设置" },
   "content_scripts": [{
     "matches": ["https://page-gateway-local.nioint.com/*"],
     "js": ["content.js"],

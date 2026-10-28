@@ -1,7 +1,10 @@
 const $ = selector => document.querySelector(selector);
 let token = '';
 let loading = false;
-const labels = { pending: '待处理', sending: '发送中', delivered: '已送达会话（不是修改完成）', unknown: '结果未知，需核实', failed: '发送失败', awaiting_review: '待验收', verified: '已验收', changes_requested: '需继续修改（请人工处理）' };
+const labels = { pending: '等待 Chat 空闲后自动执行', sending: '正在启动修改', running: 'AI 正在修改',
+  awaiting_approval: '等待 Chat 工具审批', awaiting_input: '等待 Chat 问题回复',
+  delivered: '已送达会话（不是修改完成）', unknown: '结果未知，需核实', failed: '执行失败',
+  awaiting_review: '本轮修改完成，待验收', verified: '已验收', changes_requested: '需继续修改（请人工处理）' };
 async function api(path, body) {
   const response = await fetch(path, {
     headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -43,7 +46,7 @@ async function refresh() {
       if (record.steps) card.append(node('pre', record.steps));
       if (record.element) card.append(node('pre', JSON.stringify(record.element, null, 2)));
       if (record.note) card.append(node('p', record.note));
-      if (record.status === 'pending') card.append(node('p', '请在 Mac App 中确认交给绑定的本地会话修改。'));
+      if (record.status === 'pending') card.append(node('p', 'Mac App 会在绑定 Chat 空闲时自动执行，AI 工具审批策略保持不变。'));
       if (['delivered', 'unknown'].includes(record.status)) {
         const summary = document.createElement('textarea');
         summary.placeholder = '先在 TermRelay 核实执行已经结束，再填写给业务方看的修改摘要。';

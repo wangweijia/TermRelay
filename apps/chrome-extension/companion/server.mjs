@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { RequestError, UUID, promptFor, reviewerView, secretMatches, validateFeedback } from './model.mjs';
 import { attachProxy } from './proxy.mjs';
@@ -28,8 +28,26 @@ function authorize(request, token) {
   if (!secretMatches(request.headers.authorization, `Bearer ${token}`)) throw new RequestError(401, 'Invalid access token.');
 }
 
-export function createCompanion({ store, binding, ports, reviewerToken, adminToken, proxyToken }) {
+export function createCompanion({ store, binding, ports, reviewerToken, adminToken, proxyToken, now = Date.now }) {
   let busy = false;
+  let connection;
+  let closeTunnels;
+  const activeConnection = () => {
+    if (connection && connection.expiresAt <= now()) {
+      connection = undefined;
+      closeTunnels();
+    }
+    return connection;
+  };
+  const requireConnection = request => {
+    const current = activeConnection();
+    if (!current || request.headers['x-termrelay-client-id'] !== current.clientId
+      || !secretMatches(request.headers['x-termrelay-connection-token'], current.connectionToken)) {
+      throw new RequestError(409, '插件连接已失效，请重新连接 App；整个 App 同时只允许一个插件实例。');
+    }
+    current.expiresAt = now() + 90_000;
+    return current;
+  };
   const update = async (record, patch) => {
     Object.assign(record, patch, { updatedAt: new Date().toISOString() });
     await store.save();
@@ -62,7 +80,9 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
         }
         authorize(request, adminToken);
         if (url.pathname === '/api/state' && request.method === 'GET') {
-          json(response, 200, { binding, ports, busy, records: store.records, reviewerToken, proxyToken });
+          const current = activeConnection();
+          json(response, 200, { binding, ports, busy, records: store.records, reviewerToken, proxyToken,
+            connection: current ? { clientId: current.clientId, expiresAt: current.expiresAt } : null });
           return;
         }
       } else {
@@ -70,8 +90,31 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
           throw new RequestError(403, 'Use the authorized browser extension, not a business page script.');
         }
         authorize(request, reviewerToken);
+        if (url.pathname === '/v1/connect' && request.method === 'POST') {
+          const body = await bodyOf(request);
+          if (typeof body?.clientId !== 'string' || !UUID.test(body.clientId)) {
+            throw new RequestError(400, 'A plugin instance UUID is required.');
+          }
+          if (!secretMatches(body.proxyToken, proxyToken)) throw new RequestError(401, 'Invalid plugin pairing credentials.');
+          const current = activeConnection();
+          if (current && current.clientId !== body.clientId) {
+            throw new RequestError(409, 'App 已连接另一个插件实例，请先在原插件断开连接，或等待其连接超时。');
+          }
+          connection = current ?? { clientId: body.clientId,
+            connectionToken: randomBytes(32).toString('hex'), proxyToken: randomBytes(32).toString('hex') };
+          connection.expiresAt = now() + 90_000;
+          json(response, 200, connection);
+          return;
+        }
+        requireConnection(request);
+        if (url.pathname === '/v1/disconnect' && request.method === 'POST') {
+          connection = undefined;
+          closeTunnels();
+          json(response, 200, { disconnected: true });
+          return;
+        }
         if (url.pathname === '/v1/meta' && request.method === 'GET') {
-          json(response, 200, { name: binding.name, ports });
+          json(response, 200, { name: binding.name, ports, connected: true, executionMode: 'automatic' });
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'GET') {
@@ -80,6 +123,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
         }
         if (url.pathname === '/v1/feedback' && request.method === 'POST') {
           const input = validateFeedback(await bodyOf(request));
+          requireConnection(request);
           const prior = store.records.find(record => record.id === input.id);
           if (prior) {
             const original = Object.fromEntries(Object.keys(input).map(key => [key, prior[key]]));
@@ -105,6 +149,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
       const action = match[2];
       if (!admin && action === 'verify' && url.pathname.startsWith('/v1/')) {
         const body = await bodyOf(request);
+        requireConnection(request);
         if (record.status !== 'awaiting_review' || !['verified', 'changes_requested'].includes(body.status)) {
           throw new RequestError(409, 'Feedback is not awaiting review.');
         }
@@ -115,17 +160,29 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
         json(response, 200, reviewerView(record));
         return;
       }
-      if (!admin || !url.pathname.startsWith('/api/')) throw new RequestError(403, 'Owner confirmation is required.');
+      if (!admin || !url.pathname.startsWith('/api/')) throw new RequestError(403, 'Only the local App may dispatch feedback.');
       if (action === 'result') {
         const body = await bodyOf(request);
-        if (busy || record.status !== 'sending' || body.commandId !== record.commandId
-          || !['delivered', 'unknown', 'failed'].includes(body.status)
+        const states = ['running', 'awaiting_approval', 'awaiting_input', 'awaiting_review', 'unknown', 'failed'];
+        if (busy || body.commandId !== record.commandId || !Number.isSafeInteger(body.revision) || body.revision < 1
+          || !states.includes(body.status) || (body.turnId !== null && (typeof body.turnId !== 'string' || !body.turnId || body.turnId.length > 256))
           || typeof body.note !== 'string' || body.note.length > 2000) {
           throw new RequestError(409, 'Local dispatch result does not match the pending execution.');
         }
+        if (body.revision === record.revision && body.turnId === record.turnId
+          && ((body.status === record.status && body.note === record.note)
+            || (body.status === 'awaiting_review' && ['verified', 'changes_requested'].includes(record.status)))) {
+          await store.save();
+          json(response, 200, record);
+          return;
+        }
+        if (!['sending', 'running', 'awaiting_approval', 'awaiting_input'].includes(record.status)
+          || body.revision <= (record.revision ?? 0) || (record.turnId && body.turnId !== record.turnId)) {
+          throw new RequestError(409, 'Stale or mismatched local execution progress.');
+        }
         busy = true;
         try {
-          await update(record, { status: body.status, note: body.note });
+          await update(record, { status: body.status, note: body.note, turnId: body.turnId, revision: body.revision });
           json(response, 200, record);
         } finally { busy = false; }
         return;
@@ -145,13 +202,13 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
         return;
       }
       if (action !== 'deliver' || record.status !== 'pending') throw new RequestError(409, 'Feedback was already attempted; no automatic resend is allowed.');
-      if (busy || store.records.some(item => ['sending', 'delivered', 'unknown'].includes(item.status))) {
+      if (busy || store.records.some(item => ['sending', 'running', 'awaiting_approval', 'awaiting_input', 'delivered', 'unknown'].includes(item.status))) {
         throw new RequestError(409, 'Finish or reconcile the previous execution in TermRelay first.');
       }
       busy = true;
       try {
         // The App must receive a durable intent before starting the local turn.
-        await update(record, { status: 'sending', commandId: randomUUID(), note: '' });
+        await update(record, { status: 'sending', commandId: randomUUID(), revision: 0, turnId: null, note: '' });
         json(response, 200, { commandId: record.commandId, text: promptFor(record), binding });
       } finally { busy = false; }
     } catch (error) {
@@ -162,7 +219,10 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
   };
   const publicServer = createServer(handle(false));
   const adminServer = createServer(handle(true));
-  const closeProxy = attachProxy(publicServer, { token: proxyToken });
+  closeTunnels = attachProxy(publicServer, { token: () => activeConnection()?.proxyToken });
+  const connectionTimer = setInterval(activeConnection, 1000);
+  connectionTimer.unref();
+  const closeProxy = () => { clearInterval(connectionTimer); connection = undefined; closeTunnels(); };
   for (const server of [publicServer, adminServer]) {
     server.requestTimeout = 30_000;
     server.headersTimeout = 10_000;

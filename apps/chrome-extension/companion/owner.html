@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TermRelay 反馈管理</title><link rel="stylesheet" href="/owner.css"></head>
 <body>
   <h1>TermRelay 页面反馈</h1>
-  <p>仅本机管理。先确认绑定项目，再决定是否把反馈交给 AI；此处不自动审批或自动重试。</p>
+  <p>仅本机诊断。反馈由 Mac App 自动排队进入绑定 Chat；AI 工具审批沿用 Chat 设置，未知执行不自动重试。</p>
   <form id="login"><label>本机 adminToken <input id="token" type="password" required autocomplete="off"></label><button>连接</button></form>
   <p id="error" role="alert"></p>
   <section id="workspace" hidden>

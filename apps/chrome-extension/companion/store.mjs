@@ -10,7 +10,7 @@ export class Store {
     if (!Array.isArray(this.records)) throw new Error('Invalid feedback store.');
     let changed = false;
     for (const record of this.records) {
-      if (record.status === 'sending') {
+      if (['sending', 'running', 'awaiting_approval', 'awaiting_input'].includes(record.status)) {
         record.status = 'unknown';
         record.note = 'Companion restarted during delivery. Verify in TermRelay; do not resend automatically.';
         record.updatedAt = new Date().toISOString();

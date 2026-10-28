@@ -3,18 +3,18 @@ import { HOST, secretMatches } from './model.mjs';
 
 export function attachProxy(server, { token }) {
   const sockets = new Set();
-  server.on('connection', socket => {
-    sockets.add(socket);
-    socket.on('close', () => sockets.delete(socket));
-  });
   server.on('connect', (request, client, head) => {
     const reject = (status, extra = '') => client.end(
       `HTTP/1.1 ${status}\r\n${extra}Connection: close\r\nContent-Length: 0\r\n\r\n`,
     );
-    if (!secretMatches(request.headers['proxy-authorization'], `Basic ${Buffer.from(`preview:${token}`).toString('base64')}`)) {
+    const password = typeof token === 'function' ? token() : token;
+    if (typeof password !== 'string'
+      || !secretMatches(request.headers['proxy-authorization'], `Basic ${Buffer.from(`preview:${password}`).toString('base64')}`)) {
       reject('407 Proxy Authentication Required', 'Proxy-Authenticate: Basic realm="TermRelay Preview"\r\n');
       return;
     }
+    sockets.add(client);
+    client.on('close', () => sockets.delete(client));
     const [host, rawPort, extra] = (request.url ?? '').split(':');
     const port = Number(rawPort);
     if (host !== HOST || extra !== undefined || !/^\d{1,5}$/.test(rawPort ?? '') || port < 1 || port > 65535) {

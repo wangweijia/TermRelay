@@ -18,9 +18,9 @@ App 控制：
 项目会话 -> 共享预览与反馈 -> 开启共享 / 复制配对 / 查看反馈 / 停止共享
 
 反馈执行：
-Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
-    -> App 直接启动已有本地普通 ACP 会话
-    -> 开发者核实修改结果 -> 业务方验收
+Chrome 插件 -> App 托管的本机反馈桥接 -> 自动排队等待绑定 Chat 空闲
+    -> App 直接启动已有本地普通 ACP 会话，AI 工具审批沿用原策略
+    -> App 关联真实轮次并同步开始 / 等待 / 完成状态 -> 业务方验收
 ```
 
 本机桥接不连接 Server；网页、反馈和验收在受信局域网 / 本机闭环，
@@ -36,24 +36,27 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | --- | --- | --- |
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
+| 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，双状态卡片、预览入口、自然语言错误与响应式布局 | `extension/options.*`、`manifest.json` |
+| 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
 | 域名代理 | 仅代理 `page-gateway-local.nioint.com`，保留原 URL、端口及 TLS | `extension/background.js`、`companion/proxy.mjs` |
 | 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
 | 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
-| 页面反馈 UI | 右下角按钮、右侧浮层、鼠标高亮、点击选取、选择外层、Esc 退出、整页反馈 | `extension/content.js` |
+| 点点改页面 UI | 右下角品牌按钮、两步式浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段，进度徽标与“效果满意 / 再调一调” | `extension/content.js` |
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
 | 基础敏感信息过滤 | 不采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash | `extension/content.js`、`companion/model.mjs` |
 | 受限反馈接口 | 提交、列表、验收；反馈 Token 与管理 Token 分离，网页脚本来源被拒绝 | `companion/server.mjs` |
 | 本机管理页 | 仅 loopback 监听，查看反馈、核对绑定、填写结果摘要；执行入口仅在 App | `companion/owner.*` |
 | 已有会话绑定 | 固定本地设备、工作区和会话；App 拒绝 PTY、外部 AI 对话、已结束 / 忙碌会话 | `companion/main.mjs`、`AppModel.swift` |
-| 轮次发送 | helper 持久化意图后返回受限提示词和命令 ID；App 直接启动本地轮次并回写结果 | `companion/server.mjs`、`PreviewSharingController.swift` |
+| 自动轮次发送 | helper 持久化意图后返回受限提示词和命令 ID；App 自动按序启动本地轮次，不改变 AI 工具审批 | `companion/server.mjs`、`PreviewSharingController.swift` |
+| 真实轮次跟踪 | 关联命令 ID 与 Provider 轮次，支持早于命令响应的事件；自动同步运行、等待审批 / 问答及完成 / 失败 | `PreviewSharingController.swift`、`AppModel.swift`、`extension/content.js` |
 | 提交与执行去重 | 反馈 UUID 幂等；执行意图先落盘；已经尝试发送的记录不自动重发 | `companion/server.mjs`、`store.mjs` |
 | 未知结果保护 | 本地执行结果不确定或发送中重启标记未知；丢失响应时允许人工核实发送中记录，禁止自动重发 | `PreviewSharingController.swift`、`store.mjs`、`server.mjs` |
-| 人工验收闭环 | 开发者核实后标记待验收，业务方选择通过或填写继续修改意见 | `companion/owner.js`、`extension/content.js` |
+| 人工验收闭环 | 关联轮次成功完成后自动交业务方验收；业务方选择通过或填写继续修改意见，未知结果由开发者核实 | `PreviewSharingController.swift`、`extension/content.js` |
 | 本地持久化 | 私有凭据文件、JSON 反馈记录、单数据目录进程锁、正常停止清理锁 | `companion/main.mjs`、`store.mjs` |
 | Mac 会话入口 | 会话顶部打开“共享预览与反馈”，固定绑定此会话，不跟随主窗口切换 | `apps/mac/Sources/AppShell/ContentView.swift`、`PreviewSharingView.swift` |
 | 原生共享面板 | “共享与配对 / 页面反馈”页签，端口与本机 IP 配置、启停、显示插件目录、复制配对 JSON | `apps/mac/Sources/AppShell/PreviewSharingView.swift` |
 | App 托管服务 | 自动取本地会话、设备和工作区，启动 Node helper，验证就绪，轮询反馈；不依赖 Server，只终止所属进程 | `apps/mac/Sources/Preview/PreviewSharingController.swift` |
-| 原生反馈处理 | 查看记录、人工确认发送、核实完成后填写摘要或标记失败，不要求使用 Web 管理页 | `PreviewSharingView.swift`、`PreviewSharingController.swift` |
+| 原生反馈处理 | 查看插件连接、自动执行状态与结果；未知结果手动核实，不要求使用 Web 管理页 | `PreviewSharingView.swift`、`PreviewSharingController.swift` |
 | 插件配置导入 | 一次粘贴 App 配对 JSON，仅含验收与代理凭据，不含 adminToken 或会话 ID | `extension/options.*` |
 | 生命周期联动 | 会话结束、关闭、App 正常退出时停共享；Server 断开 / 变更不影响；helper 监测 App 父进程退出 | `AppModel.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
 | Mac 打包资源 | 将 companion 与 extension 放进 App 资源目录，Node 运行时仍需本机安装 | `scripts/build-mac-release.sh` |
@@ -61,9 +64,9 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 
 ### 当前明确不是自动化的部分
 
-- “已送达会话”只代表本地会话接收，不代表 AI 已完成，更不代表修改正确。
-- AI 审批与执行结果由开发者在 TermRelay 中查看；完成后手动填写摘要交付验收。
-- “仍需修改”保存补充意见，不自动发起下一轮；需要开发者继续处理。
+- 真实轮次完成状态自动同步，但不代表修改正确；业务方验收仍需人工操作。
+- AI 工具审批与问题回复仍按 Chat 原有设置处理，不因自动派发反馈而被绕过。
+- “再调一调”保存补充意见，不自动发起下一轮；需要开发者继续处理。
 - 同一桥接不会并行发送反馈，但没有跨会话工作区锁，不能阻止其他人工轮次修改项目。
 - 业务方共享预览凭据和反馈列表；没有独立用户身份、个人列表或完整权限模型。
 
@@ -79,20 +82,19 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 检查 | 结果 | 覆盖内容 |
 | --- | --- | --- |
 | `npm run check` | 通过 | JavaScript 语法、Manifest V3 及扩展入口文件 |
-| `npm test` | 10 项通过 | 反馈校验、鉴权、幂等、人工确认、未知结果、重启恢复、真实 WebSocket 握手及协议发送、CONNECT 转发、CLI 启停 |
-| `npm run test:browser` | 通过 | 独立临时 Chrome Profile 加载实际扩展，设置与连接、代理启停、元素选取、业务点击隔离、真实插件到桥接的反馈提交、URL 过滤、整页反馈 |
-| `pnpm mac:test --filter PreviewSharingTests` | 7 项通过 | 原生配置、资源定位、错误提示、PTY 拒绝、实际 App 控制器启动与停止 helper、绑定及配对权限 |
-| 仓库根目录 `pnpm check` | 通过 | 协议、TypeScript、Linux 检查及 Mac 135 项测试（6 项按条件跳过）；不自动包含扩展独立检查 |
+| `npm test` | 16 项通过 | 独占连接、同实例复用、续约与过期、断开关闭隧道、反馈鉴权 / 幂等、进度关联及版本、保存失败重试、防重放、跨端口转发、CLI 启停 |
+| `npm run test:browser` | 通过 | 实际粘贴配对、错误恢复、代理明确授权、高级暂停、桌面 / 390px 窄屏布局、点点改命名、运行 / 审批 / 完成、验收、显式断开不抢回、跨端口资源与选取隐私 |
+| `pnpm mac:test --filter PreviewSharingTests` | 9 项通过 | 本地自动排队、真实轮次关联与乱序通知、其他轮次隔离、审批策略不变、等待问答、完成 / 中断和错误结果、helper 生命周期 |
+| 仓库根目录 `pnpm check` | 通过 | 协议、TypeScript、Linux 检查及 Mac 测试（真实 Provider 探针按条件跳过）；不自动包含扩展独立检查 |
 | `pnpm test:release` | 12 项通过 | 现有发布脚本回归；Mac 打包脚本另通过 `bash -n`，未实际生成 Mac Release 包 |
 
 验证边界：
 
-- 测试使用合成页面、合成会话及模拟 Relay，不会启动真实 Agent 或发送模型请求。
+- 测试使用合成页面、合成本地会话，不会启动真实 Agent 或发送模型请求，不需要 Relay。
 - 浏览器测试通过 CDP 提供测试页面，没有访问实际业务域名、企业 SSO 或真实项目。
 - CONNECT 测试验证认证、限制及字节转发，没有替代真实业务 HTTPS / WSS / HMR 验收。
-- 开发时 `127.0.0.1:3007` 没有运行中的 Relay，尚未连接真实 Mac 项目会话修改代码。
 - 未在另一台业务方电脑上验证公司网络、防火墙及实际 Chrome 管理策略。
-- App 控制器测试使用合成 Relay，没有替代真实业务 SSO、真实模型修改及人工原生 UI 验收。
+- App 控制器测试直接调用合成本地运行时，没有替代真实业务 SSO、真实模型修改及人工原生 UI 验收。
 
 ## 4. 下一步：按顺序完成真实试用验收
 
@@ -100,12 +102,12 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 
 | 编号 | 状态 | 工作 | 完成标准 |
 | --- | --- | --- | --- |
-| V-01 | 待完成 | 启动实际 Relay、Mac App 和测试项目 ACP 会话 | 桥接启动并正确显示设备、工作区及会话；无效绑定被拒绝 |
+| V-01 | 待完成 | 启动 Mac App 和测试项目 ACP 会话，不要求 Server 在线 | 桥接启动并正确显示设备、工作区及会话；无效绑定被拒绝 |
 | V-02 | 待完成 | 在另一台电脑配对插件并访问开发者代理 | 反馈连接成功；无需修改业务方 hosts；未授权访问失败 |
 | V-03 | 待完成 | 验证原域名的真实项目登录与操作 | 使用业务方自己的账号正常登录，接口和资源可用，无证书错误 |
 | V-04 | 待完成 | 验证多端口及项目实际 WSS / HMR | 页面与静态资源跨端口可访问且无需列举端口；热更新可用；其他域名和非法端口被拒绝 |
 | V-05 | 待完成 | 在真实业务页面验证元素选取 | 选取不会触发查询、提交或跳转；弹窗、图标、表格等不能安全选取时有明确处理方式 |
-| V-06 | 待完成 | 发起一次受控的真实代码修改 | 业务方提交一条小改动，开发者确认后进入正确会话；审批正常；修改可在页面看到 |
+| V-06 | 待完成 | 发起一次受控的真实代码修改 | 业务方提交一条小改动，自动进入绑定会话；AI 工具审批保持原策略；插件展示真实轮次开始 / 完成，修改可在页面看到 |
 | V-07 | 待完成 | 完成人工验收与补充意见 | 修改摘要可见，业务方可以通过或提出继续修改；不会误触发重复执行 |
 | V-08 | 待完成 | 真实断线与失败场景验收 | 会话忙碌、退出、桥接重启及响应丢失不串会话、不自动重发，未知结果可人工核实 |
 
@@ -121,7 +123,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | D-01 | 优先 | 代理与反馈控制链路的传输保护 | 当前 HTTP + Basic 仅限受信 LAN；扩大使用前明确加密、接入与威胁边界，不改变项目原 HTTPS |
 | D-02 | 部分完成 | 配对、凭据撤销与轮换 | 已在 App 一键复制仅供验收者的配对 JSON；仍缺原生撤销 / 轮换，停服再开启会恢复原凭据 |
 | D-03 | 部分完成 | 会话选择、绑定与失效处理 UI | 已在当前会话一键绑定和启停，不再填写 UUID；后续仍需历史反馈查看、异常锁恢复与显式迁移设计 |
-| D-04 | 优先 | 可靠的轮次关联和完成跟踪 | 当前仅跟踪本地会话接收结果；需关联真实 turn，区分执行中、审批、完成、失败和未知，避免误认人工轮次 |
+| D-04 | 部分完成 | 可靠的轮次关联和完成跟踪 | 已关联真实 turn，自动同步运行 / 审批 / 问答 / 完成 / 失败并隔离其他轮次；真实业务项目端到端验收待完成 |
 | D-05 | 优先 | DOM 选取兼容与失效提示 | 验证页面早期事件、滚动、SPA 路由及 HMR；增强目标失效处理，不依赖固定旧坐标 |
 | D-06 | 后续 | 查询与 hash 路由的精细过滤 | 当前全部丢弃；在不带出凭据的前提下保留必要路由和复现条件 |
 | D-07 | 后续 | 执行仲裁与工作区并发约束 | 现有 Mac 会拒绝忙碌会话，但无跨会话互斥；明确人工输入、反馈队列和同目录修改策略 |
