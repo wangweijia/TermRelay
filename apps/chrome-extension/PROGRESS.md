@@ -19,12 +19,13 @@ App 控制：
 
 反馈执行：
 Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
-    -> TermRelay Server /ws/web -> 已有普通 ACP 会话
+    -> App 直接启动已有本地普通 ACP 会话
     -> 开发者核实修改结果 -> 业务方验收
 ```
 
-本机桥接是现有 Server 浏览器协议的客户端，不直接操作 CLI，
-不调用通用外部 AI API，也不自动创建专用会话。
+本机桥接不连接 Server；网页、反馈和验收在受信局域网 / 本机闭环，
+由 App 复用本地 ACP 会话能力执行，不调用通用外部 AI API，也不自动创建专用会话。
+App 公网配对、Server 断开和地址变更均不影响本功能。
 “优先绑定已有会话”已用于本实验版，不代表专用会话等后续产品选项已经定案。
 用户不再需要运行 CLI、查 UUID、阅读 Token 文件或打开独立管理页；
 旧命令行入口和 Web 管理页只保留作开发诊断。
@@ -42,25 +43,25 @@ Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
 | 基础敏感信息过滤 | 不采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash | `extension/content.js`、`companion/model.mjs` |
 | 受限反馈接口 | 提交、列表、验收；反馈 Token 与管理 Token 分离，网页脚本来源被拒绝 | `companion/server.mjs` |
-| 本机管理页 | 仅 loopback 监听，查看反馈、核对绑定、人工确认发送、填写结果摘要 | `companion/owner.*` |
-| 已有会话绑定 | 固定 Relay、设备、工作区和会话；拒绝 PTY、外部 AI 对话、已结束会话 | `companion/main.mjs`、`relay.mjs` |
-| 轮次发送 | 通过 `/ws/web` 发送协议 v2 `tool.turn.start`，关联命令 ACK | `companion/relay.mjs` |
+| 本机管理页 | 仅 loopback 监听，查看反馈、核对绑定、填写结果摘要；执行入口仅在 App | `companion/owner.*` |
+| 已有会话绑定 | 固定本地设备、工作区和会话；App 拒绝 PTY、外部 AI 对话、已结束 / 忙碌会话 | `companion/main.mjs`、`AppModel.swift` |
+| 轮次发送 | helper 持久化意图后返回受限提示词和命令 ID；App 直接启动本地轮次并回写结果 | `companion/server.mjs`、`PreviewSharingController.swift` |
 | 提交与执行去重 | 反馈 UUID 幂等；执行意图先落盘；已经尝试发送的记录不自动重发 | `companion/server.mjs`、`store.mjs` |
-| 未知结果保护 | 断线、超时或发送中重启标记未知；核实前阻止本桥接继续发送其他反馈 | `companion/relay.mjs`、`store.mjs`、`server.mjs` |
+| 未知结果保护 | 本地执行结果不确定或发送中重启标记未知；丢失响应时允许人工核实发送中记录，禁止自动重发 | `PreviewSharingController.swift`、`store.mjs`、`server.mjs` |
 | 人工验收闭环 | 开发者核实后标记待验收，业务方选择通过或填写继续修改意见 | `companion/owner.js`、`extension/content.js` |
 | 本地持久化 | 私有凭据文件、JSON 反馈记录、单数据目录进程锁、正常停止清理锁 | `companion/main.mjs`、`store.mjs` |
 | Mac 会话入口 | 会话顶部打开“共享预览与反馈”，固定绑定此会话，不跟随主窗口切换 | `apps/mac/Sources/AppShell/ContentView.swift`、`PreviewSharingView.swift` |
 | 原生共享面板 | “共享与配对 / 页面反馈”页签，端口与本机 IP 配置、启停、显示插件目录、复制配对 JSON | `apps/mac/Sources/AppShell/PreviewSharingView.swift` |
-| App 托管服务 | 自动取 Server、设备和工作区，启动 Node helper，验证就绪，轮询反馈；只终止所属进程 | `apps/mac/Sources/Preview/PreviewSharingController.swift` |
+| App 托管服务 | 自动取本地会话、设备和工作区，启动 Node helper，验证就绪，轮询反馈；不依赖 Server，只终止所属进程 | `apps/mac/Sources/Preview/PreviewSharingController.swift` |
 | 原生反馈处理 | 查看记录、人工确认发送、核实完成后填写摘要或标记失败，不要求使用 Web 管理页 | `PreviewSharingView.swift`、`PreviewSharingController.swift` |
 | 插件配置导入 | 一次粘贴 App 配对 JSON，仅含验收与代理凭据，不含 adminToken 或会话 ID | `extension/options.*` |
-| 生命周期联动 | 会话结束、关闭、断连、改 Server、App 正常退出时停共享；helper 监测 App 父进程退出 | `AppModel.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
+| 生命周期联动 | 会话结束、关闭、App 正常退出时停共享；Server 断开 / 变更不影响；helper 监测 App 父进程退出 | `AppModel.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
 | Mac 打包资源 | 将 companion 与 extension 放进 App 资源目录，Node 运行时仍需本机安装 | `scripts/build-mac-release.sh` |
-| 工作区兼容修正 | 接受 Mac 实际使用的 `workspace-...` 不透明工作区 ID，不再误按 UUID 拒绝 | `companion/relay.mjs`、`tests/companion.test.mjs` |
+| 工作区兼容修正 | 接受 Mac 实际使用的 `workspace-...` 不透明工作区 ID，不再误按 UUID 拒绝 | `companion/main.mjs`、`tests/companion.test.mjs` |
 
 ### 当前明确不是自动化的部分
 
-- “已送达会话”只代表命令 ACK，不代表 AI 已完成，更不代表修改正确。
+- “已送达会话”只代表本地会话接收，不代表 AI 已完成，更不代表修改正确。
 - AI 审批与执行结果由开发者在 TermRelay 中查看；完成后手动填写摘要交付验收。
 - “仍需修改”保存补充意见，不自动发起下一轮；需要开发者继续处理。
 - 同一桥接不会并行发送反馈，但没有跨会话工作区锁，不能阻止其他人工轮次修改项目。
@@ -69,6 +70,11 @@ Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
 ## 3. 已完成的验证及其边界
 
 以下记录为 2026-10-28 实际执行结果，不是待执行计划。
+
+局域网闭环改造后，helper 的 8 项测试、Mac 共享的 8 项测试、Chrome 扩展浏览器检查
+及根目录 `pnpm check` 均已通过。新增覆盖无 Server 启动、公网地址配置 / 变更不影响共享、
+本地会话直接接收、执行意图先落盘、结果未知不重发及人工核实；不启动真实 Agent 或模型请求。
+这不替代两台真实设备在业务网络中的访问及 AI 修改验收。
 
 | 检查 | 结果 | 覆盖内容 |
 | --- | --- | --- |
@@ -115,7 +121,7 @@ Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
 | D-01 | 优先 | 代理与反馈控制链路的传输保护 | 当前 HTTP + Basic 仅限受信 LAN；扩大使用前明确加密、接入与威胁边界，不改变项目原 HTTPS |
 | D-02 | 部分完成 | 配对、凭据撤销与轮换 | 已在 App 一键复制仅供验收者的配对 JSON；仍缺原生撤销 / 轮换，停服再开启会恢复原凭据 |
 | D-03 | 部分完成 | 会话选择、绑定与失效处理 UI | 已在当前会话一键绑定和启停，不再填写 UUID；后续仍需历史反馈查看、异常锁恢复与显式迁移设计 |
-| D-04 | 优先 | 可靠的轮次关联和完成跟踪 | 当前仅跟踪命令 ACK；需关联真实 turn，区分执行中、审批、完成、失败和未知，避免误认人工轮次 |
+| D-04 | 优先 | 可靠的轮次关联和完成跟踪 | 当前仅跟踪本地会话接收结果；需关联真实 turn，区分执行中、审批、完成、失败和未知，避免误认人工轮次 |
 | D-05 | 优先 | DOM 选取兼容与失效提示 | 验证页面早期事件、滚动、SPA 路由及 HMR；增强目标失效处理，不依赖固定旧坐标 |
 | D-06 | 后续 | 查询与 hash 路由的精细过滤 | 当前全部丢弃；在不带出凭据的前提下保留必要路由和复现条件 |
 | D-07 | 后续 | 执行仲裁与工作区并发约束 | 现有 Mac 会拒绝忙碌会话，但无跨会话互斥；明确人工输入、反馈队列和同目录修改策略 |
@@ -124,7 +130,7 @@ Chrome 插件 -> App 托管的本机反馈桥接 -> 开发者在 App 确认
 | D-10 | 后续 | 草稿恢复与反馈体验 | 当前草稿只在页面内存，列表按 origin 过滤；补充跨刷新恢复、路由筛选与可靠元素重定位 |
 | D-11 | 后续 | 数据管理 | 当前本机 JSON、最多 1000 条；明确保留期限、归档、导出、清理及异常文件恢复 |
 | D-12 | 后续 | 企业代理兼容 | 当前非目标域名 DIRECT，仅适用于独立 Profile；若扩大使用，设计既有代理的保留与冲突处理 |
-| D-13 | 部分完成 | 正式 Server 反馈模块与 App 集成 | App 已管理代理、配对及反馈；是否迁移本机反馈存储到 Server 仍待决定 |
+| D-13 | 已确认 | 局域网反馈与 App 集成 | App 已管理代理、配对和反馈，并直接调用本地会话；Server 反馈模块与存储不属于本功能范围 |
 | D-14 | 待决策 | 专用反馈会话 | 当前绑定已有会话；如引入专用会话，须先解决上下文、生命周期、审批及共享工作区冲突 |
 
 ## 6. 本期明确不做

@@ -51,7 +51,7 @@ async function evaluate(expression, session = sessionId) {
 const store = new Store(join(directory, 'feedback.json'));
 await store.load();
 const app = createCompanion({
-  store, relay: {}, ports: [8080],
+  store, ports: [8080],
   binding: { sessionId: randomUUID(), deviceId: randomUUID(), workspaceId: randomUUID(), name: 'Synthetic preview' },
   reviewerToken: 'a'.repeat(64), proxyToken: 'b'.repeat(64), adminToken: 'c'.repeat(64),
 });

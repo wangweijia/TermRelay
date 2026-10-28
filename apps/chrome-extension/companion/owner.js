@@ -43,11 +43,7 @@ async function refresh() {
       if (record.steps) card.append(node('pre', record.steps));
       if (record.element) card.append(node('pre', JSON.stringify(record.element, null, 2)));
       if (record.note) card.append(node('p', record.note));
-      if (record.status === 'pending') card.append(button('确认交给此会话修改', async () => {
-        if (confirm('确认项目绑定正确、会话空闲，且没有其他会话修改同一目录？提交后不会自动重试。')) {
-          await api(`/api/feedback/${record.id}/deliver`, {});
-        }
-      }));
+      if (record.status === 'pending') card.append(node('p', '请在 Mac App 中确认交给绑定的本地会话修改。'));
       if (['delivered', 'unknown'].includes(record.status)) {
         const summary = document.createElement('textarea');
         summary.placeholder = '先在 TermRelay 核实执行已经结束，再填写给业务方看的修改摘要。';

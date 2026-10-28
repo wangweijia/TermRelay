@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { RequestError, UUID, reviewerView, secretMatches, validateFeedback } from './model.mjs';
+import { RequestError, UUID, promptFor, reviewerView, secretMatches, validateFeedback } from './model.mjs';
 import { attachProxy } from './proxy.mjs';
 
 async function bodyOf(request) {
@@ -28,7 +28,7 @@ function authorize(request, token) {
   if (!secretMatches(request.headers.authorization, `Bearer ${token}`)) throw new RequestError(401, 'Invalid access token.');
 }
 
-export function createCompanion({ store, relay, binding, ports, reviewerToken, adminToken, proxyToken }) {
+export function createCompanion({ store, binding, ports, reviewerToken, adminToken, proxyToken }) {
   let busy = false;
   const update = async (record, patch) => {
     Object.assign(record, patch, { updatedAt: new Date().toISOString() });
@@ -98,7 +98,7 @@ export function createCompanion({ store, relay, binding, ports, reviewerToken, a
         }
       }
 
-      const match = /^\/(?:api|v1)\/feedback\/([^/]+)\/(deliver|review|verify)$/.exec(url.pathname);
+      const match = /^\/(?:api|v1)\/feedback\/([^/]+)\/(deliver|result|review|verify)$/.exec(url.pathname);
       if (!match || request.method !== 'POST' || !UUID.test(match[1])) throw new RequestError(404, 'Not found.');
       const record = store.records.find(item => item.id === match[1]);
       if (!record) throw new RequestError(404, 'Feedback not found.');
@@ -116,15 +116,32 @@ export function createCompanion({ store, relay, binding, ports, reviewerToken, a
         return;
       }
       if (!admin || !url.pathname.startsWith('/api/')) throw new RequestError(403, 'Owner confirmation is required.');
+      if (action === 'result') {
+        const body = await bodyOf(request);
+        if (busy || record.status !== 'sending' || body.commandId !== record.commandId
+          || !['delivered', 'unknown', 'failed'].includes(body.status)
+          || typeof body.note !== 'string' || body.note.length > 2000) {
+          throw new RequestError(409, 'Local dispatch result does not match the pending execution.');
+        }
+        busy = true;
+        try {
+          await update(record, { status: body.status, note: body.note });
+          json(response, 200, record);
+        } finally { busy = false; }
+        return;
+      }
       if (action === 'review') {
         const body = await bodyOf(request);
-        if (!['delivered', 'unknown'].includes(record.status) || body.checked !== true
+        if (busy || !['sending', 'delivered', 'unknown'].includes(record.status) || body.checked !== true
           || !['completed', 'failed'].includes(body.outcome ?? 'completed')
           || typeof body.note !== 'string' || !body.note.trim() || body.note.length > 2000) {
           throw new RequestError(409, 'Inspect execution in TermRelay and provide a result summary first.');
         }
-        await update(record, { status: body.outcome === 'failed' ? 'failed' : 'awaiting_review', note: body.note.trim() });
-        json(response, 200, record);
+        busy = true;
+        try {
+          await update(record, { status: body.outcome === 'failed' ? 'failed' : 'awaiting_review', note: body.note.trim() });
+          json(response, 200, record);
+        } finally { busy = false; }
         return;
       }
       if (action !== 'deliver' || record.status !== 'pending') throw new RequestError(409, 'Feedback was already attempted; no automatic resend is allowed.');
@@ -133,13 +150,9 @@ export function createCompanion({ store, relay, binding, ports, reviewerToken, a
       }
       busy = true;
       try {
-        // Persist intent before network I/O; after a crash this becomes unknown, never pending.
+        // The App must receive a durable intent before starting the local turn.
         await update(record, { status: 'sending', commandId: randomUUID(), note: '' });
-        let result;
-        try { result = await relay.deliver(record, binding); }
-        catch (error) { result = { status: 'failed', note: error.message }; }
-        await update(record, result);
-        json(response, 200, record);
+        json(response, 200, { commandId: record.commandId, text: promptFor(record), binding });
       } finally { busy = false; }
     } catch (error) {
       if (!(error instanceof RequestError)) console.error('Companion request failed:', error.message);

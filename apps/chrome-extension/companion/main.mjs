@@ -2,26 +2,30 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { Relay } from './relay.mjs';
+import { UUID } from './model.mjs';
 import { Store } from './store.mjs';
 import { createCompanion } from './server.mjs';
 
 const { values } = parseArgs({ options: {
-  relay: { type: 'string', default: 'http://127.0.0.1:3007' },
   session: { type: 'string' },
+  device: { type: 'string' },
+  workspace: { type: 'string' },
+  name: { type: 'string' },
   ports: { type: 'string', default: '8080' },
   port: { type: 'string', default: '18420' },
   'owner-port': { type: 'string', default: '18421' },
   'data-dir': { type: 'string', default: new URL('../.local/', import.meta.url).pathname },
-  'expected-device': { type: 'string' },
-  'expected-workspace': { type: 'string' },
   'parent-pid': { type: 'string' },
   help: { type: 'boolean' },
 } });
 
 if (values.help || !values.session) {
-  console.log('node companion/main.mjs --session <ordinary ACP session UUID> [--relay http://127.0.0.1:3007] [--ports 8080,8081] [--data-dir PATH]');
+  console.log('node companion/main.mjs --session <local ACP session UUID> --device <device UUID> --workspace <opaque workspace ID> [--ports 8080,8081] [--data-dir PATH]');
   process.exit(values.help ? 0 : 1);
+}
+if (!UUID.test(values.session) || !UUID.test(values.device ?? '')
+  || !values.workspace?.trim() || values.workspace.length > 256) {
+  throw new Error('A local App session, device UUID and opaque workspace ID are required.');
 }
 const portOf = value => {
   if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) throw new Error(`Invalid port: ${value}`);
@@ -67,15 +71,9 @@ if (parentPID !== undefined) {
   }, 1000);
 }
 try {
-  const relay = new Relay(values.relay, values.session);
-  const session = await relay.session();
-  if ((values['expected-device'] && session.deviceId !== values['expected-device'])
-    || (values['expected-workspace'] && session.workspaceId !== values['expected-workspace'])) {
-    throw new Error('The selected App session does not match the Server device/workspace binding.');
-  }
   const binding = {
-    sessionId: session.id, deviceId: session.deviceId, workspaceId: session.workspaceId,
-    name: session.displayName || session.toolKey,
+    sessionId: values.session.toLowerCase(), deviceId: values.device.toLowerCase(), workspaceId: values.workspace,
+    name: values.name || 'Local ACP session',
   };
   const configPath = resolve(directory, 'credentials.json');
   let credentials;
@@ -84,13 +82,13 @@ try {
     if (error.code !== 'ENOENT') throw error;
     const secret = () => randomBytes(32).toString('hex');
     credentials = {
-      sessionId: session.id, deviceId: session.deviceId, workspaceId: session.workspaceId, relay: relay.base.origin,
+      sessionId: binding.sessionId, deviceId: binding.deviceId, workspaceId: binding.workspaceId,
       reviewerToken: secret(), adminToken: secret(), proxyToken: secret(),
     };
     await writeFile(configPath, JSON.stringify(credentials, null, 2), { mode: 0o600, flag: 'wx' });
   }
-  if (credentials.sessionId !== session.id || credentials.relay !== relay.base.origin
-    || credentials.deviceId !== session.deviceId || credentials.workspaceId !== session.workspaceId) {
+  if (credentials.sessionId !== binding.sessionId || credentials.relay !== undefined
+    || credentials.deviceId !== binding.deviceId || credentials.workspaceId !== binding.workspaceId) {
     throw new Error('This data directory belongs to another binding. Use a new --data-dir; do not silently rebind old feedback.');
   }
   if (['adminToken', 'reviewerToken', 'proxyToken'].some(key => !/^[0-9a-f]{64}$/.test(credentials[key] ?? ''))) {
@@ -98,7 +96,7 @@ try {
   }
   const store = new Store(resolve(directory, 'feedback.json'));
   await store.load();
-  app = createCompanion({ store, relay, binding, ports, ...credentials });
+  app = createCompanion({ store, binding, ports, ...credentials });
   const listen = (server, port, host) => new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);

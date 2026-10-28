@@ -42,7 +42,7 @@ private struct PreviewSharingView: View {
         !isBoundHere && (sharing.isRunning || sharing.isStarting || sharing.isStopping)
     }
     private var canStart: Bool {
-        appModel.connectionState == .connected && session.state == .ready
+        session.state == .ready
             && !sharing.isRunning && !sharing.isStarting && !sharing.isStopping && !anotherActive
     }
 
@@ -167,15 +167,13 @@ private struct PreviewSharingView: View {
                                     Task {
                                         do {
                                             let configuration = try PreviewSharingConfiguration(
-                                                serverURL: appModel.serverURL, ports: ports,
+                                                ports: ports,
                                                 publicPort: publicPort, ownerPort: ownerPort, shareHost: shareHost)
                                             try await appModel.startPreviewSharing(sessionID: session.id, configuration: configuration)
                                         } catch { self.error = error.localizedDescription }
                                     }
                                 }.buttonStyle(.borderedProminent).disabled(!canStart)
-                                if appModel.connectionState != .connected {
-                                    Text("请先连接 Server").font(.caption).foregroundStyle(.secondary)
-                                } else if session.state != .ready {
+                                if session.state != .ready {
                                     Text("等待当前会话就绪 / 空闲").font(.caption).foregroundStyle(.secondary)
                                 }
                             }
@@ -205,6 +203,8 @@ private struct PreviewSharingView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Text("试用版仅用于受信局域网。插件的其他域名走 DIRECT，请使用独立 Chrome Profile。停止后重新开启会恢复原配对；尚无在线撤销。")
                             .font(.caption).foregroundStyle(.orange)
+                        Text("网页访问与反馈均在本机和局域网内完成，不依赖 Server 连接或公网配对。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
             }
@@ -268,13 +268,13 @@ private struct PreviewFeedbackCard: View {
                     Button("确认交给此会话修改", action: requestExecution)
                         .disabled(!canExecute || sharing.isSending || sharing.hasUnresolvedExecution)
                 }
-                if ["delivered", "unknown"].contains(record.status) {
+                if ["sending", "delivered", "unknown"].contains(record.status) {
                     TextField("核实结果后，填写给业务方看的摘要", text: $summary, axis: .vertical)
                         .lineLimit(2...4)
                     HStack {
                         Button("已完成，交业务方验收") { resolutionFailed = false; confirmResolution = true }
                         Button("已核实失败 / 未执行") { resolutionFailed = true; confirmResolution = true }
-                    }.disabled(!canExecute || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(!canExecute || sharing.isSending || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 if record.status == "changes_requested" {
                     Text("请在项目会话中继续处理；当前版本不会自动再次发送。").font(.caption).foregroundStyle(.secondary)
@@ -284,7 +284,7 @@ private struct PreviewFeedbackCard: View {
         .alert("确认已在会话中核实执行结束？", isPresented: $confirmResolution) {
             Button("取消", role: .cancel) {}
             Button("确认") { Task { await sharing.resolve(record, summary: summary, failed: resolutionFailed) } }
-                .disabled(!canExecute)
+                .disabled(!canExecute || sharing.isSending)
         } message: {
             Text(resolutionFailed ? "记录将标为失败，不会自动重发。" : "记录将交业务方验收，不代表已经验收通过。")
         }

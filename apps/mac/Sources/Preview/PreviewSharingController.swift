@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Darwin
 import Foundation
 
@@ -34,23 +33,12 @@ struct PreviewFeedback: Decodable, Identifiable, Sendable {
 }
 
 struct PreviewSharingConfiguration: Sendable {
-    let relayURL: URL
     let ports: [Int]
     let publicPort: Int
     let ownerPort: Int
     let shareHost: String
 
-    init(serverURL: String, ports: String, publicPort: String, ownerPort: String, shareHost: String) throws {
-        guard var url = URLComponents(string: serverURL),
-              ["ws", "wss"].contains(url.scheme), url.path == "/ws/client",
-              let host = url.host, Self.isLocalHost(host), url.user == nil, url.password == nil,
-              url.query == nil, url.fragment == nil else {
-            throw PreviewSharingError("请先在 App 设置中连接受信局域网 Server；公网配对入口暂不支持页面反馈。")
-        }
-        url.scheme = url.scheme == "wss" ? "https" : "http"
-        url.path = ""
-        guard let relayURL = url.url else { throw PreviewSharingError("Server 地址无效。") }
-        self.relayURL = relayURL
+    init(ports: String, publicPort: String, ownerPort: String, shareHost: String) throws {
         let parts = ports.split(separator: ",", omittingEmptySubsequences: false)
         guard !parts.isEmpty else { throw PreviewSharingError("请填写项目端口。") }
         self.ports = try Array(Set(parts.map { try Self.port(String($0).trimmingCharacters(in: .whitespaces)) })).sorted()
@@ -126,6 +114,12 @@ private struct PreviewOwnerState: Decodable {
     let records: [PreviewFeedback]
 }
 
+private struct PreviewDispatch: Decodable {
+    let commandId: UUID
+    let text: String
+    let binding: PreviewOwnerState.Binding
+}
+
 private struct PreviewResponseFailure: Decodable {
     let error: String
 }
@@ -151,6 +145,7 @@ final class PreviewSharingController: ObservableObject {
     private var expectedWorkspaceID = ""
     private var output = ""
     private var pollTask: Task<Void, Never>?
+    private var startLocalTurn: (@MainActor (String, UUID) async -> RemoteCommandResult)?
     private let network: URLSession
     private let dataRoot: URL
 
@@ -183,7 +178,10 @@ final class PreviewSharingController: ObservableObject {
         feedback.contains { ["sending", "delivered", "unknown"].contains($0.status) }
     }
 
-    func start(session: ManagedSession, deviceID: UUID, workspaceID: String, configuration: PreviewSharingConfiguration) async {
+    func start(
+        session: ManagedSession, deviceID: UUID, workspaceID: String, configuration: PreviewSharingConfiguration,
+        startLocalTurn: @escaping @MainActor (String, UUID) async -> RemoteCommandResult
+    ) async {
         guard process == nil, !isStarting, !isStopping else {
             errorMessage = "一次只能共享一个项目，请先停止当前共享。"
             return
@@ -202,6 +200,7 @@ final class PreviewSharingController: ObservableObject {
         sessionID = session.id
         sessionName = session.displayName
         self.configuration = configuration
+        self.startLocalTurn = startLocalTurn
         expectedDeviceID = deviceID.uuidString.lowercased()
         expectedWorkspaceID = workspaceID
         defer { if generation == operation { isStarting = false } }
@@ -211,16 +210,15 @@ final class PreviewSharingController: ObservableObject {
             guard let node, FileManager.default.isExecutableFile(atPath: node.path) else {
                 throw PreviewSharingError("未找到 Node.js 22+。请在高级设置中选择已安装的 Node 可执行文件。")
             }
-            let digest = SHA256.hash(data: Data(configuration.relayURL.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
-            let directory = dataRoot.appendingPathComponent(digest, isDirectory: true)
+            let directory = dataRoot.appendingPathComponent("local", isDirectory: true)
                 .appendingPathComponent(session.id.uuidString.lowercased(), isDirectory: true)
             let child = Process()
             child.executableURL = node
             child.arguments = [
                 assets.appendingPathComponent("companion/main.mjs").path,
-                "--relay", configuration.relayURL.absoluteString,
                 "--session", session.id.uuidString.lowercased(),
-                "--expected-device", expectedDeviceID, "--expected-workspace", workspaceID,
+                "--device", expectedDeviceID, "--workspace", workspaceID,
+                "--name", session.displayName,
                 "--ports", configuration.ports.map(String.init).joined(separator: ","),
                 "--port", String(configuration.publicPort), "--owner-port", String(configuration.ownerPort),
                 "--data-dir", directory.path,
@@ -245,6 +243,7 @@ final class PreviewSharingController: ObservableObject {
                     self.isRunning = false
                     self.isStarting = false
                     self.credentials = nil
+                    self.startLocalTurn = nil
                     self.pollTask?.cancel()
                     self.errorMessage = "页面共享服务已退出。\(self.output)"
                 }
@@ -303,6 +302,7 @@ final class PreviewSharingController: ObservableObject {
         }
         process = nil
         credentials = nil
+        startLocalTurn = nil
         isSending = false
         isStopping = false
         if let reason { errorMessage = reason }
@@ -329,7 +329,7 @@ final class PreviewSharingController: ObservableObject {
     }
 
     func deliver(_ record: PreviewFeedback) async {
-        guard isRunning, !isSending, !hasUnresolvedExecution, record.status == "pending" else {
+        guard isRunning, !isSending, !hasUnresolvedExecution, record.status == "pending", let startLocalTurn else {
             errorMessage = "请先核实上一条执行结果，并确认当前共享可用。"
             return
         }
@@ -337,7 +337,19 @@ final class PreviewSharingController: ObservableObject {
         isSending = true
         defer { if generation == operation { isSending = false } }
         do {
-            let _: PreviewFeedback = try await request("/api/feedback/\(record.id)/deliver", body: [:])
+            let dispatch: PreviewDispatch = try await request("/api/feedback/\(record.id)/deliver", body: [:])
+            guard generation == operation, isRunning else { return }
+            guard dispatch.binding.sessionId == sessionID?.uuidString.lowercased(),
+                  dispatch.binding.deviceId == expectedDeviceID, dispatch.binding.workspaceId == expectedWorkspaceID else {
+                throw PreviewSharingError("反馈执行绑定与本机会话不一致，已拒绝执行。")
+            }
+            let result = await startLocalTurn(dispatch.text, dispatch.commandId)
+            guard generation == operation, isRunning else { return }
+            let status = result.succeeded ? "delivered" : (result.errorCode == "agent_action_failed" ? "unknown" : "failed")
+            let note = result.succeeded ? "本地会话已接收，开发者仍需核实 AI 执行结果。" : (result.message ?? "本地会话拒绝执行。")
+            let _: PreviewFeedback = try await request("/api/feedback/\(record.id)/result", body: [
+                "commandId": dispatch.commandId.uuidString.lowercased(), "status": status, "note": String(note.prefix(2000)),
+            ])
             guard generation == operation else { return }
             try await refresh()
             errorMessage = nil
@@ -347,7 +359,7 @@ final class PreviewSharingController: ObservableObject {
     }
 
     func resolve(_ record: PreviewFeedback, summary: String, failed: Bool) async {
-        guard isRunning, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard isRunning, !isSending, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             errorMessage = "请核实会话执行结束，并填写给验收者看的结果摘要。"
             return
         }
