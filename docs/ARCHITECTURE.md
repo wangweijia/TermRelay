@@ -98,6 +98,9 @@ Mac 普通 ACP 会话提供实验性的“共享预览与反馈”原生面板�
 `PreviewSharingController` 负责启动与停止所属 Node helper、校验固定会话 / 设备 / 工作区绑定，
 并通过仅 loopback 的管理 API 展示反馈和处理开发者确认；会话结束与 App 退出时联动关闭。
 `apps/chrome-extension` 中的 helper 提供受限 CONNECT 代理与验收者反馈 API，
+代理严格匹配 `page-gateway-local.nioint.com`，所有合法端口均转发到本机原端口，
+不使用项目端口允许列表；App 输入的入口端口只用于生成链接。代理凭据意味着对本地全部 TCP 端口的访问，
+仅供受信局域网中的可信验收者使用。
 将执行意图持久化后交给 App，由 App 直接调用绑定的本地 ACP 会话启动文字轮次，
 再向 helper 回写接收结果；helper 不连接 Server、不直接控制 CLI、不创建外部 AI API 会话。
 反馈及凭据留在 Mac 的 Application Support，Server 不增加本地路径或反馈存储。

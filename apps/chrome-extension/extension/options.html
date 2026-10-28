@@ -18,12 +18,13 @@
   </form>
   <button id="test">测试反馈连接</button>
   <hr>
-  <p>可选域名代理：仅将 page-gateway-local.nioint.com 发往开发者电脑，保留原端口和 HTTPS。</p>
+  <p>可选域名代理：将 page-gateway-local.nioint.com 的所有端口发往开发者电脑，保留原端口和 HTTPS；无需逐个填写页面、静态资源或 HMR 端口。</p>
+  <p><strong>持有代理凭据的人可通过此域名连接开发者电脑的全部本地 TCP 端口。只分享给受信任的验收者。</strong></p>
   <p><strong>此版本 PAC 对其他域名使用 DIRECT，不会合并公司现有代理规则。仅在获准且无需其他代理的独立 Chrome Profile 使用。</strong></p>
   <label><input id="consent" type="checkbox">我已确认这个 Profile 可以使用上述代理规则；切换后会关闭旧预览标签页再重新打开。</label>
   <button id="enable">启用域名代理</button><button id="disable">停用并释放代理设置</button>
   <p id="status" role="status"></p>
-  <p>反馈 UI 仅在配对环境授权的预览端口出现。共享 Token 的验收者可看到该配对环境的全部反馈。</p>
+  <p>反馈 UI 在此域名任意 HTTPS 端口的顶层页面出现。共享 Token 的验收者可看到该配对环境的全部反馈。</p>
   <script type="module" src="options.js"></script>
 </body>
 </html>

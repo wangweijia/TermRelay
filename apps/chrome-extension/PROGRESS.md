@@ -37,8 +37,8 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
 | 域名代理 | 仅代理 `page-gateway-local.nioint.com`，保留原 URL、端口及 TLS | `extension/background.js`、`companion/proxy.mjs` |
-| 多端口授权 | 一个代理入口转发多个显式授权的项目端口，目标固定为本机 loopback | `companion/main.mjs`、`proxy.mjs` |
-| 代理访问限制 | Basic 凭据、目标域名与端口允许列表；不提供任意目标转发 | `companion/proxy.mjs` |
+| 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
+| 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
 | 页面反馈 UI | 右下角按钮、右侧浮层、鼠标高亮、点击选取、选择外层、Esc 退出、整页反馈 | `extension/content.js` |
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
 | 基础敏感信息过滤 | 不采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash | `extension/content.js`、`companion/model.mjs` |
@@ -103,7 +103,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | V-01 | 待完成 | 启动实际 Relay、Mac App 和测试项目 ACP 会话 | 桥接启动并正确显示设备、工作区及会话；无效绑定被拒绝 |
 | V-02 | 待完成 | 在另一台电脑配对插件并访问开发者代理 | 反馈连接成功；无需修改业务方 hosts；未授权访问失败 |
 | V-03 | 待完成 | 验证原域名的真实项目登录与操作 | 使用业务方自己的账号正常登录，接口和资源可用，无证书错误 |
-| V-04 | 待完成 | 验证多端口及项目实际 WSS / HMR | 至少两个授权端口可访问；热更新可用；未授权端口被拒绝 |
+| V-04 | 待完成 | 验证多端口及项目实际 WSS / HMR | 页面与静态资源跨端口可访问且无需列举端口；热更新可用；其他域名和非法端口被拒绝 |
 | V-05 | 待完成 | 在真实业务页面验证元素选取 | 选取不会触发查询、提交或跳转；弹窗、图标、表格等不能安全选取时有明确处理方式 |
 | V-06 | 待完成 | 发起一次受控的真实代码修改 | 业务方提交一条小改动，开发者确认后进入正确会话；审批正常；修改可在页面看到 |
 | V-07 | 待完成 | 完成人工验收与补充意见 | 修改摘要可见，业务方可以通过或提出继续修改；不会误触发重复执行 |

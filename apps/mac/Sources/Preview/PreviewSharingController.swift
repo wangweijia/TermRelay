@@ -40,12 +40,12 @@ struct PreviewSharingConfiguration: Sendable {
 
     init(ports: String, publicPort: String, ownerPort: String, shareHost: String) throws {
         let parts = ports.split(separator: ",", omittingEmptySubsequences: false)
-        guard !parts.isEmpty else { throw PreviewSharingError("请填写项目端口。") }
+        guard !parts.isEmpty else { throw PreviewSharingError("请填写预览入口端口。") }
         self.ports = try Array(Set(parts.map { try Self.port(String($0).trimmingCharacters(in: .whitespaces)) })).sorted()
         self.publicPort = try Self.port(publicPort)
         self.ownerPort = try Self.port(ownerPort)
         guard self.publicPort != self.ownerPort, !self.ports.contains(self.publicPort), !self.ports.contains(self.ownerPort) else {
-            throw PreviewSharingError("共享端口、管理端口不能相同，也不能占用项目端口。")
+            throw PreviewSharingError("共享端口、管理端口不能相同，也不能占用预览入口端口。")
         }
         guard Self.isLocalHost(shareHost), shareHost != "localhost", !shareHost.hasPrefix("127.") else {
             throw PreviewSharingError("请选择业务方可访问的本机局域网 IPv4 地址。")

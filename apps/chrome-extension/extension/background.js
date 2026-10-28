@@ -81,7 +81,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!sender.tab || !allowedPage(sender.url) || sender.frameId !== 0) throw new Error('只允许授权预览页面提交反馈。');
     const meta = await request('/v1/meta');
     const page = new URL(sender.url);
-    if (!meta.ports.includes(Number(page.port || 443))) throw new Error('此页面端口未获开发者授权。');
     if (message.type === 'preview.meta') return meta;
     if (message.type === 'feedback.list') {
       const records = await request('/v1/feedback');

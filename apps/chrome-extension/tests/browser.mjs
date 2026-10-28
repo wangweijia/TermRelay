@@ -84,17 +84,28 @@ try {
   await call('Page.enable');
   await call('Runtime.enable');
   await call('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+  const assets = new Set();
   handlers.set('Fetch.requestPaused', params => {
-    const html = '<!doctype html><meta charset=utf-8><button id=query><span>Query</span></button><input id=password type=password value=DO-NOT-COLLECT><script>window.businessClicks=0;document.querySelector("#query").onclick=()=>window.businessClicks++;</script>';
+    const url = new URL(params.request.url);
+    const html = '<!doctype html><meta charset=utf-8><link rel=stylesheet href="https://page-gateway-local.nioint.com:8102/__debug/index.css"><script src="https://page-gateway-local.nioint.com:8102/__debug/index.js"></script><button id=query><span>Query</span></button><input id=password type=password value=DO-NOT-COLLECT><script>window.businessClicks=0;document.querySelector("#query").onclick=()=>window.businessClicks++;</script>';
+    let content = html, type = 'text/html; charset=utf-8';
+    if (url.pathname === '/__debug/index.css') {
+      assets.add(params.request.url); content = '#query{color:rgb(12, 34, 56)}'; type = 'text/css';
+    } else if (url.pathname === '/__debug/index.js') {
+      assets.add(params.request.url); content = 'window.secondaryScriptLoaded=true;'; type = 'text/javascript';
+    }
     call('Fetch.fulfillRequest', {
       requestId: params.requestId, responseCode: 200,
-      responseHeaders: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }],
-      body: Buffer.from(html).toString('base64'),
+      responseHeaders: [{ name: 'Content-Type', value: type }],
+      body: Buffer.from(content).toString('base64'),
     }).catch(error => { console.error(error.message); browser.kill('SIGTERM'); });
   });
   const loaded = new Promise(resolve => handlers.set('Page.loadEventFired', resolve));
-  await call('Page.navigate', { url: 'https://page-gateway-local.nioint.com:8080/debug/test?token=DO-NOT-COLLECT' });
+  await call('Page.navigate', { url: 'https://page-gateway-local.nioint.com:8101/debug/test?token=DO-NOT-COLLECT' });
   await loaded;
+  assert.equal(assets.size, 2, 'cross-port CSS and JS should both load');
+  assert.equal(await evaluate('window.secondaryScriptLoaded'), true);
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("#query")).color'), 'rgb(12, 34, 56)');
   assert.equal(await evaluate(`new Promise(resolve => {
     let attempts=0; const timer=setInterval(()=>{
       if(document.querySelector('termrelay-feedback')) {clearInterval(timer);resolve(true);}
@@ -129,7 +140,7 @@ try {
   const feedback = store.records[0];
   assert.equal(feedback.element.tag, 'button');
   assert.equal(feedback.element.text, 'Query');
-  assert.equal(feedback.page, 'https://page-gateway-local.nioint.com:8080/debug/test');
+  assert.equal(feedback.page, 'https://page-gateway-local.nioint.com:8101/debug/test');
   assert.ok(!JSON.stringify(feedback).includes('DO-NOT-COLLECT'));
   assert.match(await within("return this.querySelector('#status').textContent;"), /已提交/);
   await within(`this.querySelector('#new').click();this.querySelector('#whole').click();this.querySelector('#description').value='Page-level feedback';this.querySelector('#submit').click();`);
@@ -137,7 +148,7 @@ try {
   assert.equal(store.records[0].element, null);
   await evaluate("document.querySelector('#query').click()");
   assert.equal(await evaluate('businessClicks'), 1, 'normal browsing must work after selection');
-  console.log('Chrome UI: selection, business-click isolation, text submission, URL sanitization, and whole-page feedback passed.');
+  console.log('Chrome UI: unlisted preview port, cross-port CSS/JS, selection, business-click isolation, text submission, URL sanitization, and whole-page feedback passed.');
 } finally {
   clearTimeout(timeout);
   await call('Browser.close', {}, null).catch(() => {});

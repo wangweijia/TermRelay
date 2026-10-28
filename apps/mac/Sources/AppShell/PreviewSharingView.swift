@@ -126,7 +126,7 @@ private struct PreviewSharingView: View {
                 }
                 GroupBox("2. 开放本机预览") {
                     VStack(alignment: .leading, spacing: 10) {
-                        TextField("项目端口，例如 8080,8081", text: $ports)
+                        TextField("预览入口端口（仅生成链接），例如 8080,8081", text: $ports)
                             .disabled(sharing.isRunning || sharing.isStarting || sharing.isStopping)
                         HStack {
                             Text("业务方连接的本机地址")
@@ -139,7 +139,7 @@ private struct PreviewSharingView: View {
                                 if !addresses.contains(shareHost) { shareHost = addresses.first ?? "" }
                             }
                         }.disabled(sharing.isRunning || sharing.isStarting || sharing.isStopping)
-                        Text("保留 page-gateway-local.nioint.com 和项目原端口，使用项目已有 HTTPS。仅授权这里列出的端口。")
+                        Text("此域名的所有端口均转发到本机原端口，使用项目已有 HTTPS。入口端口仅用于生成链接，其他资源端口无需填写。")
                             .font(.caption).foregroundStyle(.secondary)
                         DisclosureGroup("高级设置") {
                             TextField("共享服务端口", text: $publicPort)
@@ -202,6 +202,8 @@ private struct PreviewSharingView: View {
                         Text("每个 URL 后接项目原路径。共享配置不是网址；插件设置中导入配置后再访问页面。")
                             .font(.caption).foregroundStyle(.secondary)
                         Text("试用版仅用于受信局域网。插件的其他域名走 DIRECT，请使用独立 Chrome Profile。停止后重新开启会恢复原配对；尚无在线撤销。")
+                            .font(.caption).foregroundStyle(.orange)
+                        Text("代理凭据允许通过此域名连接本机全部 TCP 端口，请只分享给受信任的验收者。")
                             .font(.caption).foregroundStyle(.orange)
                         Text("网页访问与反馈均在本机和局域网内完成，不依赖 Server 连接或公网配对。")
                             .font(.caption).foregroundStyle(.secondary)

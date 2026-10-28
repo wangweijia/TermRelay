@@ -79,7 +79,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'POST') {
-          const input = validateFeedback(await bodyOf(request), ports);
+          const input = validateFeedback(await bodyOf(request));
           const prior = store.records.find(record => record.id === input.id);
           if (prior) {
             const original = Object.fromEntries(Object.keys(input).map(key => [key, prior[key]]));
@@ -162,7 +162,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
   };
   const publicServer = createServer(handle(false));
   const adminServer = createServer(handle(true));
-  const closeProxy = attachProxy(publicServer, { ports, token: proxyToken });
+  const closeProxy = attachProxy(publicServer, { token: proxyToken });
   for (const server of [publicServer, adminServer]) {
     server.requestTimeout = 30_000;
     server.headersTimeout = 10_000;

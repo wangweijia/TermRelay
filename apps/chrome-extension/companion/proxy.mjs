@@ -1,7 +1,7 @@
 import { connect } from 'node:net';
-import { secretMatches } from './model.mjs';
+import { HOST, secretMatches } from './model.mjs';
 
-export function attachProxy(server, { ports, token }) {
+export function attachProxy(server, { token }) {
   const sockets = new Set();
   server.on('connection', socket => {
     sockets.add(socket);
@@ -15,9 +15,11 @@ export function attachProxy(server, { ports, token }) {
       reject('407 Proxy Authentication Required', 'Proxy-Authenticate: Basic realm="TermRelay Preview"\r\n');
       return;
     }
-    const match = /^page-gateway-local\.nioint\.com:(\d{1,5})$/.exec(request.url ?? '');
-    const port = Number(match?.[1]);
-    if (!match || !ports.includes(port)) { reject('403 Forbidden'); return; }
+    const [host, rawPort, extra] = (request.url ?? '').split(':');
+    const port = Number(rawPort);
+    if (host !== HOST || extra !== undefined || !/^\d{1,5}$/.test(rawPort ?? '') || port < 1 || port > 65535) {
+      reject('403 Forbidden'); return;
+    }
     const upstream = connect({ host: '127.0.0.1', port });
     sockets.add(upstream);
     upstream.setTimeout(5000);

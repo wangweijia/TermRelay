@@ -104,7 +104,7 @@ try {
   await listen(app.adminServer, ownerPort, '127.0.0.1');
   await listen(app.publicServer, publicPort, '0.0.0.0');
   console.log(`Owner console: http://127.0.0.1:${ownerPort}`);
-  console.log(`Feedback API + CONNECT proxy: port ${publicPort}; authorized project ports: ${ports.join(', ')}`);
+  console.log(`Feedback API + CONNECT proxy: port ${publicPort}; all project ports on page-gateway-local.nioint.com; preview links: ${ports.join(', ')}`);
   console.log(`Credentials (private; do not commit or log their values): ${configPath}`);
   console.log('Use adminToken in the owner console; share only reviewerToken and proxyToken with authorized testers.');
   console.log('Do not edit this project in another AI turn while a feedback execution is in progress.');

@@ -48,17 +48,32 @@ async function fixture(t) {
   return { app, store, request, prepare, result, publicURL, ownerURL };
 }
 
-test('feedback validation preserves domain/port/path, drops query and hash, rejects other origins/ports', () => {
+test('feedback accepts any valid HTTPS port on the exact preview hostname and sanitizes URLs', () => {
   const body = input();
-  const record = validateFeedback(body, [8080]);
+  const record = validateFeedback(body);
   assert.equal(record.page, `https://${HOST}:8080/debug/test`);
   assert.ok(!JSON.stringify(record).includes('secret'));
   assert.throws(() => cleanPageURL('https://example.com/'), /authorized/);
   assert.throws(() => cleanPageURL(`http://${HOST}/`), /authorized/);
-  assert.throws(() => validateFeedback(body, [9000]), /port/);
-  assert.throws(() => validateFeedback({ ...body, description: ' ' }, [8080]), /text/);
-  assert.throws(() => validateFeedback({ ...body, element: { ...body.element, text: 'x'.repeat(501) } }, [8080]), /text/);
+  for (const port of [1, 443, 8080, 8101, 65535]) {
+    const url = new URL(`https://${HOST}:${port}/__debug/`);
+    assert.equal(validateFeedback({ ...body, page: url.href }).page, url.href);
+  }
+  for (const page of [`https://${HOST}:0/`, `https://${HOST}:65536/`, `https://${HOST}.evil.example:8101/`]) {
+    assert.throws(() => validateFeedback({ ...body, page }), /authorized|Invalid page/);
+  }
+  assert.throws(() => validateFeedback({ ...body, description: ' ' }), /text/);
+  assert.throws(() => validateFeedback({ ...body, element: { ...body.element, text: 'x'.repeat(501) } }), /text/);
   assert.match(promptFor(record), /untrusted observations/);
+});
+
+test('feedback API accepts an unlisted resource port but still rejects other hostnames', async t => {
+  const f = await fixture(t);
+  const body = { ...input(), page: `https://${HOST}:8101/__debug/` };
+  assert.deepEqual((await f.request('/v1/meta')).body.ports, [8080]);
+  assert.equal((await f.request('/v1/feedback', body)).status, 201);
+  assert.equal(f.store.records[0].page, body.page);
+  assert.equal((await f.request('/v1/feedback', { ...input(), page: 'https://other.example:8101/' })).status, 400);
 });
 
 test('local-only owner dispatch persists intent before App execution and completes the reviewer loop', async t => {
@@ -169,24 +184,35 @@ async function tunnel(publicURL, authority, password, data = '') {
     });
   });
 }
-test('CONNECT proxy authenticates, restricts ports/hostname, and forwards bytes including CONNECT head', async t => {
+test('CONNECT proxy authenticates and rejects other hostnames and invalid ports', async t => {
   const f = await fixture(t);
   assert.match(await tunnel(f.publicURL, `${HOST}:8080`), /407/);
-  assert.match(await tunnel(f.publicURL, 'example.com:8080', 'proxy'), /403/);
-  assert.match(await tunnel(f.publicURL, `${HOST}:9999`, 'proxy'), /403/);
-  const target = createServer((request, response) => response.end('LOCAL-TEST'));
-  await listen(target);
-  t.after(() => close(target));
-  const port = target.address().port;
-  const app = createCompanion({
-    store: f.store, binding, ports: [port],
-    reviewerToken: 'reviewer', adminToken: 'owner', proxyToken: 'proxy',
-  });
-  const proxyURL = await listen(app.publicServer);
-  t.after(async () => { app.closeProxy(); await close(app.publicServer); });
-  const response = await tunnel(proxyURL, `${HOST}:${port}`, 'proxy', 'GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n');
-  assert.match(response, /200 Connection Established/);
-  assert.match(response, /LOCAL-TEST/);
+  for (const authority of [
+    'example.com:8080', `${HOST}.evil.example:8101`, '127.0.0.1:8101',
+    `${HOST}:0`, `${HOST}:65536`, `${HOST}:99999`, `${HOST}:abc`, `${HOST}:8080:8101`, HOST,
+  ]) {
+    assert.match(await tunnel(f.publicURL, authority, 'proxy'), /403/, authority);
+  }
+});
+
+test('one proxy forwards page and CSS/JS requests to multiple original ports without listing them', async t => {
+  const f = await fixture(t);
+  const pageServer = createServer((request, response) => response.end(`LOCAL-TEST page ${request.url}`));
+  const assetServer = createServer((request, response) => response.end(`LOCAL-TEST asset ${request.url}`));
+  await Promise.all([listen(pageServer), listen(assetServer)]);
+  t.after(() => Promise.all([close(pageServer), close(assetServer)]));
+  const pagePort = pageServer.address().port, assetPort = assetServer.address().port;
+  assert.ok(![8080].includes(pagePort) && ![8080].includes(assetPort));
+  for (const [port, path, expected] of [
+    [pagePort, '/debug/market-tracker/nev2', 'page'],
+    [assetPort, '/__debug/index.css', 'asset'],
+    [assetPort, '/__debug/index.js', 'asset'],
+  ]) {
+    const response = await tunnel(f.publicURL, `${HOST}:${port}`, 'proxy',
+      `GET ${path} HTTP/1.1\r\nHost: ${HOST}:${port}\r\nConnection: close\r\n\r\n`);
+    assert.match(response, /200 Connection Established/);
+    assert.ok(response.includes(`LOCAL-TEST ${expected} ${path}`), response);
+  }
 });
 
 test('CLI starts without any Server, persists local binding and releases its lock on shutdown', async t => {

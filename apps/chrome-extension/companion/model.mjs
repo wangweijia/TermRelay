@@ -23,7 +23,7 @@ export function privateHost(host) {
 export function cleanPageURL(raw) {
   let url;
   try { url = new URL(raw); } catch { throw new RequestError(400, 'Invalid page URL.'); }
-  if (url.protocol !== 'https:' || url.hostname !== HOST || url.username || url.password) {
+  if (url.protocol !== 'https:' || url.hostname !== HOST || url.username || url.password || Number(url.port || 443) < 1) {
     throw new RequestError(400, 'Only the authorized HTTPS preview hostname is accepted.');
   }
   // Query values and fragments can contain credentials. First version retains only the pathname.
@@ -37,10 +37,9 @@ function text(value, limit, required = false) {
   return value.trim();
 }
 
-export function validateFeedback(body, ports) {
+export function validateFeedback(body) {
   if (!body || !UUID.test(body.id ?? '')) throw new RequestError(400, 'A feedback UUID is required.');
   const page = cleanPageURL(body.page);
-  if (!ports.includes(Number(new URL(page).port || 443))) throw new RequestError(403, 'Preview port is not authorized.');
   let element = null;
   if (body.element !== null && body.element !== undefined) {
     const item = body.element;
