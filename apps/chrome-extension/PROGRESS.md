@@ -36,12 +36,12 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | --- | --- | --- |
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
-| 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，双状态卡片、预览入口、自然语言错误与响应式布局 | `extension/options.*`、`manifest.json` |
+| 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
 | 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
 | 域名代理 | 仅代理 `page-gateway-local.nioint.com`，保留原 URL、端口及 TLS | `extension/background.js`、`companion/proxy.mjs` |
 | 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
 | 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
-| 点点改页面 UI | 右下角品牌按钮、两步式浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段，进度徽标与“效果满意 / 再调一调” | `extension/content.js` |
+| 点点改页面 UI | 右下角文字按钮、简洁黑白浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段、文字进度与“效果满意 / 再调一调” | `extension/content.js` |
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
 | 基础敏感信息过滤 | 不采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash | `extension/content.js`、`companion/model.mjs` |
 | 受限反馈接口 | 提交、列表、验收；反馈 Token 与管理 Token 分离，网页脚本来源被拒绝 | `companion/server.mjs` |

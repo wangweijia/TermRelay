@@ -111,7 +111,9 @@ try {
     document.querySelector('#enable').click();`, optionSession);
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'primary preview action should enable the proxy');
   assert.equal(await evaluate(`document.querySelector('#preview-links a').href`, optionSession), 'https://page-gateway-local.nioint.com:8080/');
-  assert.equal(await evaluate(`document.querySelector('.sidebar').getBoundingClientRect().left > document.querySelector('.setup').getBoundingClientRect().right`, optionSession), true, 'desktop settings use a separate status sidebar');
+  assert.equal(await evaluate(`document.querySelector('.sidebar').getBoundingClientRect().bottom <= document.querySelector('.setup').getBoundingClientRect().top`, optionSession), true, 'settings use a single column with connection status above configuration');
+  assert.equal(await evaluate(`getComputedStyle(document.body).backgroundImage`, optionSession), 'none', 'settings have no decorative background');
+  assert.equal(await evaluate(`document.querySelectorAll('.brand-mark,.hero-tags,.step-number').length`, optionSession), 0, 'settings have no promotional decorations');
   await screenshot('options-desktop', optionSession);
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }, optionSession);
   assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`, optionSession), true, 'settings fit a narrow viewport without horizontal scrolling');
@@ -190,6 +192,9 @@ try {
   assert.equal((await within(`return this.querySelector('#toggle').textContent;`)).trim(), '点点改');
   await within(`this.querySelector('#toggle').click();`);
   assert.equal(await within(`return this.querySelector('#panel-title').textContent;`), '点点改');
+  assert.equal(await within(`return this.querySelectorAll('svg,.brand-mark,.step-heading span').length;`), 0, 'panel uses text controls without decorative icons or numbered steps');
+  assert.equal(await within(`return getComputedStyle(this.querySelector('.panel-header')).backgroundImage;`), 'none');
+  assert.equal(await within(`return getComputedStyle(this.querySelector('#panel')).boxShadow;`), 'none');
   await screenshot('panel-desktop', sessionId);
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   assert.equal(await within(`const panel=this.querySelector('#panel'),rect=panel.getBoundingClientRect();

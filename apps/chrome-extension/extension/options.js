@@ -32,7 +32,7 @@ function render() {
         : configured ? '配置已保存。开启预览时会自动连接 App。' : '先粘贴配置，把浏览器和开发者 Mac 连起来。';
   for (const control of document.querySelectorAll('button,input,textarea')) control.disabled = busy;
   $('#enable').disabled = busy || !configured || !$('#consent').checked || proxyBlocked || (previewing && connected);
-  $('#enable').textContent = previewing && connected ? '预览已开启' : '开启预览 ↗';
+  $('#enable').textContent = previewing && connected ? '预览已开启' : '开启预览';
   $('#disconnect').disabled = busy || !configured;
   $('#test').disabled = busy || !configured;
   $('#disable').disabled = busy || !state.proxyEnabled;
@@ -56,7 +56,7 @@ function renderLinks() {
     link.href = `https://page-gateway-local.nioint.com:${port}/`;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
-    link.textContent = `打开预览 · 端口 ${port} ↗`;
+    link.textContent = `打开预览（端口 ${port}）`;
     $('#preview-links').append(link);
   }
 }
@@ -114,7 +114,7 @@ $('#enable').onclick = () => run(async () => {
   if (!$('#consent').checked) throw new Error('请先确认当前 Chrome 用户配置可以使用此预览代理。');
   await connect();
   await send({ type: 'proxy.set', enabled: true });
-  return '预览已开启！点击右侧入口，进入项目页面后打开「点点改」。如果之前开过预览页，请关闭后重新打开。';
+  return '预览已开启。打开预览链接，进入业务页面后点击「点点改」。旧预览标签页请关闭后重新打开。';
 }, '正在连接并开启预览…');
 $('#test').onclick = () => run(async () => { await connect(); return 'App 连接正常，可以继续预览与提交想法。'; }, '正在检查 App 连接…');
 $('#disconnect').onclick = () => run(async () => {

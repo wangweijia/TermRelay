@@ -8,31 +8,38 @@
 </head>
 <body>
   <main class="shell">
-    <header class="hero">
-      <div class="wordmark"><span class="brand-mark" aria-hidden="true">↗</span><span>TermRelay <span class="wordmark-divider">/</span> 局域网协作</span></div>
-      <h1>点点改<span class="hero-dot">.</span></h1>
-      <p class="hero-description">点一下，说想法。让页面朝你想的样子，变好一点。</p>
-      <div class="hero-tags"><span>无需修改 hosts</span><span>无需 Server 登录</span><span>进度自动同步</span></div>
+    <header class="page-header">
+      <h1>点点改</h1>
+      <span class="muted small">TermRelay · 局域网预览</span>
     </header>
 
     <div id="status" class="message" role="status" aria-live="polite" hidden></div>
     <div class="layout">
+      <aside class="sidebar" aria-label="连接状态">
+        <section class="status-section">
+          <div class="connection-summary">
+            <div class="connection-row"><span>Mac App</span><span id="connection-badge" class="badge">未连接</span></div>
+            <div class="connection-row"><span>页面预览</span><span id="proxy-badge" class="badge">未开启</span></div>
+          </div>
+          <p id="connection-help" class="muted small">先粘贴配置，把浏览器和开发者 Mac 连起来。</p>
+          <div id="preview-links" class="preview-links" aria-label="预览入口"><p class="muted small">连接后，这里会出现可打开的预览入口。</p></div>
+        </section>
+      </aside>
       <div class="setup">
-        <section class="card" aria-labelledby="pairing-title">
-          <div class="section-heading"><span class="step-number">1</span><div><h2 id="pairing-title">把 App 配置粘贴到这里</h2><p>不用研究地址和密钥，一整段复制过来就好。</p></div><span id="config-badge" class="badge">待配置</span></div>
-          <div class="copy-guide"><span class="guide-label">在 Mac App 中</span><p>打开项目会话 → 共享预览与反馈 → 开启共享 → <strong>复制插件配对配置</strong></p></div>
+        <section class="section" aria-labelledby="pairing-title">
+          <div class="section-heading"><h2 id="pairing-title">连接 App</h2><span id="config-badge" class="badge">待配置</span></div>
+          <p class="muted small">在 App「共享预览与反馈」中开启共享，复制插件配对配置并粘贴到下方。</p>
           <label class="sr-only" for="import-config">App 配对配置</label>
-          <textarea id="import-config" class="config-input" rows="5" spellcheck="false" autocomplete="off" placeholder="在这里粘贴 App 复制的完整配置…"></textarea>
-          <div class="card-actions"><button id="import" class="primary">保存并连接 App <span aria-hidden="true">→</span></button><span class="muted small">配置只保存在这个 Chrome 用户配置中</span></div>
-          <div id="saved-config" class="saved-config" hidden><span class="status-dot" aria-hidden="true"></span><span>已保存环境</span><strong id="saved-address"></strong></div>
+          <textarea id="import-config" class="config-input" rows="3" spellcheck="false" autocomplete="off" placeholder="粘贴完整配对配置"></textarea>
+          <div class="actions"><button id="import" class="primary">保存并连接 App</button><span class="muted small">配置仅保存在当前 Chrome 用户配置中</span></div>
+          <div id="saved-config" class="saved-config" hidden><span>服务地址</span><strong id="saved-address"></strong></div>
         </section>
 
-        <section class="card" aria-labelledby="preview-title">
-          <div class="section-heading"><span class="step-number">2</span><div><h2 id="preview-title">准备好，就开启预览</h2><p>保留原网址，页面和资源的其他端口也会自动转发。</p></div></div>
-          <div class="notice"><strong>只和信任的人一起使用</strong><p>请使用独立 Chrome 用户配置，不与公司代理混用。开启后，此域名可连接开发者 Mac 的所有本地 TCP 端口；其他域名走直连。</p></div>
+        <section class="section" aria-labelledby="preview-title">
+          <div class="section-heading"><h2 id="preview-title">页面预览</h2></div>
+          <p class="notice">仅限受信局域网，请使用独立 Chrome 用户配置，不与公司代理混用。开启后，预览域名可连接开发者 Mac 的所有本地 TCP 端口，其他域名走直连。</p>
           <label class="consent"><input id="consent" type="checkbox"><span>我确认当前用户配置可以使用上述代理规则；切换环境后会关闭旧页面，再重新打开。</span></label>
-          <div class="card-actions"><button id="enable" class="primary" disabled>开启预览 <span aria-hidden="true">↗</span></button><button id="disconnect" class="quiet" disabled>结束本次连接</button></div>
-          <p class="muted small">开启后，点击右侧预览链接，再进入项目的具体页面。</p>
+          <div class="actions"><button id="enable" class="primary" disabled>开启预览</button><button id="disconnect" disabled>结束本次连接</button></div>
         </section>
 
         <details id="advanced" class="advanced">
@@ -51,22 +58,7 @@
         </details>
       </div>
 
-      <aside class="sidebar" aria-label="连接状态和使用说明">
-        <section class="card status-card">
-          <div class="aside-heading"><h2>你的连接</h2><span class="live-label">自动更新</span></div>
-          <div class="connection-row"><span>Mac App</span><span id="connection-badge" class="badge">未连接</span></div>
-          <div class="connection-row"><span>页面预览</span><span id="proxy-badge" class="badge">未开启</span></div>
-          <p id="connection-help" class="muted small">先粘贴配置，把浏览器和开发者 Mac 连起来。</p>
-          <div id="preview-links" class="preview-links" aria-label="预览入口"><p class="muted small">连接后，这里会出现可打开的预览入口。</p></div>
-        </section>
-        <section class="how-it-works">
-          <span class="eyebrow">在业务页面上</span><h2>想改哪里，点点就好</h2>
-          <ol><li><span>01</span><div><strong>点选一个位置</strong><p>打开右下角「点点改」，选中按钮、卡片，也可以聊聊整个页面。</p></div></li><li><span>02</span><div><strong>说说你的想法</strong><p>用自己的话描述期待，AI 会在绑定的项目里开始修改。</p></div></li><li><span>03</span><div><strong>回来看看效果</strong><p>开始、等待审批、完成都会更新。你满意了，才算真正改好。</p></div></li></ol>
-          <p class="privacy-note">不采集截图或表单值。想法会自动进入绑定 Chat，AI 工具审批沿用 Chat 原设置。</p>
-        </section>
-      </aside>
     </div>
-    <footer>点点改 by TermRelay <span>只在本机与受信局域网内协作</span></footer>
   </main>
   <script type="module" src="options.js"></script>
 </body>
