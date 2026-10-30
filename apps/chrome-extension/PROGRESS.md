@@ -1,6 +1,6 @@
 # Chrome 预览与反馈：进展与待办
 
-> 更新日期：2026-10-28。
+> 更新日期：2026-10-29。
 > 当前阶段：已从独立 CLI 实验版接入 Mac App 原生 UI，完成合成环境验证，尚未完成真实业务项目端到端验收。
 > 使用方法见 [README](README.md)，产品交互与未决策项见 [需求草案](../../docs/CHROME_PREVIEW_FEEDBACK_REQUIREMENTS.md)。
 
@@ -39,6 +39,8 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
 | 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
 | 域名代理 | 仅代理 `page-gateway-local.nioint.com`，保留原 URL、端口及 TLS | `extension/background.js`、`companion/proxy.mjs` |
+| ZeroOmega 分流模式 | 保留内置 PAC；显式切换并保存模式，生成可复制的无凭据配置方案；外部分流仅维持连接 / 认证 / 反馈，不覆盖原规则 | `extension/options.*`、`background.js` |
+| 代理错误归属 | 只在本扩展实际接管内置代理时记录全局代理错误，设置页显示并允许重试；不误报其他扩展的代理错误 | `extension/background.js`、`options.js` |
 | 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
 | 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
 | 点点改页面 UI | 右下角文字按钮、简洁黑白浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段、文字进度与“效果满意 / 再调一调” | `extension/content.js` |
@@ -71,6 +73,13 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 - 业务方共享预览凭据和反馈列表；没有独立用户身份、个人列表或完整权限模型。
 
 ## 3. 已完成的验证及其边界
+
+2026-10-29 代理模式更新：`node --test apps/chrome-extension/tests/*.test.mjs` 共 24 项通过；
+`node apps/chrome-extension/scripts/check.mjs` 与 `node apps/chrome-extension/tests/browser.mjs` 通过。
+新增覆盖内置 / ZeroOmega 往返切换与持久化、其他扩展和管理员控制权保护、认证范围与断开不重连、
+无凭据配置方案及复制失败、窄屏布局和全局代理错误归属。浏览器测试加载第二个真实代理控制扩展，
+验证保留其 PAC，并通过真实 HTTPS CONNECT 挑战确认点点改提供当前租约的动态认证。
+测试目标有意在 TLS 前断开；不据此宣称真实业务 HTTPS 或 ZeroOmega 产品端到端验收已完成。
 
 以下记录为 2026-10-28 实际执行结果，不是待执行计划。
 
@@ -131,7 +140,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | D-09 | 后续 | 身份与反馈可见范围 | 当前共享 Token；是否需要独立账号、个人反馈、协作权限需先确认 |
 | D-10 | 后续 | 草稿恢复与反馈体验 | 当前草稿只在页面内存，列表按 origin 过滤；补充跨刷新恢复、路由筛选与可靠元素重定位 |
 | D-11 | 后续 | 数据管理 | 当前本机 JSON、最多 1000 条；明确保留期限、归档、导出、清理及异常文件恢复 |
-| D-12 | 后续 | 企业代理兼容 | 当前非目标域名 DIRECT，仅适用于独立 Profile；若扩大使用，设计既有代理的保留与冲突处理 |
+| D-12 | 部分完成 | 企业代理兼容 | 已提供内置 / ZeroOmega 切换和无凭据快速配置方案，合成扩展验证规则保留与动态认证；真实 ZeroOmega 版本及企业网络验收待完成，不绕过管理员策略 |
 | D-13 | 已确认 | 局域网反馈与 App 集成 | App 已管理代理、配对和反馈，并直接调用本地会话；Server 反馈模块与存储不属于本功能范围 |
 | D-14 | 待决策 | 专用反馈会话 | 当前绑定已有会话；如引入专用会话，须先解决上下文、生命周期、审批及共享工作区冲突 |
 

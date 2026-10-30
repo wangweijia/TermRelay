@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:net';
 import { Store } from '../companion/store.mjs';
 import { createCompanion } from '../companion/server.mjs';
 
@@ -18,7 +19,7 @@ const browser = spawn(executable, [
 ], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
 let sequence = 0, buffer = '', sessionId;
 const pending = new Map(), handlers = new Map();
-const timeout = setTimeout(() => browser.kill('SIGTERM'), 30_000);
+const timeout = setTimeout(() => browser.kill('SIGTERM'), 60_000);
 browser.on('error', error => { for (const { reject } of pending.values()) reject(error); });
 browser.on('exit', () => { for (const { reject } of pending.values()) reject(new Error('Chrome exited.')); });
 function call(method, params = {}, session = sessionId) {
@@ -64,6 +65,15 @@ const app = createCompanion({
 });
 await new Promise(resolve => app.publicServer.listen(0, '127.0.0.1', resolve));
 const companionURL = `http://127.0.0.1:${app.publicServer.address().port}`;
+const probeServer = createServer(socket => socket.destroy());
+await new Promise(resolve => probeServer.listen(0, '127.0.0.1', resolve));
+const probePort = probeServer.address().port;
+let observedProxyAuthorization;
+app.publicServer.on('connect', request => {
+  if (request.url === `page-gateway-local.nioint.com:${probePort}` && request.headers['proxy-authorization']) {
+    observedProxyAuthorization = request.headers['proxy-authorization'];
+  }
+});
 try {
   const { id } = await call('Extensions.loadUnpacked', { path: fileURLToPath(new URL('../extension/', import.meta.url)) }, null);
   const optionTarget = await call('Target.createTarget', { url: 'about:blank' }, null);
@@ -75,9 +85,9 @@ try {
   await optionsLoaded;
   async function waitOptions(condition, description) {
     const result = await evaluate(`new Promise(resolve=>{
-      let attempts=0;const timer=setInterval(()=>{
+      let attempts=0;const timer=setInterval(async()=>{
         if(${condition}){clearInterval(timer);resolve(true);}
-        else if(++attempts>100){clearInterval(timer);resolve(document.querySelector('#status').textContent);}
+        else if(++attempts>200){clearInterval(timer);resolve(document.querySelector('#status').textContent);}
       },25);
     })`, optionSession);
     assert.equal(result, true, description);
@@ -136,6 +146,78 @@ try {
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='未开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'advanced pause should keep the App connection but disable the proxy');
   assert.equal(await evaluate(`document.querySelector('#connection-badge').textContent`, optionSession), '已连接');
   await evaluate(`document.querySelector('#advanced').open=false`, optionSession);
+  await evaluate(`document.querySelector('#enable').click()`, optionSession);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'built-in preview should restart before switching ownership');
+  await evaluate(`document.querySelector('[name="proxy-mode"][value="zeroomega"]').click()`, optionSession);
+  await waitOptions(`document.querySelector('#zeroomega-setup').hidden===false && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'ZeroOmega choice should immediately show the generated setup');
+  assert.equal((await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession)).levelOfControl, 'controllable_by_this_extension', 'switching away must release our active PAC');
+  assert.equal(await evaluate(`document.querySelector('#consent').checked`, optionSession), false, 'switching modes needs fresh consent');
+  assert.equal((await evaluate(`chrome.storage.local.get('proxyEnabled')`, optionSession)).proxyEnabled, false);
+  assert.equal(await evaluate(`document.querySelector('#connection-badge').textContent`, optionSession), '已连接', 'mode switch preserves the App connection');
+  const guide = await evaluate(`document.querySelector('#zeroomega-guide').value`, optionSession);
+  assert.ok(guide.includes('127.0.0.1'));
+  assert.ok(guide.includes(String(app.publicServer.address().port)));
+  assert.ok(guide.includes('page-gateway-local.nioint.com'));
+  assert.ok(guide.includes('保留其余规则与默认情景'));
+  assert.ok(!guide.includes('a'.repeat(64)) && !guide.includes('b'.repeat(64)), 'quick setup never exports pairing credentials');
+  assert.ok(!guide.includes((await evaluate(`chrome.storage.local.get('connection')`, optionSession)).connection.proxyToken), 'quick setup never exports the dynamic proxy credential');
+  await evaluate(`Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:async text=>{window.copiedGuide=text;}});
+    document.querySelector('#copy-zeroomega').click();`, optionSession);
+  await waitOptions(`document.querySelector('#status').textContent.includes('已复制') && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'quick setup copy should report success');
+  assert.equal(await evaluate('window.copiedGuide', optionSession), guide);
+  await evaluate(`Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:async()=>{throw new Error('Clipboard unavailable');}});
+    document.querySelector('#copy-zeroomega').click();`, optionSession);
+  await waitOptions(`document.querySelector('#status').dataset.tone==='error' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'clipboard failure must be visible instead of reporting success');
+  const externalDirectory = join(directory, 'external-proxy');
+  await mkdir(externalDirectory);
+  const externalPAC = `function FindProxyForURL(url,host){if(host==="page-gateway-local.nioint.com")return "PROXY 127.0.0.1:${app.publicServer.address().port}";return "DIRECT";}`;
+  await writeFile(join(externalDirectory, 'manifest.json'), JSON.stringify({
+    manifest_version: 3, name: 'External proxy controller test fixture', version: '1.0',
+    permissions: ['proxy'], background: { service_worker: 'background.js' },
+  }));
+  await writeFile(join(externalDirectory, 'background.js'), `chrome.proxy.settings.set({value:{mode:"pac_script",pacScript:{data:${JSON.stringify(externalPAC)}}},scope:"regular"});`);
+  const { id: externalId } = await call('Extensions.loadUnpacked', { path: externalDirectory }, null);
+  await waitOptions(`(await chrome.proxy.settings.get({incognito:false})).levelOfControl==='controlled_by_other_extensions'`, 'the second extension should own Chrome proxy settings');
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='ZeroOmega · 未确认'`, 'external mode should not mislabel another controller as a conflict');
+  assert.equal((await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession)).levelOfControl, 'controlled_by_other_extensions');
+  const externalState = await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession);
+  await evaluate(`document.querySelector('#consent').checked=true;document.querySelector('#consent').dispatchEvent(new Event('change'));
+    document.querySelector('#enable').click();`, optionSession);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='ZeroOmega · 待验证' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'external mode can connect with another proxy controller, without claiming verified routing');
+  assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'external preview does not rewrite existing proxy rules');
+  assert.equal(await evaluate(`document.querySelector('#preview-links').hidden`, optionSession), false);
+  assert.equal(await evaluate(`document.querySelector('#disable').hidden`, optionSession), true, 'do not offer to pause a proxy we do not control');
+  const probeResult = await evaluate(`fetch('https://page-gateway-local.nioint.com:${probePort}/',{signal:AbortSignal.timeout(5000)})
+    .then(()=> 'unexpected success',error=>error.name)`, optionSession);
+  assert.notEqual(probeResult, 'unexpected success', 'the synthetic target deliberately closes before TLS');
+  const currentLease = (await evaluate(`chrome.storage.local.get('connection')`, optionSession)).connection;
+  assert.equal(observedProxyAuthorization, `Basic ${Buffer.from(`preview:${currentLease.proxyToken}`).toString('base64')}`,
+    'Chrome must dispatch real external-PAC proxy authentication to our extension and use the current lease credential');
+  await screenshot('options-zeroomega', optionSession);
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }, optionSession);
+  assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`, optionSession), true, 'generated ZeroOmega setup fits narrow viewports');
+  await screenshot('options-zeroomega-narrow', optionSession);
+  await call('Emulation.clearDeviceMetricsOverride', {}, optionSession);
+  const optionsReloaded = new Promise(resolve => handlers.set('Page.loadEventFired', resolve));
+  await call('Page.reload', {}, optionSession);
+  await optionsReloaded;
+  await waitOptions(`document.querySelector('[name="proxy-mode"][value="zeroomega"]').checked && document.querySelector('#proxy-badge').textContent==='ZeroOmega · 待验证' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'external mode and deliberate confirmation survive reloading settings');
+  await evaluate(`document.querySelector('[name="proxy-mode"][value="builtin"]').click()`, optionSession);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='代理受限制' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'returning to built-in mode must respect another proxy controller');
+  assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState);
+  await call('Extensions.uninstall', { id: externalId }, null);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='未开启'`, 'built-in mode becomes available when the external controller releases its settings');
+  assert.equal(await evaluate(`document.querySelector('#consent').checked`, optionSession), false);
+  await evaluate(`document.querySelector('#consent').checked=true;document.querySelector('#consent').dispatchEvent(new Event('change'));
+    document.querySelector('#enable').click();`, optionSession);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'built-in mode still works after a round trip through ZeroOmega');
+  await evaluate(`document.querySelector('[name="proxy-mode"][value="zeroomega"]').click()`, optionSession);
+  await waitOptions(`document.querySelector('#zeroomega-setup').hidden===false && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'return to external mode for the feedback lifecycle test');
+  await call('Extensions.loadUnpacked', { path: externalDirectory }, null);
+  await waitOptions(`(await chrome.proxy.settings.get({incognito:false})).levelOfControl==='controlled_by_other_extensions'`, 'external proxy ownership should return before testing feedback');
+  await evaluate(`document.querySelector('#consent').checked=true;document.querySelector('#consent').dispatchEvent(new Event('change'));
+    document.querySelector('#enable').click();`, optionSession);
+  await waitOptions(`document.querySelector('#proxy-badge').textContent==='ZeroOmega · 待验证' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'external preview can resume after mode switching');
   const { targetId } = await call('Target.createTarget', { url: 'about:blank' }, null);
   ({ sessionId } = await call('Target.attachToTarget', { targetId, flatten: true }, null));
   await call('Page.enable');
@@ -252,13 +334,15 @@ try {
   });`), true, 'explicit disconnect must remain disconnected even while preview tabs are open');
   assert.equal(await within("return this.querySelector('#submit').disabled;"), true);
   assert.equal((await evaluate(`chrome.storage.local.get('connection')`, optionSession)).connection, undefined);
-  console.log('Chrome UI: paste-first pairing, validation/recovery, explicit proxy consent, responsive settings/panel, 点点改 branding, live running/approval/completion states, acceptance, disconnect, cross-port CSS/JS and private element selection passed.');
+  assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'disconnect releases our lease, not the external controller or its rules');
+  console.log('Chrome UI: paste-first pairing, explicit consent, built-in/ZeroOmega switching and persistence, copyable credential-free setup, external proxy ownership, responsive layout, feedback lifecycle, disconnect, cross-port assets and private selection passed.');
 } finally {
   clearTimeout(timeout);
   await call('Browser.close', {}, null).catch(() => {});
   if (browser.exitCode === null) await Promise.race([once(browser, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
   if (browser.exitCode === null) { browser.kill('SIGTERM'); await once(browser, 'exit'); }
   app.closeProxy();
+  await new Promise(resolve => probeServer.close(resolve));
   await new Promise(resolve => { app.publicServer.close(resolve); app.publicServer.closeAllConnections(); });
   await rm(directory, { recursive: true });
 }

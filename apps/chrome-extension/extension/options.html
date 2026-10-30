@@ -37,8 +37,24 @@
 
         <section class="section" aria-labelledby="preview-title">
           <div class="section-heading"><h2 id="preview-title">页面预览</h2></div>
-          <p class="notice">仅限受信局域网，请使用独立 Chrome 用户配置，不与公司代理混用。开启后，预览域名可连接开发者 Mac 的所有本地 TCP 端口，其他域名走直连。</p>
-          <label class="consent"><input id="consent" type="checkbox"><span>我确认当前用户配置可以使用上述代理规则；切换环境后会关闭旧页面，再重新打开。</span></label>
+          <fieldset class="proxy-modes">
+            <legend>由谁管理浏览器代理？</legend>
+            <label class="mode-choice"><input type="radio" name="proxy-mode" value="builtin" checked><span><strong>插件内置代理</strong><small>一键开启；其他域名直连，适合独立 Chrome 用户配置。</small></span></label>
+            <label class="mode-choice"><input type="radio" name="proxy-mode" value="zeroomega"><span><strong>ZeroOmega 统一分流</strong><small>保留现有代理规则；点点改只负责连接、认证和页面反馈。</small></span></label>
+          </fieldset>
+          <p id="mode-help" class="notice"></p>
+          <div id="zeroomega-setup" class="zeroomega-setup" hidden>
+            <h3>ZeroOmega 快速配置</h3>
+            <p class="muted small">只新增一个代理情景和两条优先规则，不导入整份备份，也不覆盖现有规则。更换开发者 Mac 地址后需更新。</p>
+            <p id="zeroomega-unconfigured" class="muted small">先保存 App 配对配置，即可生成当前环境的配置方案。</p>
+            <div id="zeroomega-configured" hidden>
+              <label class="sr-only" for="zeroomega-guide">ZeroOmega 配置方案</label>
+              <textarea id="zeroomega-guide" class="config-input" rows="14" readonly spellcheck="false"></textarea>
+              <div class="actions"><button id="copy-zeroomega">复制配置方案</button></div>
+            </div>
+          </div>
+          <p class="notice">仅限受信局域网。预览域名可连接开发者 Mac 的所有本地 TCP 端口；仅向可信验收者分享，不绕过公司网络管理策略。</p>
+          <label class="consent"><input id="consent" type="checkbox"><span id="consent-label">我确认当前用户配置可以使用上述代理规则；切换环境后会关闭旧页面，再重新打开。</span></label>
           <div class="actions"><button id="enable" class="primary" disabled>开启预览</button><button id="disconnect" disabled>结束本次连接</button></div>
         </section>
 
@@ -53,6 +69,7 @@
               <button class="secondary" type="submit">保存手动配置并连接</button>
             </form>
             <div class="diagnostic-actions"><button id="test" class="secondary">重新连接 / 检查状态</button><button id="disable" class="quiet">只暂停域名代理</button></div>
+            <p id="pause-help" class="muted small" hidden>ZeroOmega 模式下，结束连接会撤销本次代理认证并关闭已有预览隧道，但不会修改 ZeroOmega。若需移除分流，请在 ZeroOmega 中停用新增规则。</p>
             <p class="muted small">整个 App 同时只允许一个插件实例连接，同一 Chrome 用户配置的多个页面可共用。切换验收者时请结束连接；浏览器异常退出后约 90 秒释放。</p>
           </div>
         </details>

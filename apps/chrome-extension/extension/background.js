@@ -80,23 +80,42 @@ async function disconnectApp() {
     await chrome.alarms.clear(HEARTBEAT);
   }
 }
+async function proxyModeOf() {
+  const { proxyMode = 'builtin' } = await chrome.storage.local.get('proxyMode');
+  if (!['builtin', 'zeroomega'].includes(proxyMode)) throw new Error('代理模式无效，请重新选择代理方式。');
+  return proxyMode;
+}
+async function setProxyMode(mode) {
+  if (!['builtin', 'zeroomega'].includes(mode)) throw new Error('请选择插件内置代理或 ZeroOmega 分流。');
+  if (mode === await proxyModeOf()) return;
+  await setProxy(false);
+  await chrome.storage.local.set({ proxyMode: mode });
+}
 async function setProxy(enabled) {
-  const effective = await chrome.proxy.settings.get({ incognito: false });
-  if (enabled && !['controllable_by_this_extension', 'controlled_by_this_extension'].includes(effective.levelOfControl)) {
-    throw new Error('Chrome 代理被管理员或其他插件控制，未修改设置。');
-  }
   if (!enabled) {
     await chrome.proxy.settings.clear({ scope: 'regular' });
-    await chrome.storage.local.set({ proxyEnabled: false });
+    await chrome.storage.local.set({ proxyEnabled: false, externalPreviewEnabled: false, proxyError: '' });
     return;
   }
+  const mode = await proxyModeOf();
+  if (mode === 'builtin') {
+    const effective = await chrome.proxy.settings.get({ incognito: false });
+    if (!['controllable_by_this_extension', 'controlled_by_this_extension'].includes(effective.levelOfControl)) {
+      throw new Error('Chrome 代理被管理员或其他插件控制，未修改设置。可改用 ZeroOmega 分流，或先在其他插件中释放代理控制。');
+    }
+  }
   await connectApp(true);
+  if (mode === 'zeroomega') {
+    await chrome.proxy.settings.clear({ scope: 'regular' });
+    await chrome.storage.local.set({ proxyEnabled: false, externalPreviewEnabled: true, proxyError: '' });
+    return;
+  }
   const config = await configOf();
   const url = new URL(config.companionURL);
   const proxy = `${url.hostname}:${url.port || 80}`;
   const data = `function FindProxyForURL(url, host) { if (host === ${JSON.stringify(HOST)}) return ${JSON.stringify(`PROXY ${proxy}`)}; return "DIRECT"; }`;
   await chrome.proxy.settings.set({ value: { mode: 'pac_script', pacScript: { data, mandatory: true } }, scope: 'regular' });
-  await chrome.storage.local.set({ proxyEnabled: true });
+  await chrome.storage.local.set({ proxyEnabled: true, externalPreviewEnabled: false, proxyError: '' });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
@@ -105,10 +124,15 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const options = sender.url === chrome.runtime.getURL('options.html');
     if (options) {
       if (message.type === 'settings.get') {
-        const values = await chrome.storage.local.get(['config', 'proxyEnabled', 'connection', 'connectionError']);
+        const values = await chrome.storage.local.get(['config', 'proxyEnabled', 'externalPreviewEnabled', 'proxyError', 'connection', 'connectionError']);
         const effective = await chrome.proxy.settings.get({ incognito: false });
         return { config: values.config, proxyEnabled: values.proxyEnabled, connected: !!values.connection && !values.connectionError,
-          connectionError: values.connectionError, levelOfControl: effective.levelOfControl };
+          externalPreviewEnabled: values.externalPreviewEnabled, proxyMode: await proxyModeOf(),
+          proxyError: values.proxyError, connectionError: values.connectionError, levelOfControl: effective.levelOfControl };
+      }
+      if (message.type === 'proxy.mode') {
+        await setProxyMode(message.mode);
+        return { mode: message.mode };
       }
       if (message.type === 'settings.save') {
         const config = validateConfig(message.config);
@@ -154,14 +178,26 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.webRequest.onAuthRequired.addListener((details, callback) => {
   (async () => {
     if (!details.isProxy || !allowedPage(details.url)) return {};
-    const { config, connection } = await connectApp();
+    const config = await configOf();
     const proxy = new URL(config.companionURL);
     if (details.challenger.host !== proxy.hostname || details.challenger.port !== Number(proxy.port || 80)) return {};
+    const { connection } = await connectApp();
     return { authCredentials: { username: 'preview', password: connection.proxyToken } };
   })().then(callback, () => callback({ cancel: true }));
 }, { urls: [`https://${HOST}/*`] }, ['asyncBlocking']);
 
-chrome.proxy.onProxyError.addListener(error => console.error('TermRelay preview proxy:', error.error, error.details));
+chrome.proxy.onProxyError.addListener(error => {
+  (async () => {
+    await storageReady;
+    if (await proxyModeOf() !== 'builtin') return;
+    const { proxyEnabled } = await chrome.storage.local.get('proxyEnabled');
+    if (!proxyEnabled) return;
+    const effective = await chrome.proxy.settings.get({ incognito: false });
+    if (effective.levelOfControl !== 'controlled_by_this_extension') return;
+    console.error('TermRelay built-in preview proxy:', error.error);
+    await chrome.storage.local.set({ proxyError: error.error });
+  })().catch(error => console.error('TermRelay proxy error reporting failed:', error.message));
+});
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== HEARTBEAT) return;
   request('/v1/meta').catch(async error => {

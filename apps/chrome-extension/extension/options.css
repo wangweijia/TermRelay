@@ -24,7 +24,7 @@ p{margin:10px 0}
 .badge[data-state=warning]{color:#805b20}
 .muted{color:#666}
 .small{font-size:12px}
-textarea,input:not([type=checkbox]){width:100%;border:1px solid #ccc;border-radius:4px;padding:9px 10px;color:#222;background:#fff}
+textarea,input:not([type=checkbox]):not([type=radio]){width:100%;border:1px solid #ccc;border-radius:4px;padding:9px 10px;color:#222;background:#fff}
 textarea{resize:vertical;min-height:84px}
 .config-input{display:block;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
 textarea::placeholder{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#888}
@@ -32,6 +32,15 @@ textarea::placeholder{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sa
 .saved-config{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:#666;margin-top:12px}
 .saved-config strong{font-weight:400;overflow-wrap:anywhere}
 .notice{font-size:12px;color:#555}
+.proxy-modes{border:0;padding:0;margin:16px 0}
+.proxy-modes legend{font-size:12px;color:#555;margin-bottom:8px}
+.mode-choice{display:flex;align-items:flex-start;gap:8px;margin:10px 0;cursor:pointer}
+.mode-choice input{flex-shrink:0;margin:5px 0 0;accent-color:#333}
+.mode-choice strong{display:block;font-size:13px;font-weight:500}
+.mode-choice small{display:block;font-size:12px;color:#666}
+.zeroomega-setup{border:1px solid #ddd;border-radius:4px;padding:14px;margin:14px 0}
+.zeroomega-setup h3{margin:0;font-size:13px;font-weight:600}
+#zeroomega-guide{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
 .consent{display:flex;align-items:flex-start;gap:8px;font-size:12px;cursor:pointer;margin-top:14px}
 .consent input{accent-color:#333;flex-shrink:0;margin:4px 0 0}
 .message{position:sticky;top:8px;z-index:2;margin-bottom:20px;padding:10px 12px;border:1px solid #ddd;border-radius:4px;font-size:13px;background:#fafafa;overflow-wrap:anywhere}
