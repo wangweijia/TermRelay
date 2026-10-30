@@ -26,7 +26,8 @@ private struct PreviewSharingView: View {
     @ObservedObject var sharing: PreviewSharingController
     @ObservedObject var session: LocalStructuredAgentSession
     let displayName: String
-    @State private var ports = "8080"
+    @State private var previewURL = ""
+    @State private var accessMode = "direct"
     @State private var publicPort = "18420"
     @State private var ownerPort = "18421"
     @State private var addresses = PreviewSharingConfiguration.localAddresses()
@@ -77,7 +78,8 @@ private struct PreviewSharingView: View {
         .frame(width: 720, height: 680)
         .onAppear {
             if isBoundHere, let configuration = sharing.configuration {
-                ports = configuration.ports.map(String.init).joined(separator: ",")
+                previewURL = configuration.previewURLs.first ?? ""
+                accessMode = configuration.accessMode
                 publicPort = String(configuration.publicPort)
                 ownerPort = String(configuration.ownerPort)
                 shareHost = configuration.shareHost
@@ -92,7 +94,9 @@ private struct PreviewSharingView: View {
                 Task { await sharing.stop(reason: "共享已停止；项目会话和已启动的 AI 轮次不会因此终止。") }
             }
         } message: {
-            Text("业务方将无法继续通过代理访问或提交反馈。已开始的 AI 修改不会被取消，请到项目会话核实结果。")
+            Text(accessMode == "direct"
+                 ? "业务方将无法继续提交反馈；项目的直接访问不受影响。已开始的 AI 修改不会被取消。"
+                 : "业务方将无法继续通过代理访问或提交反馈。已开始的 AI 修改不会被取消，请到项目会话核实结果。")
         }
     }
 
@@ -114,12 +118,17 @@ private struct PreviewSharingView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
                 }
-                GroupBox("2. 开放本机预览") {
+                GroupBox("2. 项目访问与反馈连接") {
                     VStack(alignment: .leading, spacing: 10) {
-                        TextField("预览入口端口（仅生成链接），例如 8080,8081", text: $ports)
+                        TextField("项目访问地址，例如 http://192.168.1.20:5173/ 或 https://project.test:8080/", text: $previewURL)
+                            .disabled(sharing.isRunning || sharing.isStarting || sharing.isStopping)
+                        Picker("访问方式", selection: $accessMode) {
+                            Text("直接访问（默认）").tag("direct")
+                            Text("通过开发者电脑代理").tag("proxy")
+                        }.pickerStyle(.segmented)
                             .disabled(sharing.isRunning || sharing.isStarting || sharing.isStopping)
                         HStack {
-                            Text("业务方连接的本机地址")
+                            Text("反馈服务局域网地址")
                             Picker("局域网地址", selection: $shareHost) {
                                 Text("请选择").tag("")
                                 ForEach(addresses, id: \.self) { Text($0).tag($0) }
@@ -129,7 +138,9 @@ private struct PreviewSharingView: View {
                                 if !addresses.contains(shareHost) { shareHost = addresses.first ?? "" }
                             }
                         }.disabled(sharing.isRunning || sharing.isStarting || sharing.isStopping)
-                        Text("此域名的所有端口均转发到本机原端口，使用项目已有 HTTPS。入口端口仅用于生成链接，其他资源端口无需填写。")
+                            Text(accessMode == "direct"
+                                ? "验收者直接访问项目地址，插件只提交反馈，不修改 Chrome 代理或 ZeroOmega。"
+                                : "仅代理填写的项目主机，各端口转发到开发者本机原端口；建议验收者使用专用 Chrome 用户配置。")
                             .font(.caption).foregroundStyle(.secondary)
                         DisclosureGroup("高级设置") {
                             TextField("共享服务端口", text: $publicPort)
@@ -157,7 +168,7 @@ private struct PreviewSharingView: View {
                                     Task {
                                         do {
                                             let configuration = try PreviewSharingConfiguration(
-                                                ports: ports,
+                                                previewURL: previewURL, accessMode: accessMode,
                                                 publicPort: publicPort, ownerPort: ownerPort, shareHost: shareHost)
                                             try await appModel.startPreviewSharing(sessionID: session.id, configuration: configuration)
                                         } catch { self.error = error.localizedDescription }
@@ -191,10 +202,12 @@ private struct PreviewSharingView: View {
                         }
                         Text("每个 URL 后接项目原路径。共享配置不是网址；插件设置中导入配置后再访问页面。")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text("试用版仅用于受信局域网。插件的其他域名走 DIRECT，请使用独立 Chrome Profile。停止后重新开启会恢复原配对；尚无在线撤销。")
+                        Text("试用版仅用于受信局域网。停止后重新开启会恢复原配对；尚无在线撤销。")
                             .font(.caption).foregroundStyle(.orange)
-                        Text("代理凭据允许通过此域名连接本机全部 TCP 端口，请只分享给受信任的验收者。")
-                            .font(.caption).foregroundStyle(.orange)
+                        if accessMode == "proxy" {
+                            Text("代理模式允许通过项目主机连接本机全部 TCP 端口；其他域名直连，请使用专用 Chrome Profile。")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
                         Text("网页访问与反馈均在本机和局域网内完成，不依赖 Server 连接或公网配对。")
                             .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(6)

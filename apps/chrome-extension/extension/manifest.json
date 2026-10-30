@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "description": "在受信局域网预览页面，点选位置、说出想法，让绑定的 TermRelay 会话修改并同步进度。",
   "minimum_chrome_version": "120",
-  "permissions": ["storage", "proxy", "webRequest", "webRequestAuthProvider", "alarms"],
+  "permissions": ["storage", "proxy", "webRequest", "webRequestAuthProvider", "alarms", "scripting"],
   "host_permissions": ["https://page-gateway-local.nioint.com/*", "http://*/*"],
+  "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "options_page": "options.html",
   "icons": {
@@ -15,7 +16,8 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "打开点点改；非预览页面打开配对设置",
+    "default_title": "点点改 · 快捷连接",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

@@ -20,11 +20,33 @@ export function privateHost(host) {
     || /^172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
-export function cleanPageURL(raw) {
+export function previewConfiguration(value) {
+  if (value === undefined) return { url: `https://${HOST}:8080/`, accessMode: 'proxy' };
+  let url;
+  try { url = new URL(value.url); } catch { throw new RequestError(400, 'Invalid project URL.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
+    || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) < 1
+    || !['direct', 'proxy'].includes(value.accessMode)) {
+    throw new RequestError(400, 'Use an HTTP(S) project URL without credentials, query or fragment and select direct or proxy access.');
+  }
+  if (url.hostname === 'localhost' || url.hostname.startsWith('127.') || url.hostname === '[::1]'
+    || (value.accessMode === 'proxy' && url.hostname.includes(':'))) {
+    throw new RequestError(400, 'Use the developer LAN address or a project hostname, not reviewer localhost.');
+  }
+  return { url: url.href, accessMode: value.accessMode };
+}
+
+export function cleanPageURL(raw, preview) {
   let url;
   try { url = new URL(raw); } catch { throw new RequestError(400, 'Invalid page URL.'); }
-  if (url.protocol !== 'https:' || url.hostname !== HOST || url.username || url.password || Number(url.port || 443) < 1) {
-    throw new RequestError(400, 'Only the authorized HTTPS preview hostname is accepted.');
+  const project = preview ? previewConfiguration(preview) : undefined;
+  const entry = project ? new URL(project.url) : undefined;
+  const allowed = project ? project.accessMode === 'direct' ? url.origin === entry.origin
+    : url.hostname === entry.hostname && url.protocol === entry.protocol
+    : url.protocol === 'https:' && url.hostname === HOST;
+  if (!['http:', 'https:'].includes(url.protocol) || !allowed || url.username || url.password
+    || Number(url.port || (url.protocol === 'https:' ? 443 : 80)) < 1) {
+    throw new RequestError(400, 'Only the authorized project page is accepted.');
   }
   // Query values and fragments can contain credentials. First version retains only the pathname.
   return `${url.origin}${url.pathname}`;
@@ -37,9 +59,9 @@ function text(value, limit, required = false) {
   return value.trim();
 }
 
-export function validateFeedback(body) {
+export function validateFeedback(body, preview) {
   if (!body || !UUID.test(body.id ?? '')) throw new RequestError(400, 'A feedback UUID is required.');
-  const page = cleanPageURL(body.page);
+  const page = cleanPageURL(body.page, preview);
   let element = null;
   if (body.element !== null && body.element !== undefined) {
     const item = body.element;

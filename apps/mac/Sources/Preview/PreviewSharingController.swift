@@ -37,11 +37,15 @@ struct PreviewFeedback: Decodable, Identifiable, Sendable {
 
 struct PreviewSharingConfiguration: Sendable {
     let ports: [Int]
+    let previewURL: String?
+    let accessMode: String
     let publicPort: Int
     let ownerPort: Int
     let shareHost: String
 
     init(ports: String, publicPort: String, ownerPort: String, shareHost: String) throws {
+        previewURL = nil
+        accessMode = "proxy"
         let parts = ports.split(separator: ",", omittingEmptySubsequences: false)
         guard !parts.isEmpty else { throw PreviewSharingError("请填写预览入口端口。") }
         self.ports = try Array(Set(parts.map { try Self.port(String($0).trimmingCharacters(in: .whitespaces)) })).sorted()
@@ -54,6 +58,39 @@ struct PreviewSharingConfiguration: Sendable {
             throw PreviewSharingError("请选择业务方可访问的本机局域网 IPv4 地址。")
         }
         self.shareHost = shareHost
+    }
+
+    init(previewURL: String, accessMode: String, publicPort: String, ownerPort: String, shareHost: String) throws {
+        guard let components = URLComponents(string: previewURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
+              host != "localhost", !host.hasPrefix("127."), !["::1", "[::1]"].contains(host),
+              ["direct", "proxy"].contains(accessMode),
+              accessMode != "proxy" || !host.contains(":"),
+              let url = components.url else {
+            throw PreviewSharingError("请填写完整 HTTP / HTTPS 项目地址，不含账号、查询参数或片段；不要使用验收者的 localhost。")
+        }
+        let projectPort = components.port ?? (scheme == "https" ? 443 : 80)
+        guard (1...65535).contains(projectPort) else { throw PreviewSharingError("项目端口必须为 1 至 65535。") }
+        self.publicPort = try Self.port(publicPort)
+        self.ownerPort = try Self.port(ownerPort)
+        guard self.publicPort != self.ownerPort,
+              (accessMode == "direct" && host != shareHost) || ![self.publicPort, self.ownerPort].contains(projectPort) else {
+            throw PreviewSharingError("共享端口、管理端口不能相同，也不能占用本机项目端口。")
+        }
+        guard Self.isLocalHost(shareHost), shareHost != "localhost", !shareHost.hasPrefix("127.") else {
+            throw PreviewSharingError("请选择业务方可访问的本机局域网 IPv4 地址。")
+        }
+        self.previewURL = url.absoluteString + (components.path.isEmpty ? "/" : "")
+        self.accessMode = accessMode
+        self.ports = [projectPort]
+        self.shareHost = shareHost
+    }
+
+    var previewURLs: [String] {
+        if let previewURL { return [previewURL] }
+        return ports.map { "https://page-gateway-local.nioint.com:\($0)/" }
     }
 
     static func port(_ text: String) throws -> Int {
@@ -260,6 +297,9 @@ final class PreviewSharingController: ObservableObject {
                 "--data-dir", directory.path,
                 "--parent-pid", String(getpid()),
             ]
+            if let previewURL = configuration.previewURL {
+                child.arguments?.append(contentsOf: ["--preview-url", previewURL, "--access-mode", configuration.accessMode])
+            }
             child.environment = TerminalEnvironment.make(executableURL: node)
             let pipe = Pipe()
             child.standardOutput = pipe
@@ -296,7 +336,7 @@ final class PreviewSharingController: ObservableObject {
                     try await refresh()
                     guard generation == operation, child.isRunning else { return }
                     isRunning = true
-                    previewURLs = configuration.ports.map { "https://page-gateway-local.nioint.com:\($0)/" }
+                    previewURLs = configuration.previewURLs
                     pollTask = Task { [weak self] in
                         while !Task.isCancelled {
                             do { try await Task.sleep(for: .seconds(1)) } catch { break }
@@ -516,10 +556,15 @@ final class PreviewSharingController: ObservableObject {
 
     func pairingJSON() throws -> String {
         guard isRunning, let configuration, let credentials else { throw PreviewSharingError("请先开启共享。") }
-        let data = try JSONSerialization.data(withJSONObject: [
+        var pairing = [
             "companionURL": "http://\(configuration.shareHost):\(configuration.publicPort)",
             "reviewerToken": credentials.reviewerToken, "proxyToken": credentials.proxyToken,
-        ], options: [.prettyPrinted, .sortedKeys])
+        ]
+        if let previewURL = configuration.previewURL {
+            pairing["previewURL"] = previewURL
+            pairing["accessMode"] = configuration.accessMode
+        }
+        let data = try JSONSerialization.data(withJSONObject: pairing, options: [.prettyPrinted, .sortedKeys])
         return String(decoding: data, as: UTF8.self)
     }
 

@@ -1,6 +1,6 @@
 (() => {
-  const HOST = 'page-gateway-local.nioint.com';
-  if (location.protocol !== 'https:' || location.hostname !== HOST) return;
+  if (!['http:', 'https:'].includes(location.protocol) || globalThis.__termrelayFeedbackLoaded) return;
+  globalThis.__termrelayFeedbackLoaded = true;
   const pageURL = () => `${location.origin}${location.pathname}`;
   const labels = {
     pending: '已排队，等待 Chat 空闲', sending: 'App 正在启动修改', running: 'AI 正在修改',
@@ -105,14 +105,15 @@
     if (sending || submitted) return;
     const description = $('#description').value.trim();
     if (!description) { status('先说说你的想法，比如希望哪里变得更好。', 'error'); $('#description').focus(); return; }
-    if (!pending) pending = {
-      id: crypto.randomUUID(), page: pinnedPage, element,
+    const draft = {
+      page: pinnedPage, element,
       description, steps: $('#steps').value.trim(),
     };
     sending = true; freezeForm(true); $('#submit').disabled = true;
     $('#submit').textContent = '正在传递你的想法…';
     status('正在提交；若响应丢失，可用原编号重试确认。');
     try {
+      if (!pending) pending = { ...draft, id: await send({ type: 'feedback.id' }) };
       const record = await send({ type: 'feedback.create', feedback: pending });
       pending = null; submitted = true;
       submittedID = record.id;

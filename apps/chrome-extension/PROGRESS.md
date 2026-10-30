@@ -1,6 +1,6 @@
 # Chrome 预览与反馈：进展与待办
 
-> 更新日期：2026-10-29。
+> 更新日期：2026-10-30。
 > 当前阶段：已从独立 CLI 实验版接入 Mac App 原生 UI，完成合成环境验证，尚未完成真实业务项目端到端验收。
 > 使用方法见 [README](README.md)，产品交互与未决策项见 [需求草案](../../docs/CHROME_PREVIEW_FEEDBACK_REQUIREMENTS.md)。
 
@@ -12,7 +12,8 @@ Mac 原生入口、托管进程与反馈管理已接入 `apps/mac`。
 
 ```text
 预览访问：
-Chrome 插件 -> 本机受限 CONNECT 代理 -> 127.0.0.1:项目原端口
+默认直连：业务方 Chrome -> 项目原 HTTP(S) 地址（已有域名 / 局域网 IP）
+可选代理：Chrome 插件 -> 开发者受限 HTTP / CONNECT 代理 -> 127.0.0.1:项目原端口
 
 App 控制：
 项目会话 -> 共享预览与反馈 -> 开启共享 / 复制配对 / 查看反馈 / 停止共享
@@ -36,9 +37,13 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | --- | --- | --- |
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
+| 快捷连接与配置层级 | 工具栏轻量 popup，快速开启 / 关闭、项目入口与独立配置按钮；设置页突出当前项目、实际模式与连接状态，已保存配对默认收起 | `extension/popup.*`、`view-state.js`、`options.*`、`background.js` |
 | 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
+| 验收专用 Profile 默认流程 | 明确在验收者电脑创建独立 Profile，不安装 ZeroOmega；确认后“打开预览”自动连接、启用代理并打开首个入口，可重复打开；ZeroOmega 移入高级设置且保留旧模式 | `extension/options.*`、`tests/browser.mjs` |
 | 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
-| 域名代理 | 仅代理 `page-gateway-local.nioint.com`，保留原 URL、端口及 TLS | `extension/background.js`、`companion/proxy.mjs` |
+| 项目地址与访问方式 | App 填写完整 HTTP(S) URL，默认直连，也可选择代理；配对带项目地址与方式，旧配置保留原域名兼容 | `PreviewSharingView.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
+| 配置主机代理 | 仅代理本次配置的项目主机，HTTP / WS 转发、HTTPS / WSS CONNECT 均连接开发者本机原端口 | `extension/background.js`、`companion/proxy.mjs` |
+| 动态页面授权 | HTTPS 主机按需申请权限，按站点注册反馈脚本；直连精确匹配 origin，代理匹配同协议同主机的合法端口；分享变更提示重新导入 | `extension/background.js`、`options.js`、`manifest.json`、`companion/model.mjs` |
 | ZeroOmega 分流模式 | 保留内置 PAC；显式切换并保存模式，生成可复制的无凭据配置方案；外部分流仅维持连接 / 认证 / 反馈，不覆盖原规则 | `extension/options.*`、`background.js` |
 | 代理错误归属 | 只在本扩展实际接管内置代理时记录全局代理错误，设置页显示并允许重试；不误报其他扩展的代理错误 | `extension/background.js`、`options.js` |
 | 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
@@ -73,6 +78,49 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 - 业务方共享预览凭据和反馈列表；没有独立用户身份、个人列表或完整权限模型。
 
 ## 3. 已完成的验证及其边界
+
+2026-10-30 快捷弹窗与配置状态更新：
+
+- 工具栏默认打开 344px 快捷弹窗，不再直接打开设置页；开关释放 / 重新建立共享连接，“配置”显式打开完整设置。
+- 设置页突出当前项目、当前访问方式、项目与反馈地址以及实时状态；保存配对后收起输入，高级设置默认折叠。
+- 状态区分未配置、连接中、已连接未开启、已开启、已关闭、断线、代理受限与连接异常；ZeroOmega 分流仍标记待验证。
+- 同配置保留明确代理确认，配置或代理方式变更后失效；直连不需要代理确认、不修改外部代理。
+- 弹窗检查已有租约，不因打开弹窗自动重连已关闭连接；过期租约不显示已连接，晚到的检查响应不恢复已关闭租约。
+- `node --test apps/chrome-extension/tests/*.test.mjs`：36 项通过；`node apps/chrome-extension/scripts/check.mjs` 与 `git diff --check` 通过。
+- 真实 Chrome 加载扩展的 `tests/browser.mjs` 通过，覆盖默认 popup 路径、配置按钮、开关关闭 / 再开启、设置页状态同步、直连 IP / 域名反馈及代理不受影响。
+- 已检查弹窗未配置、已连接未开启、已开启及直连状态截图，并检查设置页桌面 / 窄窗口布局；证据位于 `/tmp/termrelay-popup-options/`。
+- 首轮扩展浏览器流程超过原 60 秒上限，旧清理逻辑等待已退出 Chrome；修正退出清理并调整总上限至 120 秒后完整通过。
+
+边界：弹窗页面在真实 Chrome 扩展标签页中验证，配置跳转与新标签请求由测试记录；未人工验证原生工具栏弹窗定位 / 自动收起，也未做真实双机网络或真实 AI 修改验收。
+本轮只修改独立扩展与对应文档，未重跑 Mac 构建和根检查；下方跨组件检查记录属于此前项目地址配置通用化版本。
+
+2026-10-30 项目访问配置通用化（本次最终实现）：
+
+- App 分享面板以完整项目地址与直接 / 代理访问取代入口端口表单，默认直接访问；反馈服务 IP 与项目地址分开配置。
+- 配对新增 `previewURL` / `accessMode`；helper 接受对应启动参数，元数据发布入口与访问方式；不更改 Server 或远程协议。
+- 直连不设置或清除浏览器代理，也不开放预览代理；代理模式按配置主机限制，旧配对配置与 ZeroOmega 模式继续兼容。
+- HTTP 页面在扩展后台生成反馈 UUID，保留提交编号幂等与失败重试；两层页面校验与项目变更保护有效。
+- `node --test apps/chrome-extension/tests/*.test.mjs`：32 项通过，覆盖直连 IP / 域名、自定义代理主机、HTTP / WebSocket 转发、WSS 认证、权限拒绝和过时配对拒绝。
+- `node apps/chrome-extension/scripts/check.mjs` 与真实扩展 `node apps/chrome-extension/tests/browser.mjs` 通过；浏览器覆盖合成 HTTP IP / 域名页面动态注入及实际反馈提交，原代理设置保持不变。
+- `pnpm mac:test --filter PreviewSharingTests`：11 项通过，含 App 配置 → 配对 JSON → helper 接收对应页面反馈的闭环。
+- 根目录 `pnpm check` 通过；Mac 全套 139 项、6 项按条件跳过、0 失败。不启动真实 Agent，不发送模型请求。
+- 直连桌面 / 390px 窄窗口截图已检查，无横向溢出，证据位于 `/tmp/termrelay-configurable-preview/`；新页面打开请求在浏览器测试中记录后由 CDP 合成导航，不访问实际项目。
+
+尚未验证：真实双机网络、业务登录与真实 AI 修改、自定义 HTTPS 主机首次权限弹窗的人工接受、Mac 原生表单视觉验收。
+单次分享仍仅配置一个项目主机；不增加多项目并行、跨域资源重写或登录态迁移。项目地址不接受账号、查询参数或 hash。
+以下专用 Profile 更新记录属于本日较早版本；最终版本仅在代理模式推荐专用 Profile，直连隐藏该引导。
+
+2026-10-30 专用 Profile 引导与预览入口更新：
+
+- `node apps/chrome-extension/scripts/check.mjs` 通过，扩展入口、JavaScript 语法和图标检查有效。
+- `node --test apps/chrome-extension/tests/*.test.mjs` 共 24 项通过。
+- `node apps/chrome-extension/tests/browser.mjs` 通过；覆盖默认折叠代理选择、专用 Profile 引导、明确确认后开启代理并请求打开首个入口、重复打开、新标签页打开失败恢复、代理冲突保护、ZeroOmega 模式保存和原反馈闭环。
+- 浏览器使用独立临时 Profile 与合成会话；新入口的 `chrome.tabs.create` 在测试中替换为记录/失败桩，不实际访问业务站点，因此只验证入口参数和交互顺序，不代表真实业务导航已验收。
+- 设置页桌面 1280px 和窄窗口 390px 截图已检查，无横向溢出；截图位于本机临时目录 `/tmp/termrelay-profile-preview/`，不提交到仓库。
+- 修改文件编辑器诊断和 `git diff --check` 通过；未修改跨包执行链路，未运行根目录 `pnpm check`。
+
+本次未实现自动创建 / 检测 Chrome Profile，不迁移 Cookie 或登录态，不放开预览域名限制。
+专用 Profile 的首次建立、扩展安装和业务登录仍需人工完成；真实双机网络、日常 Profile 与验收 Profile 并行使用、真实项目访问及 AI 修改验收仍待完成。
 
 2026-10-29 代理模式更新：`node --test apps/chrome-extension/tests/*.test.mjs` 共 24 项通过；
 `node apps/chrome-extension/scripts/check.mjs` 与 `node apps/chrome-extension/tests/browser.mjs` 通过。
@@ -148,7 +196,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 
 - 截图、录屏、图片标注及 AI 看图。
 - 自研浏览器、完整浏览器自动化、手机 Chrome 扩展。
-- 每人不同域名、同一 Profile 同域名按标签页分流。
+- 多项目同时共享、同一 Profile 同域名按标签页分流；单项目地址已支持按分享配置不同域名或局域网 IP。
 - 无人确认自动改代码、自动提交 Git、自动发布。
 - 绕过企业网络隔离，或向公网提供未保护的本地代理 / Relay。
 

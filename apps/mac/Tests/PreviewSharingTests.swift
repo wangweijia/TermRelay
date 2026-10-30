@@ -3,6 +3,22 @@ import XCTest
 @testable import TermRelay
 
 final class PreviewSharingTests: XCTestCase {
+    func testProjectURLSupportsDirectLANAndCustomProxyHost() throws {
+        let direct = try PreviewSharingConfiguration(previewURL: "http://192.168.1.20:5173/project/", accessMode: "direct",
+            publicPort: "18420", ownerPort: "18421", shareHost: "10.1.2.3")
+        XCTAssertEqual(direct.previewURLs, ["http://192.168.1.20:5173/project/"])
+        XCTAssertEqual(direct.accessMode, "direct")
+        let proxy = try PreviewSharingConfiguration(previewURL: "https://another-project.test:8080", accessMode: "proxy",
+            publicPort: "18420", ownerPort: "18421", shareHost: "10.1.2.3")
+        XCTAssertEqual(proxy.previewURLs, ["https://another-project.test:8080/"])
+        XCTAssertEqual(proxy.accessMode, "proxy")
+        for url in ["file:///tmp/test", "http://localhost:5173/", "http://127.0.0.1/", "https://example.com:0/",
+                    "https://user:secret@example.com/", "https://example.com/?token=secret", "https://example.com/#secret"] {
+            XCTAssertThrowsError(try PreviewSharingConfiguration(previewURL: url, accessMode: "direct",
+                publicPort: "18420", ownerPort: "18421", shareHost: "10.1.2.3"))
+        }
+    }
+
     func testConfigurationIsLocalOnlyAndKeepsMultipleProjectPorts() throws {
         let configuration = try PreviewSharingConfiguration(
             ports: "8081, 8080,8081", publicPort: "18420", ownerPort: "18421", shareHost: "10.1.2.3")
@@ -28,6 +44,23 @@ final class PreviewSharingTests: XCTestCase {
         let assets = try PreviewSharingController.assetsURL()
         XCTAssertTrue(FileManager.default.fileExists(atPath: assets.appendingPathComponent("companion/main.mjs").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: assets.appendingPathComponent("extension/manifest.json").path))
+    }
+
+    @MainActor
+    func testConfiguredProjectFlowsFromAppThroughPairingAndHelper() async throws {
+        for (url, mode) in [("http://192.168.1.20:5173/project/", "direct"), ("https://custom-project.test:8080/start/", "proxy")] {
+            try await withSharing(previewURL: url, accessMode: mode) { controller, managed, configuration in
+                await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-configured", configuration: configuration) { _, _ in .completed }
+                XCTAssertTrue(controller.isRunning, controller.errorMessage ?? "Sharing failed.")
+                XCTAssertEqual(controller.previewURLs, [url])
+                let config = try pairing(controller)
+                XCTAssertEqual(config["previewURL"], url)
+                XCTAssertEqual(config["accessMode"], mode)
+                let id = try await submitFeedback(configuration, config)
+                try await controller.refresh()
+                XCTAssertEqual(controller.feedback.first { $0.id == id }?.page, url)
+            }
+        }
     }
 
     @MainActor
@@ -240,6 +273,7 @@ final class PreviewSharingTests: XCTestCase {
 
     @MainActor
     private func withSharing(
+        previewURL: String? = nil, accessMode: String = "direct",
         _ body: @MainActor (PreviewSharingController, ManagedSession, PreviewSharingConfiguration) async throws -> Void
     ) async throws {
         guard let node = ExecutableLocator.find(named: "node") else { throw XCTSkip("Node.js is not installed.") }
@@ -265,8 +299,14 @@ final class PreviewSharingTests: XCTestCase {
         guard !probe.isRunning, probe.terminationStatus == 0 else { return XCTFail("Local port probe failed.") }
         struct Ports: Decodable { let publicPort: Int; let ownerPort: Int }
         let ports = try JSONDecoder().decode(Ports.self, from: Data(contentsOf: portsFile))
-        let configuration = try PreviewSharingConfiguration(ports: "8080,8081",
-            publicPort: String(ports.publicPort), ownerPort: String(ports.ownerPort), shareHost: "10.1.2.3")
+        let configuration: PreviewSharingConfiguration
+        if let previewURL {
+            configuration = try PreviewSharingConfiguration(previewURL: previewURL, accessMode: accessMode,
+                publicPort: String(ports.publicPort), ownerPort: String(ports.ownerPort), shareHost: "10.1.2.3")
+        } else {
+            configuration = try PreviewSharingConfiguration(ports: "8080,8081",
+                publicPort: String(ports.publicPort), ownerPort: String(ports.ownerPort), shareHost: "10.1.2.3")
+        }
         let controller = PreviewSharingController(directory: directory.appendingPathComponent("sharing"))
         controller.nodePath = node.path
         let managed = ManagedSession(directory: directory, toolID: "codex", displayName: "Local fixture", runtimeMode: .acp)
@@ -306,7 +346,7 @@ final class PreviewSharingTests: XCTestCase {
         request.setValue("Bearer \(try XCTUnwrap(pairing["reviewerToken"]))", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "id": id, "page": "https://page-gateway-local.nioint.com:8080/",
+            "id": id, "page": configuration.previewURLs[0],
             "description": "Move the button", "steps": "",
         ])
         let (_, response) = try await URLSession.shared.data(for: request)

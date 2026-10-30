@@ -11,7 +11,7 @@ import { connect } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../companion/store.mjs';
 import { createCompanion } from '../companion/server.mjs';
-import { HOST, cleanPageURL, validateFeedback, promptFor } from '../companion/model.mjs';
+import { HOST, cleanPageURL, validateFeedback, promptFor, previewConfiguration } from '../companion/model.mjs';
 
 const binding = { sessionId: randomUUID(), deviceId: randomUUID(), workspaceId: `workspace-${randomUUID()}`, name: 'Local test' };
 const input = () => ({
@@ -77,6 +77,81 @@ test('feedback API accepts an unlisted resource port but still rejects other hos
   assert.equal((await f.request('/v1/feedback', body)).status, 201);
   assert.equal(f.store.records[0].page, body.page);
   assert.equal((await f.request('/v1/feedback', { ...input(), page: 'https://other.example:8101/' })).status, 400);
+});
+
+test('configured direct LAN pages and project domains are scoped without a proxy', async t => {
+  for (const url of ['http://192.168.1.20:5173/project/', 'https://project.example:8080/']) {
+    const preview = { url, accessMode: 'direct' };
+    const f = await fixture(t, { preview });
+    assert.deepEqual((await f.request('/v1/meta')).body.preview, preview);
+    assert.deepEqual((await f.request('/v1/meta')).body.previewURLs, [url]);
+    assert.equal((await f.request('/v1/feedback', { ...input(), page: `${url}?token=private#secret` })).status, 201);
+    assert.equal(f.store.records[0].page, url);
+    assert.equal((await f.request('/v1/feedback', input())).status, 400);
+    assert.equal((await f.request('/v1/feedback', { ...input(), page: url.replace(/:\d+/, ':9999') })).status, 400);
+    assert.match(await tunnel(f.publicURL, `${new URL(url).hostname}:8080`, f.lease.proxyToken), /403/);
+  }
+});
+
+test('configured proxy accepts only the project hostname and keeps cross-port support', async t => {
+  const preview = { url: 'https://another-project.test:8080/', accessMode: 'proxy' };
+  const f = await fixture(t, { preview });
+  assert.equal((await f.request('/v1/feedback', { ...input(), page: 'https://another-project.test:8101/page' })).status, 201);
+  assert.equal((await f.request('/v1/feedback', input())).status, 400);
+  assert.match(await tunnel(f.publicURL, `${HOST}:8080`, f.lease.proxyToken), /403/);
+});
+
+test('project configuration rejects unsafe URLs and invalid access modes', () => {
+  for (const url of ['file:///tmp/test', 'https://user:secret@example.com/', 'http://localhost:5173/',
+    'http://127.0.0.1/', 'https://example.com:0/', 'https://example.com/?token=secret', 'https://example.com/#secret']) {
+    assert.throws(() => previewConfiguration({ url, accessMode: 'direct' }));
+  }
+  assert.throws(() => previewConfiguration({ url: 'https://example.com/', accessMode: 'invalid' }));
+});
+
+test('configured HTTP proxy preserves Host and path but strips proxy credentials', async t => {
+  const target = createServer((request, response) => response.end(JSON.stringify({ host: request.headers.host,
+    path: request.url, proxyAuthorization: request.headers['proxy-authorization'] })));
+  await listen(target);
+  t.after(() => close(target));
+  const port = target.address().port;
+  const f = await fixture(t, { preview: { url: `http://project.test:${port}/`, accessMode: 'proxy' } });
+  const request = (host, password) => new Promise((resolve, reject) => {
+    const response = httpRequest(f.publicURL, { path: `http://${host}:${port}/page?value=1`,
+      headers: { 'Proxy-Authorization': `Basic ${Buffer.from(`preview:${password}`).toString('base64')}` } }, result => {
+      let body = ''; result.on('data', chunk => body += chunk); result.on('end', () => resolve({ status: result.statusCode, body }));
+    });
+    response.on('error', reject); response.end();
+  });
+  assert.deepEqual(JSON.parse((await request('project.test', f.lease.proxyToken)).body), { host: `project.test:${port}`, path: '/page?value=1' });
+  assert.equal((await request('other.test', f.lease.proxyToken)).status, 403);
+  assert.equal((await request('project.test', 'wrong')).status, 407);
+});
+
+test('configured HTTP proxy forwards WebSocket upgrades without proxy credentials', async t => {
+  let observed;
+  const target = createServer();
+  target.on('upgrade', (request, socket) => {
+    observed = { host: request.headers.host, path: request.url, proxyAuthorization: request.headers['proxy-authorization'] };
+    socket.end('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\nSYNTHETIC-FRAME');
+  });
+  await listen(target);
+  t.after(() => close(target));
+  const port = target.address().port;
+  const f = await fixture(t, { preview: { url: `http://project.test:${port}/`, accessMode: 'proxy' } });
+  const proxy = new URL(f.publicURL);
+  const response = await new Promise((resolve, reject) => {
+    const socket = connect(Number(proxy.port), proxy.hostname);
+    let data = '';
+    socket.setTimeout(3000, () => socket.destroy(new Error('Upgrade timed out.')));
+    socket.on('error', reject);
+    socket.on('data', chunk => data += chunk);
+    socket.on('end', () => resolve(data));
+    socket.on('connect', () => socket.write(`GET http://project.test:${port}/hmr HTTP/1.1\r\nHost: project.test:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nProxy-Authorization: Basic ${Buffer.from(`preview:${f.lease.proxyToken}`).toString('base64')}\r\n\r\n`));
+  });
+  assert.match(response, /101 Switching Protocols/);
+  assert.match(response, /SYNTHETIC-FRAME/);
+  assert.deepEqual(observed, { host: `project.test:${port}`, path: '/hmr', proxyAuthorization: undefined });
 });
 
 test('local-only App dispatch persists intent before execution and completes the reviewer loop', async t => {

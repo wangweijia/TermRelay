@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { UUID } from './model.mjs';
+import { UUID, previewConfiguration } from './model.mjs';
 import { Store } from './store.mjs';
 import { createCompanion } from './server.mjs';
 
@@ -12,6 +12,8 @@ const { values } = parseArgs({ options: {
   workspace: { type: 'string' },
   name: { type: 'string' },
   ports: { type: 'string', default: '8080' },
+  'preview-url': { type: 'string' },
+  'access-mode': { type: 'string', default: 'direct' },
   port: { type: 'string', default: '18420' },
   'owner-port': { type: 'string', default: '18421' },
   'data-dir': { type: 'string', default: new URL('../.local/', import.meta.url).pathname },
@@ -32,6 +34,8 @@ const portOf = value => {
   return Number(value);
 };
 const ports = [...new Set(values.ports.split(',').map(portOf))];
+const preview = values['preview-url'] === undefined ? undefined
+  : previewConfiguration({ url: values['preview-url'], accessMode: values['access-mode'] });
 const publicPort = portOf(values.port);
 const ownerPort = portOf(values['owner-port']);
 if (publicPort === ownerPort) throw new Error('Public and owner ports must differ.');
@@ -96,7 +100,7 @@ try {
   }
   const store = new Store(resolve(directory, 'feedback.json'));
   await store.load();
-  app = createCompanion({ store, binding, ports, ...credentials });
+  app = createCompanion({ store, binding, ports, preview, ...credentials });
   const listen = (server, port, host) => new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
@@ -104,7 +108,7 @@ try {
   await listen(app.adminServer, ownerPort, '127.0.0.1');
   await listen(app.publicServer, publicPort, '0.0.0.0');
   console.log(`Owner console: http://127.0.0.1:${ownerPort}`);
-  console.log(`Feedback API + CONNECT proxy: port ${publicPort}; all project ports on page-gateway-local.nioint.com; preview links: ${ports.join(', ')}`);
+  console.log(`Feedback API: port ${publicPort}; preview access: ${preview?.accessMode ?? 'legacy proxy'}`);
   console.log(`Credentials (private; do not commit or log their values): ${configPath}`);
   console.log('Use adminToken in the owner console; share only reviewerToken and proxyToken with authorized testers.');
   console.log('Do not edit this project in another AI turn while a feedback execution is in progress.');

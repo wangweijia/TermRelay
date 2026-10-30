@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
+import { connectionView } from '../extension/view-state.js';
 
 const source = await readFile(new URL('../extension/background.js', import.meta.url), 'utf8');
 const config = { companionURL: 'http://192.168.1.20:18420', reviewerToken: 'a'.repeat(64), proxyToken: 'b'.repeat(64) };
@@ -11,8 +12,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 async function fixture(initial = {}, controller = 'available') {
   const storage = structuredClone({ config, ...initial });
-  const handlers = {}, calls = { set: [], clear: [], fetch: [], errors: [] };
-  let ownProxy;
+  const handlers = {}, calls = { set: [], clear: [], fetch: [], errors: [], scripts: [] };
+  let ownProxy, connectionGate, statusGate;
   const foreignProxy = { mode: 'pac_script', pacScript: { data: 'function FindProxyForURL() { return "PROXY company.example:8080"; }' } };
   const chrome = {
     storage: { local: {
@@ -44,31 +45,97 @@ async function fixture(initial = {}, controller = 'available') {
     alarms: { async create() {}, async clear() {}, onAlarm: { addListener() {} } },
     webRequest: { onAuthRequired: { addListener: listener => { handlers.auth = listener; } } },
     action: { onClicked: { addListener() {} } },
+    permissions: { async contains() { return true; } },
+    scripting: { async unregisterContentScripts() {}, async registerContentScripts(scripts) { calls.scripts.push(scripts); } },
   };
   runInNewContext(source, {
     chrome, URL, crypto: { randomUUID }, AbortSignal,
     console: { error: (...args) => calls.errors.push(args) },
     fetch: async (url, options) => {
       calls.fetch.push({ url, options });
+      if (url.endsWith('/v1/connect') && connectionGate) await connectionGate;
+      if (url.endsWith('/v1/meta') && statusGate) await statusGate;
       return { ok: true, json: async () => url.endsWith('/v1/connect')
         ? { clientId: storage.clientId, connectionToken: 'c'.repeat(64), proxyToken: 'd'.repeat(64) }
-        : url.endsWith('/v1/meta') ? { ports: [8080] } : {} };
+        : url.endsWith('/v1/meta') ? storage.serverMeta ?? { ports: [8080], ...(storage.config?.previewURL
+          ? { preview: { url: storage.config.previewURL, accessMode: storage.config.accessMode }, previewURLs: [storage.config.previewURL] } : {}) } : {} };
     },
   });
-  const send = message => new Promise(resolve => {
-    handlers.message(message, { url: chrome.runtime.getURL('options.html') }, resolve);
+  const send = (message, sender = { url: chrome.runtime.getURL('options.html') }) => new Promise(resolve => {
+    handlers.message(message, sender, resolve);
   });
   const auth = details => new Promise(resolve => handlers.auth(details, resolve));
   await send({ type: 'settings.get' });
   return {
     storage, calls, send, auth, foreignProxy, chrome,
     control: value => { controller = value; },
+    pauseConnection() { let release; connectionGate = new Promise(resolve => { release = resolve; }); return release; },
+    pauseStatus() { let release; statusGate = new Promise(resolve => { release = resolve; }); return release; },
     async proxyError(error = { error: 'net::ERR_PROXY_CONNECTION_FAILED', details: 'Do not log raw details.' }) {
       handlers.proxyError(error);
       await tick();
     },
   };
 }
+
+test('connection presentation separates configuration, live connection, enabled state and faults', () => {
+  assert.equal(connectionView({}).title, '尚未配置');
+  const direct = { config: { ...config, accessMode: 'direct' }, connected: true };
+  assert.equal(connectionView(direct).title, '已连接，未开启');
+  assert.equal(connectionView(direct).mode, '直接访问');
+  assert.equal(connectionView({ ...direct, directPreviewEnabled: true }).title, '已开启');
+  assert.equal(connectionView({ ...direct, connecting: true }).tone, 'pending');
+  assert.equal(connectionView({ ...direct, directPreviewEnabled: true, connectionError: 'Offline' }).usable, false);
+  assert.equal(connectionView({ ...direct, directPreviewEnabled: true, connectionError: 'Offline' }).tone, 'error');
+  assert.equal(connectionView({ config, connected: true, proxyMode: 'builtin', levelOfControl: 'controlled_by_other_extensions' }).title, '代理受限制');
+  assert.equal(connectionView({ config, connected: true, proxyMode: 'zeroomega', externalPreviewEnabled: true }).tone, 'warning');
+});
+
+test('popup can inspect and toggle the shared connection without a settings page', async () => {
+  const f = await fixture();
+  const sender = { url: f.chrome.runtime.getURL('popup.html') };
+  assert.equal((await f.send({ type: 'settings.get' }, sender)).ok, true);
+  assert.equal((await f.send({ type: 'proxy.set', enabled: true, consent: true }, sender)).ok, true);
+  assert.equal(f.storage.previewConsent, true);
+  const connects = f.calls.fetch.filter(call => call.url.endsWith('/v1/connect')).length;
+  assert.equal((await f.send({ type: 'connection.status' }, sender)).data.checked, true);
+  assert.equal(f.calls.fetch.filter(call => call.url.endsWith('/v1/connect')).length, connects, 'health checks do not acquire a new lease');
+  await f.send({ type: 'connection.disconnect' }, sender);
+  assert.equal(f.storage.proxyEnabled, false);
+  const requests = f.calls.fetch.length;
+  assert.equal((await f.send({ type: 'connection.status' }, sender)).data.checked, false);
+  assert.equal(f.calls.fetch.length, requests, 'opening a closed popup must not reconnect');
+  await f.send({ type: 'proxy.mode', mode: 'zeroomega' });
+  assert.equal(f.storage.previewConsent, false, 'changing mode requires fresh consent');
+});
+
+test('a late popup health response cannot restore an explicitly closed connection', async () => {
+  const f = await fixture();
+  await f.send({ type: 'proxy.set', enabled: true });
+  const release = f.pauseStatus();
+  const status = f.send({ type: 'connection.status' });
+  await tick();
+  await f.send({ type: 'connection.disconnect' });
+  release();
+  assert.equal((await status).data.checked, false);
+  assert.equal(f.storage.connection, undefined);
+  assert.equal(f.storage.connectionError, '');
+  assert.equal((await f.send({ type: 'settings.get' })).data.connected, false);
+});
+
+test('settings expose pending and expired connections rather than a stale connected label', async () => {
+  const f = await fixture();
+  const release = f.pauseConnection();
+  const connecting = f.send({ type: 'connection.test' });
+  await tick();
+  const pending = (await f.send({ type: 'settings.get' })).data;
+  assert.equal(pending.connecting, true);
+  assert.equal(pending.connected, false);
+  release();
+  assert.equal((await connecting).ok, true);
+  f.storage.connection.expiresAt = Date.now() - 1;
+  assert.equal((await f.send({ type: 'settings.get' })).data.connected, false);
+});
 
 test('existing installs default to built-in PAC, and stopping clears only our own override', async () => {
   const f = await fixture();
@@ -84,6 +151,48 @@ test('existing installs default to built-in PAC, and stopping clears only our ow
   assert.equal((await f.send({ type: 'proxy.set', enabled: false })).ok, true);
   assert.deepEqual(await f.chrome.proxy.settings.get(), before);
   assert.equal(f.storage.proxyEnabled, false);
+});
+
+test('direct projects connect, authorize feedback and disconnect without touching an external proxy', async () => {
+  const direct = { ...config, previewURL: 'http://192.168.1.20:5173/project/', accessMode: 'direct' };
+  const f = await fixture({ config: direct, proxyMode: 'zeroomega' }, 'other');
+  const before = await f.chrome.proxy.settings.get();
+  assert.equal((await f.send({ type: 'settings.save', config: direct })).ok, true);
+  assert.equal(f.calls.scripts[0][0].matches[0], 'http://192.168.1.20/*');
+  assert.equal((await f.send({ type: 'proxy.set', enabled: true })).ok, true);
+  assert.equal(f.storage.directPreviewEnabled, true);
+  assert.equal((await f.send({ type: 'preview.meta' }, { tab: { id: 1 }, frameId: 0, url: 'http://192.168.1.20:5173/page' })).ok, true);
+  assert.equal((await f.send({ type: 'preview.meta' }, { tab: { id: 1 }, frameId: 0, url: 'http://192.168.1.20:5174/page' })).ok, false);
+  assert.equal((await f.auth({ isProxy: true, url: direct.previewURL, challenger: { host: '192.168.1.20', port: 18420 } })).authCredentials, undefined);
+  await f.send({ type: 'connection.disconnect' });
+  assert.equal(f.storage.directPreviewEnabled, false);
+  assert.equal(f.calls.set.length, 0);
+  assert.equal(f.calls.clear.length, 0);
+  assert.deepEqual(await f.chrome.proxy.settings.get(), before);
+});
+
+test('custom project proxy PAC and auth use the configured host, not the legacy hostname', async () => {
+  const f = await fixture({ config: { ...config, previewURL: 'https://project.test:8080/start/', accessMode: 'proxy' } });
+  await f.send({ type: 'proxy.set', enabled: true });
+  const pac = f.calls.set[0].value.pacScript.data;
+  assert.equal(runInNewContext(`${pac};FindProxyForURL('https://project.test:8101/','project.test')`), 'PROXY 192.168.1.20:18420');
+  assert.equal(runInNewContext(`${pac};FindProxyForURL('https://${HOST}/','${HOST}')`), 'DIRECT');
+  const details = { isProxy: true, url: 'https://project.test:8101/', challenger: { host: '192.168.1.20', port: 18420 } };
+  assert.equal((await f.auth(details)).authCredentials.password, 'd'.repeat(64));
+  assert.equal((await f.auth({ ...details, url: 'wss://project.test:8101/hmr' })).authCredentials.password, 'd'.repeat(64));
+  assert.equal((await f.auth({ ...details, url: `https://${HOST}/` })).authCredentials, undefined);
+  f.chrome.permissions.contains = async () => false;
+  assert.equal((await f.send({ type: 'preview.authorize' })).ok, false);
+});
+
+test('changed project metadata rejects stale pairing for both current and legacy configurations', async () => {
+  for (const saved of [config, { ...config, previewURL: 'https://project.test:8080/', accessMode: 'proxy' }]) {
+    const f = await fixture({ config: saved, serverMeta: { preview: { url: 'http://192.168.1.30:5173/', accessMode: 'direct' } } });
+    const result = await f.send({ type: 'connection.test' });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /重新导入/);
+    assert.equal(f.calls.set.length, 0);
+  }
 });
 
 test('built-in mode refuses other extensions and administrator policy without changing proxy settings', async () => {

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { RequestError, UUID, promptFor, reviewerView, secretMatches, validateFeedback } from './model.mjs';
+import { RequestError, UUID, promptFor, reviewerView, secretMatches, validateFeedback, previewConfiguration } from './model.mjs';
 import { attachProxy } from './proxy.mjs';
 
 async function bodyOf(request) {
@@ -28,7 +28,9 @@ function authorize(request, token) {
   if (!secretMatches(request.headers.authorization, `Bearer ${token}`)) throw new RequestError(401, 'Invalid access token.');
 }
 
-export function createCompanion({ store, binding, ports, reviewerToken, adminToken, proxyToken, now = Date.now }) {
+export function createCompanion({ store, binding, ports = [8080], preview, reviewerToken, adminToken, proxyToken, now = Date.now }) {
+  const project = previewConfiguration(preview);
+  const previewURLs = preview ? [project.url] : ports.map(port => `https://${new URL(project.url).hostname}:${port}/`);
   let busy = false;
   let connection;
   let closeTunnels;
@@ -54,6 +56,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
     return record;
   };
   const handle = admin => async (request, response) => {
+    if (!admin && /^http:\/\//i.test(request.url ?? '')) return;
     try {
       const url = new URL(request.url, 'http://localhost');
       const origin = request.headers.origin;
@@ -114,15 +117,17 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
           return;
         }
         if (url.pathname === '/v1/meta' && request.method === 'GET') {
-          json(response, 200, { name: binding.name, ports, connected: true, executionMode: 'automatic' });
+          json(response, 200, { name: binding.name, ports, preview: project, previewURLs, connected: true, executionMode: 'automatic' });
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'GET') {
-          json(response, 200, store.records.map(reviewerView));
+          json(response, 200, store.records.filter(record => {
+            try { validateFeedback(record, project); return true; } catch { return false; }
+          }).map(reviewerView));
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'POST') {
-          const input = validateFeedback(await bodyOf(request));
+          const input = validateFeedback(await bodyOf(request), project);
           requireConnection(request);
           const prior = store.records.find(record => record.id === input.id);
           if (prior) {
@@ -148,6 +153,7 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
       if (!record) throw new RequestError(404, 'Feedback not found.');
       const action = match[2];
       if (!admin && action === 'verify' && url.pathname.startsWith('/v1/')) {
+        validateFeedback(record, project);
         const body = await bodyOf(request);
         requireConnection(request);
         if (record.status !== 'awaiting_review' || !['verified', 'changes_requested'].includes(body.status)) {
@@ -219,7 +225,8 @@ export function createCompanion({ store, binding, ports, reviewerToken, adminTok
   };
   const publicServer = createServer(handle(false));
   const adminServer = createServer(handle(true));
-  closeTunnels = attachProxy(publicServer, { token: () => activeConnection()?.proxyToken });
+  closeTunnels = attachProxy(publicServer, { token: () => activeConnection()?.proxyToken,
+    hostname: new URL(project.url).hostname, enabled: project.accessMode === 'proxy' });
   const connectionTimer = setInterval(activeConnection, 1000);
   connectionTimer.unref();
   const closeProxy = () => { clearInterval(connectionTimer); connection = undefined; closeTunnels(); };

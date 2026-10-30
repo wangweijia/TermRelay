@@ -1,0 +1,47 @@
+:root{color-scheme:light;font:13px/1.6 "PingFang SC","Helvetica Neue",sans-serif;letter-spacing:0;color:#242b28;background:#fff}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;width:344px}
+main{padding:18px 20px}
+button,input{font:inherit}
+button{cursor:pointer;border:1px solid #d5dcd7;background:#fff;border-radius:6px;color:#243b30;padding:7px 12px}
+button:hover:not(:disabled){background:#f1f6f3}
+button:disabled{opacity:.45;cursor:not-allowed}
+:focus-visible{outline:2px solid #23805c;outline-offset:3px}
+header,.brand{display:flex;align-items:center;gap:8px}
+header{justify-content:space-between;padding-bottom:16px;border-bottom:1px solid #e8ece9}
+.brand strong{font-size:15px;font-weight:600}
+.text-button{border:0;padding:4px 0;color:#53645b}
+.project{padding:18px 0 16px}
+.mode{font-size:11px;font-weight:600;color:#216548;background:#edf5ef;padding:3px 7px;border-radius:4px}
+h1{font-size:17px;font-weight:600;line-height:1.5;margin:8px 0 3px;overflow-wrap:anywhere}
+.address{font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:#7a827d;margin:0;overflow-wrap:anywhere}
+.connection{border-top:1px solid #e8ece9;padding-top:16px}
+.state{display:flex;align-items:center;gap:8px;color:#68746d}
+.state strong{font-size:15px;font-weight:600}
+.dot{width:8px;height:8px;flex-shrink:0;border-radius:50%;background:currentColor}
+.state[data-tone=success]{color:#21764d}
+.state[data-tone=ready]{color:#416f85}
+.state[data-tone=warning]{color:#9a6b1a}
+.state[data-tone=error]{color:#b34040}
+.state[data-tone=pending]{color:#416f85}
+.state[data-tone=pending] .dot{animation:pulse 1.2s ease-in-out infinite}
+#state-detail{color:#768078;font-size:12px;margin:6px 0 16px;min-height:38px;overflow-wrap:anywhere}
+.power-row{display:flex;align-items:center;justify-content:space-between;position:relative;cursor:pointer;padding:12px 0;border-top:1px solid #edf0ed}
+.power-row small{display:block;color:#828a84;font-size:11px}
+#power{position:absolute;right:0;width:40px;height:24px;opacity:0;margin:0;cursor:pointer}
+.switch{width:40px;height:24px;flex-shrink:0;border-radius:20px;background:#ccd4ce;pointer-events:none;transition:background .15s}
+.switch::after{content:"";display:block;width:18px;height:18px;margin:3px;background:#fff;border-radius:50%;box-shadow:0 1px 3px #0002;transition:transform .15s}
+#power:checked+.switch{background:#237651}
+#power:checked+.switch::after{transform:translateX(16px)}
+#power:focus-visible+.switch{outline:2px solid #23805c;outline-offset:3px}
+#power:disabled+.switch{opacity:.5}
+.consent{display:flex;gap:7px;align-items:flex-start;color:#6b756d;font-size:11px;margin:6px 0 14px}
+.consent input{flex-shrink:0;margin-top:3px;accent-color:#237651}
+#message{color:#b34040;background:#fcf2f1;padding:8px;border-radius:4px;font-size:12px;overflow-wrap:anywhere}
+footer{display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid #e8ece9;gap:10px}
+footer button{background:#243e30;color:#fff;border-color:#243e30}
+footer button:hover:not(:disabled){background:#31543f}
+#connection-label{font-size:11px;color:#828a84}
+@keyframes pulse{50%{opacity:.3}}
+@media(prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}

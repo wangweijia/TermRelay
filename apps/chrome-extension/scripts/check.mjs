@@ -16,7 +16,7 @@ async function check(directory) {
 await check(root);
 const manifest = JSON.parse(await readFile(new URL('extension/manifest.json', root)));
 if (manifest.manifest_version !== 3) throw new Error('Manifest V3 is required.');
-for (const path of [manifest.background.service_worker, manifest.options_page, ...manifest.content_scripts.flatMap(item => item.js)]) {
+for (const path of [manifest.background.service_worker, manifest.options_page, manifest.action.default_popup, ...manifest.content_scripts.flatMap(item => item.js)]) {
   await readFile(new URL(`extension/${path}`, root));
 }
 for (const icons of [manifest.icons, manifest.action.default_icon]) {

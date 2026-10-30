@@ -19,7 +19,7 @@ const browser = spawn(executable, [
 ], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
 let sequence = 0, buffer = '', sessionId;
 const pending = new Map(), handlers = new Map();
-const timeout = setTimeout(() => browser.kill('SIGTERM'), 60_000);
+const timeout = setTimeout(() => browser.kill('SIGTERM'), 120_000);
 browser.on('error', error => { for (const { reject } of pending.values()) reject(error); });
 browser.on('exit', () => { for (const { reject } of pending.values()) reject(new Error('Chrome exited.')); });
 function call(method, params = {}, session = sessionId) {
@@ -45,7 +45,7 @@ browser.stdio[4].on('data', chunk => {
   }
 });
 async function evaluate(expression, session = sessionId) {
-  const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, session);
+  const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }, session);
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
   return result.result.value;
 }
@@ -65,6 +65,7 @@ const app = createCompanion({
 });
 await new Promise(resolve => app.publicServer.listen(0, '127.0.0.1', resolve));
 const companionURL = `http://127.0.0.1:${app.publicServer.address().port}`;
+const configuredApps = [];
 const probeServer = createServer(socket => socket.destroy());
 await new Promise(resolve => probeServer.listen(0, '127.0.0.1', resolve));
 const probePort = probeServer.address().port;
@@ -93,11 +94,39 @@ try {
     assert.equal(result, true, description);
   }
   await waitOptions(`document.querySelector('main').getAttribute('aria-busy')==='false'`, 'options should initialize');
+  await evaluate(`window.openedPreviews=[];chrome.tabs.create=async options=>{window.openedPreviews.push(options.url);return {id:123};}`, optionSession);
   assert.equal(await evaluate(`document.querySelector('#advanced').open`, optionSession), false, 'manual configuration stays out of the primary flow');
+  assert.equal(await evaluate(`document.querySelector('.proxy-modes').closest('#advanced')!==null && !document.querySelector('.proxy-modes').checkVisibility()`, optionSession), true, 'proxy choices are hidden in advanced settings by default');
+  assert.match(await evaluate(`document.querySelector('#profile-setup').textContent`, optionSession), /普通新窗口或新标签页不会隔离代理设置/);
   assert.equal(await evaluate(`document.querySelector('#import-config').getBoundingClientRect().height>0`, optionSession), true, 'paste configuration is visible immediately');
   assert.equal(await evaluate(`document.querySelector('#import').disabled`, optionSession), true);
+  assert.equal(await evaluate(`chrome.action.getPopup({})`, optionSession), `chrome-extension://${id}/popup.html`, 'toolbar action opens the lightweight popup, not options');
+  const popupTarget = await call('Target.createTarget', { url: 'about:blank' }, null);
+  const { sessionId: popupSession } = await call('Target.attachToTarget', { targetId: popupTarget.targetId, flatten: true }, null);
+  await call('Page.enable', {}, popupSession);
+  await call('Emulation.setDeviceMetricsOverride', { width: 344, height: 640, deviceScaleFactor: 1, mobile: false }, popupSession);
+  const popupLoaded = new Promise(resolve => handlers.set('Page.loadEventFired', resolve));
+  await call('Page.navigate', { url: `chrome-extension://${id}/popup.html` }, popupSession);
+  await popupLoaded;
+  async function waitPopup(condition, description) {
+    const result = await evaluate(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+      if(${condition}){clearInterval(timer);resolve(true);}
+      else if(++attempts>200){clearInterval(timer);resolve(document.querySelector('#state-title').textContent+' '+document.querySelector('#message').textContent);}
+    },25);})`, popupSession);
+    assert.equal(result, true, description);
+  }
+  await waitPopup(`document.querySelector('main').getAttribute('aria-busy')==='false'`, 'popup initializes without a configuration');
+  assert.equal(await evaluate(`document.querySelector('#state-title').textContent`, popupSession), '尚未配置');
+  assert.equal(await evaluate(`document.querySelector('#power').disabled`, popupSession), true);
+  await evaluate(`window.configurationOpened=0;window.popupEntries=[];
+    chrome.runtime.openOptionsPage=async()=>{window.configurationOpened++;};
+    chrome.tabs.create=async options=>{window.popupEntries.push(options.url);return {id:456};};`, popupSession);
+  assert.equal(await evaluate('window.configurationOpened', popupSession), 0, 'opening the popup never opens a settings page automatically');
+  await evaluate(`document.querySelector('#configure').click()`, popupSession);
+  assert.equal(await evaluate('window.configurationOpened', popupSession), 1, 'only the configuration command opens options');
+  await screenshot('popup-unconfigured', popupSession);
   async function paste(value) {
-    await evaluate(`document.querySelector('#import-config').value=${JSON.stringify(value)};
+    await evaluate(`document.querySelector('#pairing').open=true;document.querySelector('#import-config').value=${JSON.stringify(value)};
       document.querySelector('#import-config').dispatchEvent(new Event('input'));
       document.querySelector('#import').click();`, optionSession);
   }
@@ -109,6 +138,11 @@ try {
   assert.match(await evaluate(`document.querySelector('#status').textContent`, optionSession), /配置不完整/);
   await paste(JSON.stringify({ companionURL, reviewerToken: 'a'.repeat(64), proxyToken: 'b'.repeat(64) }));
   await waitOptions(`document.querySelector('#connection-badge').textContent==='已连接' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'pasting configuration should save and connect in one action');
+  assert.equal(await evaluate(`document.querySelector('#pairing').open`, optionSession), false, 'saved pairing stays collapsed');
+  assert.equal(await evaluate(`document.querySelector('#active-mode').textContent`, optionSession), '内置代理');
+  assert.equal(await evaluate(`document.querySelector('#session-status').textContent`, optionSession), '已连接，未开启');
+  await waitPopup(`document.querySelector('#state-title').textContent==='已连接，未开启'`, 'popup reflects configured but not enabled state');
+  await screenshot('popup-ready', popupSession);
   assert.equal(await evaluate(`document.querySelector('#import-config').value`, optionSession), '', 'clear pasted credentials after saving');
   assert.equal(await evaluate(`document.querySelector('#enable').disabled`, optionSession), true, 'proxy needs explicit consent even after successful pairing');
   assert.equal((await evaluate(`chrome.storage.local.get('proxyEnabled')`, optionSession)).proxyEnabled, undefined);
@@ -120,6 +154,32 @@ try {
   await evaluate(`document.querySelector('#consent').checked=true;document.querySelector('#consent').dispatchEvent(new Event('change'));
     document.querySelector('#enable').click();`, optionSession);
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'primary preview action should enable the proxy');
+  assert.deepEqual(await evaluate('window.openedPreviews', optionSession), ['https://page-gateway-local.nioint.com:8080/'], 'the primary action opens the project after enabling its proxy');
+  assert.equal(await evaluate(`document.querySelector('#enable').disabled`, optionSession), false, 'preview can be reopened while connected');
+  await waitPopup(`document.querySelector('#power').checked && document.querySelector('#state-title').textContent==='已开启'`, 'popup follows preview enabled in options');
+  assert.equal(await evaluate(`document.querySelector('#consent-row').hidden`, popupSession), true, 'explicit proxy consent is reused for this configuration');
+  await evaluate(`document.querySelector('#power').checked=false;document.querySelector('#power').dispatchEvent(new Event('change'));`, popupSession);
+  await waitPopup(`document.querySelector('#state-title').textContent==='已关闭' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'popup switch closes the lease and proxy');
+  await waitOptions(`document.querySelector('#session-status').textContent==='已关闭'`, 'options follows popup shutdown');
+  assert.equal((await evaluate(`chrome.storage.local.get('connectionEnabled')`, optionSession)).connectionEnabled, false);
+  await screenshot('popup-closed', popupSession);
+  await evaluate(`document.querySelector('#power').checked=true;document.querySelector('#power').dispatchEvent(new Event('change'));`, popupSession);
+  await waitPopup(`document.querySelector('#state-title').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'popup reopens using the saved configuration without visiting options');
+  await waitOptions(`document.querySelector('#session-status').textContent==='已开启'`, 'options reflects popup reconnection');
+  await evaluate(`document.querySelector('#open-project').click()`, popupSession);
+  await waitPopup(`document.querySelector('main').getAttribute('aria-busy')==='false'`, 'popup can open the project independently');
+  assert.deepEqual(await evaluate('window.popupEntries', popupSession), ['https://page-gateway-local.nioint.com:8080/']);
+  assert.equal(await evaluate('window.configurationOpened', popupSession), 1, 'switching and opening the project do not open configuration');
+  assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth && document.body.getBoundingClientRect().width===344`, popupSession), true, 'popup fits its fixed width');
+  await screenshot('popup-enabled', popupSession);
+  await evaluate(`chrome.tabs.create=async()=>{throw new Error('Cannot open tab');};document.querySelector('#enable').click();`, optionSession);
+  await waitOptions(`document.querySelector('#status').dataset.tone==='error' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'tab creation failure should be recoverable');
+  assert.match(await evaluate(`document.querySelector('#status').textContent`, optionSession), /预览已开启，但未能打开新标签页/);
+  assert.equal(await evaluate(`document.querySelector('#preview-links').hidden`, optionSession), false, 'manual entry links remain available after tab creation fails');
+  assert.equal((await evaluate(`chrome.storage.local.get('proxyEnabled')`, optionSession)).proxyEnabled, true, 'tab creation failure does not misreport a working proxy as disabled');
+  await evaluate(`chrome.tabs.create=async options=>{window.openedPreviews.push(options.url);return {id:123};};document.querySelector('#enable').click();`, optionSession);
+  await waitOptions(`document.querySelector('#status').dataset.tone==='success' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'the primary action can retry opening preview');
+  assert.equal(await evaluate('window.openedPreviews.length', optionSession), 2);
   assert.equal(await evaluate(`document.querySelector('#preview-links a').href`, optionSession), 'https://page-gateway-local.nioint.com:8080/');
   assert.equal(await evaluate(`document.querySelector('.sidebar').getBoundingClientRect().bottom <= document.querySelector('.setup').getBoundingClientRect().top`, optionSession), true, 'settings use a single column with connection status above configuration');
   assert.equal(await evaluate(`getComputedStyle(document.body).backgroundImage`, optionSession), 'none', 'settings have no decorative background');
@@ -148,7 +208,7 @@ try {
   await evaluate(`document.querySelector('#advanced').open=false`, optionSession);
   await evaluate(`document.querySelector('#enable').click()`, optionSession);
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='已开启' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'built-in preview should restart before switching ownership');
-  await evaluate(`document.querySelector('[name="proxy-mode"][value="zeroomega"]').click()`, optionSession);
+  await evaluate(`document.querySelector('#advanced').open=true;document.querySelector('[name="proxy-mode"][value="zeroomega"]').click()`, optionSession);
   await waitOptions(`document.querySelector('#zeroomega-setup').hidden===false && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'ZeroOmega choice should immediately show the generated setup');
   assert.equal((await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession)).levelOfControl, 'controllable_by_this_extension', 'switching away must release our active PAC');
   assert.equal(await evaluate(`document.querySelector('#consent').checked`, optionSession), false, 'switching modes needs fresh consent');
@@ -202,8 +262,13 @@ try {
   await call('Page.reload', {}, optionSession);
   await optionsReloaded;
   await waitOptions(`document.querySelector('[name="proxy-mode"][value="zeroomega"]').checked && document.querySelector('#proxy-badge').textContent==='ZeroOmega · 待验证' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'external mode and deliberate confirmation survive reloading settings');
-  await evaluate(`document.querySelector('[name="proxy-mode"][value="builtin"]').click()`, optionSession);
+  assert.equal(await evaluate(`document.querySelector('#advanced').open`, optionSession), false, 'saved external mode does not force advanced settings open');
+  assert.match(await evaluate(`document.querySelector('#preview-help').textContent`, optionSession), /当前使用 ZeroOmega/);
+  await evaluate(`window.openedPreviews=[];chrome.tabs.create=async options=>{window.openedPreviews.push(options.url);return {id:123};};
+    document.querySelector('#advanced').open=true;document.querySelector('[name="proxy-mode"][value="builtin"]').click()`, optionSession);
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='代理受限制' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'returning to built-in mode must respect another proxy controller');
+  assert.equal(await evaluate(`document.querySelector('#enable').disabled`, optionSession), true, 'proxy conflicts block the primary action');
+  assert.match(await evaluate(`document.querySelector('#preview-help').textContent`, optionSession), /验收专用用户配置/);
   assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState);
   await call('Extensions.uninstall', { id: externalId }, null);
   await waitOptions(`document.querySelector('#proxy-badge').textContent==='未开启'`, 'built-in mode becomes available when the external controller releases its settings');
@@ -262,7 +327,7 @@ try {
   }
   const shadow = findHost(tree)?.shadowRoots?.[0];
   assert.ok(shadow, 'closed production shadow root must exist');
-  const { object } = await call('DOM.resolveNode', { nodeId: shadow.nodeId });
+  let { object } = await call('DOM.resolveNode', { nodeId: shadow.nodeId });
   async function within(body) {
     const result = await call('Runtime.callFunctionOn', {
       objectId: object.objectId, functionDeclaration: `function(){${body}}`,
@@ -335,13 +400,65 @@ try {
   assert.equal(await within("return this.querySelector('#submit').disabled;"), true);
   assert.equal((await evaluate(`chrome.storage.local.get('connection')`, optionSession)).connection, undefined);
   assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'disconnect releases our lease, not the external controller or its rules');
-  console.log('Chrome UI: paste-first pairing, explicit consent, built-in/ZeroOmega switching and persistence, copyable credential-free setup, external proxy ownership, responsive layout, feedback lifecycle, disconnect, cross-port assets and private selection passed.');
+  for (const previewURL of ['http://192.168.8.20:5173/project/', 'http://another-project.test:8080/start/']) {
+    const directStore = new Store(join(directory, `direct-${configuredApps.length}.json`));
+    await directStore.load();
+    const directApp = createCompanion({ store: directStore, binding: { name: 'Direct project' },
+      preview: { url: previewURL, accessMode: 'direct' }, reviewerToken: 'e'.repeat(64), proxyToken: 'f'.repeat(64), adminToken: '1'.repeat(64) });
+    configuredApps.push(directApp);
+    await new Promise(resolve => directApp.publicServer.listen(0, '127.0.0.1', resolve));
+    await paste(JSON.stringify({ companionURL: `http://127.0.0.1:${directApp.publicServer.address().port}`,
+      reviewerToken: 'e'.repeat(64), proxyToken: 'f'.repeat(64), previewURL, accessMode: 'direct' }));
+    await waitOptions(`document.querySelector('#connection-badge').textContent==='已连接' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'direct configuration connects without proxy setup');
+    assert.equal(await evaluate(`document.querySelector('#profile-guide').hidden && document.querySelector('#proxy-consent').hidden && document.querySelector('.proxy-modes').hidden`, optionSession), true);
+    assert.equal(await evaluate(`document.querySelector('#enable').disabled`, optionSession), false, 'direct project requires no proxy confirmation');
+    assert.equal(await evaluate(`document.querySelector('#project-address').textContent`, optionSession), previewURL);
+    assert.equal(await evaluate(`document.querySelector('#active-mode').textContent`, optionSession), '直接访问');
+    await evaluate(`window.realPermissionRequest=chrome.permissions.request;chrome.permissions.request=async()=>false;document.querySelector('#enable').click();`, optionSession);
+    await waitOptions(`document.querySelector('#status').dataset.tone==='error' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'permission denial should remain recoverable');
+    assert.match(await evaluate(`document.querySelector('#status').textContent`, optionSession), /未获得项目站点权限/);
+    await evaluate(`chrome.permissions.request=window.realPermissionRequest;document.querySelector('#enable').click();`, optionSession);
+    await waitOptions(`document.querySelector('#status').dataset.tone==='success' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'direct project opens with feedback authorization');
+    assert.equal((await evaluate('window.openedPreviews.at(-1)', optionSession)), previewURL);
+    assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'direct opening preserves the external proxy');
+    assert.equal(await evaluate(`chrome.scripting.getRegisteredContentScripts().then(scripts=>scripts.find(script=>script.id==='termrelay-project-feedback').matches[0])`, optionSession), `${new URL(previewURL).protocol}//${new URL(previewURL).hostname}/*`);
+    await evaluate(`document.querySelector('#advanced').open=false`, optionSession);
+    await screenshot(`options-direct-${configuredApps.length}`, optionSession);
+    await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false }, optionSession);
+    assert.equal(await evaluate(`document.documentElement.scrollWidth <= innerWidth`, optionSession), true, 'direct project address fits narrow windows');
+    await screenshot(`options-direct-${configuredApps.length}-narrow`, optionSession);
+    await call('Emulation.clearDeviceMetricsOverride', {}, optionSession);
+    const directLoaded = new Promise(resolve => handlers.set('Page.loadEventFired', resolve));
+    await call('Page.navigate', { url: previewURL });
+    await directLoaded;
+    assert.equal(await evaluate(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+      if(document.querySelector('termrelay-feedback')){clearInterval(timer);resolve(true);}
+      else if(++attempts>60){clearInterval(timer);resolve(false);}},100);})`), true, 'dynamic feedback script must mount on the configured direct project');
+    const directTree = (await call('DOM.getDocument', { depth: -1, pierce: true })).root;
+    ({ object } = await call('DOM.resolveNode', { nodeId: findHost(directTree).shadowRoots[0].nodeId }));
+    await within(`this.querySelector('#toggle').click();this.querySelector('#whole').click();this.querySelector('#description').value='Direct project feedback';this.querySelector('#submit').click();`);
+    assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+      if(this.querySelector('#status').textContent.includes('已提交')){clearInterval(timer);resolve(true);}
+      else if(++attempts>60){clearInterval(timer);resolve(false);}},100);});`), true);
+    assert.equal(directStore.records[0].page, previewURL);
+    await waitPopup(`document.querySelector('#power').checked && document.querySelector('#mode').textContent==='直接访问'`, 'popup displays the current direct project');
+    await screenshot(`popup-direct-${configuredApps.length}`, popupSession);
+    await evaluate(`document.querySelector('#power').checked=false;document.querySelector('#power').dispatchEvent(new Event('change'));`, popupSession);
+    await waitPopup(`!document.querySelector('#power').checked && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'popup turns off direct feedback');
+    await waitOptions(`document.querySelector('#connection-badge').textContent==='未连接' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'direct project disconnects');
+    assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'direct disconnect preserves the external proxy');
+  }
+  console.log('Chrome UI: popup quick toggle/configuration, shared live states, options hierarchy, legacy pairing, proxy ownership, ZeroOmega and dynamic direct IP/domain feedback passed.');
 } finally {
   clearTimeout(timeout);
-  await call('Browser.close', {}, null).catch(() => {});
+  if (browser.exitCode === null) await call('Browser.close', {}, null).catch(() => {});
   if (browser.exitCode === null) await Promise.race([once(browser, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
   if (browser.exitCode === null) { browser.kill('SIGTERM'); await once(browser, 'exit'); }
   app.closeProxy();
+  for (const configured of configuredApps) {
+    configured.closeProxy();
+    await new Promise(resolve => { configured.publicServer.close(resolve); configured.publicServer.closeAllConnections(); });
+  }
   await new Promise(resolve => probeServer.close(resolve));
   await new Promise(resolve => { app.publicServer.close(resolve); app.publicServer.closeAllConnections(); });
   await rm(directory, { recursive: true });

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>点点改</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main aria-busy="true">
+    <header><div class="brand"><img src="icons/icon-32.png" width="26" height="26" alt=""><strong>点点改</strong></div><button id="configure" class="text-button">配置</button></header>
+    <section class="project" aria-label="当前项目">
+      <span id="mode" class="mode">未配置</span>
+      <h1 id="project-title">尚未添加项目</h1>
+      <p id="project-url" class="address"></p>
+    </section>
+    <section class="connection" aria-label="连接状态">
+      <div id="connection-state" class="state" data-tone="pending" role="status" aria-live="polite"><span class="dot"></span><strong id="state-title">读取状态中</strong></div>
+      <p id="state-detail">正在读取当前配置…</p>
+      <label class="power-row" for="power"><span>共享连接<small id="power-label">已关闭</small></span><input id="power" type="checkbox" role="switch" aria-label="开启或关闭共享连接" disabled><span class="switch" aria-hidden="true"></span></label>
+      <label id="consent-row" class="consent" hidden><input id="consent" type="checkbox"><span id="consent-label"></span></label>
+    </section>
+    <p id="message" role="alert" hidden></p>
+    <footer><button id="open-project" disabled>打开项目</button><span id="connection-label">App 未连接</span></footer>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
