@@ -1,8 +1,15 @@
 # Chrome 预览与反馈：进展与待办
 
-> 更新日期：2026-10-30。
-> 当前阶段：已从独立 CLI 实验版接入 Mac App 原生 UI，完成合成环境验证，尚未完成真实业务项目端到端验收。
+> 更新日期：2026-11-02。
+> 当前阶段：用户反馈原有局域网预览与反馈功能已验收、基本可用；截图链路及 Mac 聊天图片回显完成自动化验证与 Release 打包，新增截图尚未完成真实 AI 修改验收。
 > 使用方法见 [README](README.md)，产品交互与未决策项见 [需求草案](../../docs/CHROME_PREVIEW_FEEDBACK_REQUIREMENTS.md)。
+
+## 聊天图片回显补齐（2026-11-02）
+
+- 修复图片已进入 AI 请求、但用户消息事件只保留文字的缺口：Codex、Copilot、DSH 的用户消息现在携带图片，消息投影保留图片，后续文字更新不会清掉已有图片。
+- App 聊天窗显示等比缩略图，点击打开大图，关闭按钮 / Escape 关闭预览；图片解码失败显示明确提示。没有修改 Server 或远程协议，也不自动恢复此前未保存图片的纯文字历史消息。
+- 新增消息投影回归与 SwiftUI 离屏实际 PNG 像素检查；`pnpm mac:test` 共 143 项，6 项条件跳过，0 失败。离屏验证包含缩略图尺寸和非透明绿色像素，不等同于真实会话及人工点击验收。
+- 已重新执行 `pnpm release:mac --allow-dirty`，Release 编译和签名校验通过；更新同路径 arm64 DMG / ZIP，使用 ad-hoc 签名、未公证，未替换正在使用的 App。安装新版并重启共享后重新提交截图验收。
 
 ## 1. 当前实现路线
 
@@ -38,6 +45,8 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
 | 快捷连接与配置层级 | 工具栏轻量 popup，快速开启 / 关闭、项目入口与独立配置按钮；设置页突出当前项目、实际模式与连接状态，已保存配对默认收起 | `extension/popup.*`、`view-state.js`、`options.*`、`background.js` |
+| 局部截图修改建议 | 框选可见区域、取消 / 预览 / 移除、隐私确认、同编号提交与历史图片读取；图片随绑定轮次进入支持图片的 Codex / ACP 会话 | `extension/capture.js`、`content.js`、`companion/model.mjs`、`server.mjs`、Mac Preview / Agents |
+| Mac 聊天图片显示 | 携图用户消息显示等比缩略图、点击放大、关闭 / Escape、解码失败提示；文字更新保留图片 | `AgentModels.swift`、`AgentSessionPresentation.swift`、`ContentView.swift`、三个 Provider adapter |
 | 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
 | 验收专用 Profile 默认流程 | 明确在验收者电脑创建独立 Profile，不安装 ZeroOmega；确认后“打开预览”自动连接、启用代理并打开首个入口，可重复打开；ZeroOmega 移入高级设置且保留旧模式 | `extension/options.*`、`tests/browser.mjs` |
 | 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
@@ -50,7 +59,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
 | 点点改页面 UI | 右下角文字按钮、简洁黑白浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段、文字进度与“效果满意 / 再调一调” | `extension/content.js` |
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
-| 基础敏感信息过滤 | 不采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash | `extension/content.js`、`companion/model.mjs` |
+| 基础敏感信息过滤 | 不自动采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash；主动添加的截图可能含可见敏感信息，提交前须检查确认 | `extension/content.js`、`companion/model.mjs` |
 | 受限反馈接口 | 提交、列表、验收；反馈 Token 与管理 Token 分离，网页脚本来源被拒绝 | `companion/server.mjs` |
 | 本机管理页 | 仅 loopback 监听，查看反馈、核对绑定、填写结果摘要；执行入口仅在 App | `companion/owner.*` |
 | 已有会话绑定 | 固定本地设备、工作区和会话；App 拒绝 PTY、外部 AI 对话、已结束 / 忙碌会话 | `companion/main.mjs`、`AppModel.swift` |
@@ -78,6 +87,23 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 - 业务方共享预览凭据和反馈列表；没有独立用户身份、个人列表或完整权限模型。
 
 ## 3. 已完成的验证及其边界
+
+2026-11-02 局部截图建议：
+
+- 用户确认采用“框选可见页面区域 + 文字”，图片需要一起交给 AI；保留原 DOM 点选和纯文字方式，不增加画笔、多图或录屏。
+- 使用 activeTab 临时授权，无所有网站截图权限；后台确认活动标签页及项目范围，裁切按实际像素与 DPR 计算，截图期间隐藏点点改 UI。
+- 每条最多一张 PNG，最长边 1600px、最大 1 MB，必要时缩小后预览；用户明确确认后上传，编码后图片总量最多 32 MB。
+- 图片与反馈一起私有持久化、幂等比较；列表仅传摘要，读取受配对 / 租约 / 项目范围保护。未知提交结果保留原编号，不重发新反馈。
+- Mac 增加图片解码和原生轮次输入：Codex image URL 内容、Copilot / DSH 在 ACP image 能力协商成功时发送图片；未支持时拒绝，不静默丢图。
+- `node --test apps/chrome-extension/tests/*.test.mjs`：40 项通过；包含 PNG 格式 / 尺寸 / 体积、图片读取鉴权、持久化、幂等、单次派发及能力拒绝。
+- 真实 Chrome 扩展 `tests/browser.mjs` 通过：框选 / Esc 取消、权限拒绝恢复、DPR=2 的 480×240 选区像素与原页面一致、隐私确认后提交、历史读取及不支持图片会话。桌面 / 窄窗口证据在 `/tmp/termrelay-screenshot-feedback/`，截图已检查。
+- 截图 API 在浏览器测试中用 CDP 捕获的真实合成页面像素替代，裁切模块、框选 UI、后台和桥接实际运行；尚未人工验证 Chrome 工具栏 activeTab 授权后的原生 captureVisibleTab。
+- 初次 Mac 构建被 Metal Toolchain 缺失阻塞；用户下载组件后重新验证，完整编译通过，无需修改功能代码。
+- `pnpm mac:test --filter 'PreviewSharingTests|CodexAppServerClientTests|CopilotACPClientTests|DSHACPClientTests'`：执行 34 项，3 项真实 Provider 探针按条件跳过，0 失败。包含 helper → Mac 图片回调、PNG 实际解码、Codex / ACP 图片内容序列化，以及不支持图片时保持 ready 的测试。
+- `pnpm check` 完整通过：43 个协议 Schema、全部 TypeScript 类型检查、Linux 19 项通过 / 2 项条件跳过，Mac 共执行 141 项 / 6 项条件跳过 / 0 失败。未启动真实 Agent 或发送模型请求。
+- `pnpm release:mac --allow-dirty` 成功，Release 编译与签名校验通过。产物位于 `dist/termrelay-mac/TermRelay-0.1.0-arm64.{dmg,zip}`，附 `.sha256`；使用 ad-hoc 签名，未公证，未自动替换已安装 App。
+
+待完成：安装新版 App、更新插件并重新开启共享后，人工验证工具栏临时授权与一次真实截图 → AI 修改 → 页面验收。此前用户对基础功能“基本可用”的反馈不等于新增截图已验收。
 
 2026-10-30 快捷弹窗与配置状态更新：
 
@@ -155,6 +181,8 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 
 ## 4. 下一步：按顺序完成真实试用验收
 
+2026-11-02 用户已反馈原有功能完成验收且基本可用；下表保留原逐项清单，未把未提供的逐项环境与证据补写成已完成。新增截图另按上节记录验收边界。
+
 这些是当前交付缺口，不能因为自动化检查通过就标为已完成。
 
 | 编号 | 状态 | 工作 | 完成标准 |
@@ -194,7 +222,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 
 ## 6. 本期明确不做
 
-- 截图、录屏、图片标注及 AI 看图。
+- 录屏、图片画笔 / 箭头标注、多图及全页滚动截图；局部框选与 AI 图片输入已按 2026-11-02 新需求纳入本轮。
 - 自研浏览器、完整浏览器自动化、手机 Chrome 扩展。
 - 多项目同时共享、同一 Profile 同域名按标签页分流；单项目地址已支持按分享配置不同域名或局域网 IP。
 - 无人确认自动改代码、自动提交 Git、自动发布。

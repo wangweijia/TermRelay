@@ -184,6 +184,8 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         emit(.failed(code:"runtime_exited",message:"Codex App Server 已退出"))
     }
 
+    func supportsImageInput() async -> Bool { true }
+
     func send(_ action: ToolAction) async throws {
         guard let threadID else {
             throw AgentError.invalidState(expected: "thread created", actual: .starting)
@@ -198,7 +200,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 "clientUserMessageId": .string(idempotencyKey.uuidString.lowercased()),
                 "input": .array([
                     .object(["type": .string("text"), "text": .string(input.text)]),
-                ]),
+                ] + input.images.map { .object(["type": .string("image"), "url": .string($0.dataURL)]) }),
             ]
             if let selectedModel { params["model"] = .string(selectedModel) }
             if let selectedEffort { params["effort"] = .string(selectedEffort) }
@@ -207,7 +209,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 throw AgentError.protocolFailure("turn/start 未返回 turn.id")
             }
             emit(
-                .userMessage(messageID: idempotencyKey.uuidString.lowercased(), text: input.text),
+                .userMessage(messageID: idempotencyKey.uuidString.lowercased(), text: input.text, images: input.images),
                 turnID: turnID,
                 itemID: idempotencyKey.uuidString.lowercased()
             )

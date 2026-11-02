@@ -46,12 +46,17 @@ final class CodexAppServerClientTests: XCTestCase {
         let changedOptions = try await changing.value
         XCTAssertEqual(changedOptions.last?.currentValue, "high")
 
-        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello"), idempotencyKey: UUID())) }
+        let image = AgentImage(data: "c3ludGhldGlj", mimeType: "image/png")
+        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello", images: [image]), idempotencyKey: UUID())) }
         let turn = try await transport.waitForSentMessage(at: 5)
         let params = try XCTUnwrap(turn["params"] as? [String: Any])
         XCTAssertEqual(params["threadId"] as? String, "thread-model")
         XCTAssertEqual(params["model"] as? String, "model-a")
         XCTAssertEqual(params["effort"] as? String, "high")
+        let content = try XCTUnwrap(params["input"] as? [[String: Any]])
+        XCTAssertEqual(content.count, 2)
+        XCTAssertEqual(content[1]["type"] as? String, "image")
+        XCTAssertEqual(content[1]["url"] as? String, image.dataURL)
         try await transport.respondToRequest(at: 5, result: ["turn": ["id": "turn-model"]])
         try await sending.value
         await runtime.stop()

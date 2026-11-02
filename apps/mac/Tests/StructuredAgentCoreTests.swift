@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import XCTest
 @testable import TermRelay
 
@@ -134,6 +135,58 @@ final class StructuredAgentCoreTests: XCTestCase {
         snapshot = await coordinator.snapshot()
         XCTAssertEqual(snapshot.state, .running)
         XCTAssertTrue(snapshot.pendingApprovalIDs.isEmpty)
+    }
+
+    @MainActor
+    func testChatImageRendersActualPNGInsideThumbnail() throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 32,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        var pixel = [31, 184, 77, 255]
+        for row in 0..<32 {
+            for column in 0..<64 {
+            bitmap.setPixel(&pixel, atX: column, y: row)
+            }
+        }
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let source = try XCTUnwrap(NSBitmapImageRep(data: png))
+        XCTAssertGreaterThan(try XCTUnwrap(source.colorAt(x: 32, y: 16)).alphaComponent, 0.9)
+        let image = AgentImage(data: png.base64EncodedString(), mimeType: "image/png")
+        let renderer = ImageRenderer(content: AgentMessageImageView(image: image).frame(width: 320, height: 240))
+        renderer.scale = 1
+        let rendered = try XCTUnwrap(renderer.nsImage)
+        let pixels = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(rendered.tiffRepresentation)))
+        XCTAssertEqual(pixels.pixelsWide, 320)
+        XCTAssertEqual(pixels.pixelsHigh, 240)
+        let center = try XCTUnwrap(pixels.colorAt(x: 160, y: 120)?.usingColorSpace(.deviceRGB))
+        XCTAssertGreaterThan(center.greenComponent, 0.6)
+        XCTAssertLessThan(center.redComponent, 0.3)
+        XCTAssertGreaterThan(center.alphaComponent, 0.9)
+    }
+
+    func testUserMessageRetainsImagesWhenTextIsUpdated() throws {
+        let sessionID = UUID()
+        let image = AgentImage(data: "aW1hZ2U=", mimeType: "image/png")
+        var items: [AgentTimelineItem] = []
+        for (sequence, payload) in [
+            ToolEventPayload.userMessage(messageID: "user-a", text: "修改截图", images: [image]),
+            .userMessage(messageID: "user-a", text: "修改截图中的按钮"),
+        ].enumerated() {
+            AgentTimelineProjector.apply(ToolEvent(
+                sessionID: sessionID, sequence: UInt64(sequence), occurredAt: Date(),
+                correlation: AgentCorrelation(turnID: "turn-a", itemID: "user-a", approvalID: nil),
+                payload: payload
+            ), to: &items)
+        }
+        XCTAssertEqual(items.count, 1)
+        guard case .message(let message) = try XCTUnwrap(items.first) else {
+            return XCTFail("Expected a user message")
+        }
+        XCTAssertEqual(message.images, [image])
+        XCTAssertEqual(message.text, "修改截图中的按钮")
+        XCTAssertEqual(message.turnID, "turn-a")
     }
 
     func testReasoningChunksWithoutItemIDMergeByTurn() {

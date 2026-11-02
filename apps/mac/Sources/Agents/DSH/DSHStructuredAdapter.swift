@@ -107,6 +107,7 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
     private var assistantMessages: [String: String] = [:]
     private var sequence: UInt64 = 0
     private var stopped = false
+    private var imageInputSupported = false
 
     init(
         sessionID: UUID,
@@ -139,6 +140,7 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
         guard initialized.object?["protocolVersion"]?.integer == 1 else {
             throw AgentError.protocolFailure("DSH 未协商到 ACP v1")
         }
+        imageInputSupported = initialized.object?["agentCapabilities"]?.object?["promptCapabilities"]?.object?["image"]?.bool == true
         let messages = client.messages
         messageTask = Task { [weak self] in
             for await message in messages {
@@ -172,12 +174,15 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
         emit(.failed(code:"runtime_exited",message:"DSH ACP 已退出"))
     }
 
+    func supportsImageInput() async -> Bool { imageInputSupported }
+
     func send(_ action: ToolAction) async throws {
         guard let providerSessionID else {
             throw AgentError.invalidState(expected: "session created", actual: .starting)
         }
         switch action {
         case .startTurn(let input, let idempotencyKey):
+            guard input.images.isEmpty || imageInputSupported else { throw AgentError.unsupportedCapability("image input") }
             guard promptTask == nil else {
                 throw AgentError.invalidState(expected: "no active prompt", actual: .running)
             }
@@ -186,10 +191,10 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
             let turnID = idempotencyKey.uuidString.lowercased()
             activeTurnID = turnID
             assistantMessages.removeAll()
-            emit(.userMessage(messageID: turnID, text: input.text), turnID: turnID, itemID: turnID)
+            emit(.userMessage(messageID: turnID, text: input.text, images: input.images), turnID: turnID, itemID: turnID)
             emit(.turnStarted(turnID: turnID), turnID: turnID)
             promptTask = Task { [weak self] in
-                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, text: input.text)
+                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, text: input.text, images: input.images)
             }
         case .steer:
             throw AgentError.unsupportedCapability("steering")
@@ -265,14 +270,14 @@ actor DSHStructuredRuntime: StructuredAgentRuntime {
         continuation.finish()
     }
 
-    private func runPrompt(sessionID: String, turnID: String, text: String) async {
+    private func runPrompt(sessionID: String, turnID: String, text: String, images: [AgentImage]) async {
         do {
             let result = try await client.request(method: "session/prompt", params: .object([
                 "sessionId": .string(sessionID),
                 "prompt": .array([.object([
                     "type": .string("text"),
                     "text": .string(text),
-                ])]),
+                ])] + images.map(\.acpContent)),
             ]), timeout: nil)
             guard activeTurnID == turnID else { return }
             for (messageID, text) in assistantMessages where !text.isEmpty {

@@ -13,6 +13,8 @@
   let pinnedPage = pageURL(), pending = null, submitted = false, sending = false;
   let submittedID = null;
   let synchronizing = false;
+  let screenshot = null, screenshotSupported = false, screenshotSelecting = false, capturing = false, drag = null;
+  let openedScreenshot = null, openedScreenshotID = null;
   const $ = selector => root.querySelector(selector);
   function node(tag, value) { const result = document.createElement(tag); result.textContent = value; return result; }
   async function send(message) {
@@ -59,7 +61,7 @@
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
   }
   function summary() {
-    $('#object').textContent = element ? `${element.tag} · ${element.text.slice(0, 80) || element.role || '无可见文字'}` : '整个页面';
+    $('#object').textContent = screenshot ? '截图区域' : element ? `${element.tag} · ${element.text.slice(0, 80) || element.role || '无可见文字'}` : '整个页面';
     $('#page').textContent = pinnedPage;
     $('#page').title = pinnedPage;
     $('#context').textContent = JSON.stringify({ page: pinnedPage, element }, null, 2);
@@ -78,6 +80,7 @@
     highlight($('#panel').hidden ? null : target);
   }
   function editable() {
+    if (capturing || screenshotSelecting) return false;
     if (sending || pending) { status('先确认当前提交结果；不要修改后用同一编号重试。'); return false; }
     if (submitted) { status('这个想法已经提交，点击“再来一个想法”就能继续。'); return false; }
     return true;
@@ -89,7 +92,59 @@
     $('#toggle').setAttribute('aria-expanded', 'false');
   }
   function freezeForm(value) {
-    for (const selector of ['#description', '#steps', '#pick', '#whole', '#outer']) $(selector).disabled = value;
+    for (const selector of ['#description', '#steps', '#pick', '#whole', '#outer', '#screenshot', '#remove-screenshot', '#screenshot-consent']) $(selector).disabled = value;
+    $('#screenshot').disabled = value || !screenshotSupported;
+  }
+  function showScreenshot(value) {
+    screenshot = value;
+    $('#screenshot-preview').hidden = !value;
+    $('#screenshot-image').src = value?.dataURL || '';
+    $('#screenshot-size').textContent = value ? `${value.width} × ${value.height}` : '';
+    $('#screenshot-consent').checked = false;
+    summary();
+  }
+  function viewScreenshot(value) {
+    $('#viewer-image').src = value.dataURL;
+    if (!$('#image-viewer').open) $('#image-viewer').showModal();
+  }
+  function finishScreenshotSelection() {
+    screenshotSelecting = false; drag = null;
+    $('#screenshot-overlay').hidden = true;
+    $('#panel').hidden = false;
+    $('#toggle').setAttribute('aria-expanded', 'true');
+  }
+  function beginScreenshot() {
+    if (!editable()) return false;
+    if (!screenshotSupported) { status('当前 AI 会话不支持图片输入，请联系开发者更换会话。', 'error'); return false; }
+    if (selecting) exitSelection();
+    screenshotSelecting = true;
+    $('#panel').hidden = true; $('#highlight').hidden = true;
+    $('#toggle').setAttribute('aria-expanded', 'false');
+    $('#screenshot-overlay').hidden = false;
+    $('#screenshot-region').hidden = true;
+    $('#cancel-screenshot').focus();
+    return true;
+  }
+  async function captureScreenshot(rect) {
+    const viewport = { width: innerWidth, height: innerHeight };
+    const locationBefore = location.href, scrollBefore = { x: scrollX, y: scrollY };
+    finishScreenshotSelection();
+    capturing = true; freezeForm(true); $('#submit').disabled = true;
+    host.style.setProperty('visibility', 'hidden', 'important');
+    try {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const image = await send({ type: 'screenshot.capture', rect, viewport });
+      if (location.href !== locationBefore || scrollX !== scrollBefore.x || scrollY !== scrollBefore.y
+        || innerWidth !== viewport.width || innerHeight !== viewport.height) throw new Error('页面或窗口已变化，请重新截图。');
+      target = null; element = null; pinnedPage = pageURL(); highlight(null); summary();
+      showScreenshot(image);
+      status('截图已准备，确认图片内容后填写修改建议。');
+    } catch (error) { status(error.message, 'error'); }
+    finally {
+      host.style.removeProperty('visibility');
+      capturing = false; freezeForm(false); $('#submit').disabled = submitted;
+      $('#description').focus();
+    }
   }
   function reset() {
     if (pending) { status('提交结果待确认，请先用原编号重试查询。'); return; }
@@ -97,6 +152,7 @@
     submittedID = null;
     $('#description').value = ''; $('#steps').value = '';
     $('#count').textContent = '0 / 4000';
+    showScreenshot(null);
     freezeForm(false); highlight(null); summary(); status('');
     $('#submit').disabled = false;
     $('#submit').textContent = '交给 AI 改一改';
@@ -105,9 +161,12 @@
     if (sending || submitted) return;
     const description = $('#description').value.trim();
     if (!description) { status('先说说你的想法，比如希望哪里变得更好。', 'error'); $('#description').focus(); return; }
+    if (capturing || screenshotSelecting) return;
+    if (screenshot && !$('#screenshot-consent').checked) { status('请先确认截图内容可以发送给 AI。', 'error'); $('#screenshot-consent').focus(); return; }
     const draft = {
       page: pinnedPage, element,
       description, steps: $('#steps').value.trim(),
+      ...(screenshot ? { screenshot } : {}),
     };
     sending = true; freezeForm(true); $('#submit').disabled = true;
     $('#submit').textContent = '正在传递你的想法…';
@@ -140,6 +199,21 @@
         heading.append(badge, node('small', record.id.slice(0, 8)));
         const page = node('small', record.page); page.className = 'record-page'; page.title = record.page;
         card.append(heading, node('p', record.description), page);
+        if (record.screenshot) {
+          const button = node('button', `查看截图 · ${record.screenshot.width} × ${record.screenshot.height}`);
+          button.onclick = async () => {
+            button.disabled = true;
+            try {
+              if (openedScreenshotID !== record.id) {
+                openedScreenshot = await send({ type: 'feedback.screenshot', id: record.id });
+                openedScreenshotID = record.id;
+              }
+              viewScreenshot(openedScreenshot);
+            } catch (error) { status(error.message, 'error'); }
+            finally { button.disabled = false; }
+          };
+          card.append(button);
+        }
         if (record.note) { const note = node('p', record.note); note.className = 'record-note'; card.append(note); }
         if (record.status === 'awaiting_review') {
           for (const [label, next] of [['效果满意', 'verified'], ['再调一调', 'changes_requested']]) {
@@ -169,7 +243,7 @@
     root.innerHTML = `
       <style>
         *{box-sizing:border-box}[hidden]{display:none!important}
-        #toggle,#panel,#hint{pointer-events:auto;font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#222;text-align:left;letter-spacing:normal;color-scheme:light}
+        #toggle,#panel,#hint,#screenshot-overlay,#image-viewer{pointer-events:auto;font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#222;text-align:left;letter-spacing:0;color-scheme:light}
         button,textarea{font:inherit}button,textarea,summary{outline-offset:3px}
         :focus-visible{outline:2px solid #555}
         button{cursor:pointer;border:1px solid #ccc;border-radius:4px;background:white;color:#333;padding:7px 10px;font-size:13px}
@@ -221,22 +295,38 @@
         #hint{position:fixed;top:16px;left:16px;max-width:calc(100vw - 32px);background:#fff;padding:10px 12px;border:1px solid #ccc;border-radius:4px}
         #hint button{margin-left:8px;font-size:12px}
         #highlight{position:fixed;border:2px solid #444;background:#00000008;pointer-events:none}
+        #screenshot-overlay{position:fixed;inset:0;z-index:3;cursor:crosshair;touch-action:none;background:#0002;overflow:hidden}
+        #screenshot-toolbar{position:absolute;top:16px;left:16px;display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #ccc;padding:8px 12px;border-radius:4px}
+        #screenshot-region{position:absolute;border:2px solid #21764d;background:#ffffff20;pointer-events:none;box-shadow:0 0 0 30000px #0003}
+        #screenshot-preview{margin:0 0 16px}
+        #screenshot-expand{display:block;width:100%;padding:0;overflow:hidden;background:#f5f5f5}
+        #screenshot-image{display:block;width:100%;height:auto;max-height:200px;object-fit:contain}
+        .screenshot-actions{display:flex;align-items:center;justify-content:space-between;margin-top:5px;font-size:11px;color:#666}
+        #remove-screenshot{border:0;padding:2px 0;font-size:12px}
+        .screenshot-consent{display:flex;align-items:flex-start;gap:6px;margin-top:8px;font-size:11px;color:#666}
+        .screenshot-consent input{flex-shrink:0;margin-top:4px}
+        #image-viewer{max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);padding:12px;border:1px solid #ccc;border-radius:6px;background:#fff;overflow:auto}
+        #image-viewer::backdrop{background:#0007}
+        #viewer-image{display:block;max-width:100%;max-height:calc(100vh - 110px);object-fit:contain;margin-top:8px}
         @media(max-width:440px){#panel{right:10px;top:10px;bottom:70px;width:calc(100vw - 20px)}#toggle{right:14px;bottom:14px}}
       </style>
       <div id="highlight" hidden></div>
       <div id="hint" hidden>移动鼠标定位，点击选中；Esc 退出 <button id="cancel-pick">取消选择</button></div>
+      <div id="screenshot-overlay" hidden><div id="screenshot-region" hidden></div><div id="screenshot-toolbar"><span>框选截图区域</span><button id="cancel-screenshot">取消</button></div></div>
+      <dialog id="image-viewer" aria-label="反馈截图"><button id="close-viewer">关闭</button><img id="viewer-image" alt="反馈截图"></dialog>
       <button id="toggle" aria-controls="panel" aria-expanded="false">点点改</button>
       <section id="panel" aria-labelledby="panel-title" hidden>
         <header class="panel-header"><h2 id="panel-title">点点改</h2><button id="close" aria-label="收起点点改">收起</button></header>
         <div class="panel-body">
           <div class="connection"><p id="environment"></p><p id="connection" role="status"></p></div>
           <h3 class="step-heading">修改范围</h3>
-          <div class="pick-actions"><button id="pick">点选页面位置</button><button id="whole">改改整个页面</button></div>
+          <div class="pick-actions"><button id="pick">点选页面位置</button><button id="whole">改改整个页面</button><button id="screenshot" disabled>框选截图</button></div>
           <div class="selection"><div class="selection-heading"><p id="object"></p><button id="outer">扩大范围</button></div><small id="page"></small></div>
+          <div id="screenshot-preview" hidden><button id="screenshot-expand" title="查看截图"><img id="screenshot-image" alt="待提交截图"></button><div class="screenshot-actions"><span id="screenshot-size"></span><button id="remove-screenshot">移除截图</button></div><label class="screenshot-consent"><input id="screenshot-consent" type="checkbox"><span>我确认图片可发送给绑定 AI，已检查其中的表单、账号及其他敏感内容。</span></label></div>
           <label for="description" class="step-heading">修改描述</label>
           <textarea id="description" maxlength="4000" required placeholder="比如：查询按钮换成主色，再和旁边的输入框对齐。"></textarea><small id="count">0 / 4000</small>
           <details><summary>补充重现步骤（选填）</summary><textarea id="steps" maxlength="2000" aria-label="重现步骤" placeholder="如果需要特定操作才能看到问题，可以写在这里。"></textarea></details>
-          <details><summary>会带上哪些页面信息？</summary><p class="privacy-copy">仅当前页面地址、选中元素的有限文字与结构。不采集截图、表单值或网址查询参数；请勿填写敏感信息。</p><pre id="context"></pre></details>
+          <details><summary>会带上哪些页面信息？</summary><p class="privacy-copy">当前页面地址、选中元素的有限文字与结构，以及你明确添加的局部截图。截图可能包含可见的表单和账号信息，确认后随建议发送给绑定 AI；不自动采集图片或网址查询参数。</p><pre id="context"></pre></details>
           <p class="privacy-copy">提交即自动进入绑定 Chat；AI 工具审批沿用 Chat 原设置。</p>
           <div class="submit-actions"><button id="submit">交给 AI 改一改</button><button id="new">再来一个想法</button></div>
           <p id="status" role="status" aria-live="polite" hidden></p>
@@ -251,15 +341,48 @@
     $('#close').onclick = () => { $('#panel').hidden = true; $('#toggle').setAttribute('aria-expanded', 'false'); highlight(null); $('#toggle').focus(); };
     $('#description').oninput = () => { $('#count').textContent = `${$('#description').value.length} / 4000`; };
     $('#pick').onclick = selectMode;
+    $('#screenshot').onclick = beginScreenshot;
+    $('#remove-screenshot').onclick = () => { if (editable()) showScreenshot(null); };
+    $('#screenshot-expand').onclick = () => { if (screenshot) viewScreenshot(screenshot); };
+    $('#close-viewer').onclick = () => $('#image-viewer').close();
+    $('#cancel-screenshot').onclick = event => { event.stopPropagation(); finishScreenshotSelection(); $('#screenshot').focus(); };
+    const overlay = $('#screenshot-overlay');
+    overlay.onpointerdown = event => {
+      if (event.button !== 0 || event.target.closest('#screenshot-toolbar')) return;
+      event.preventDefault(); event.stopPropagation();
+      drag = { x: event.clientX, y: event.clientY };
+      overlay.setPointerCapture(event.pointerId);
+      $('#screenshot-region').hidden = true;
+    };
+    overlay.onpointermove = event => {
+      if (!drag) return;
+      event.preventDefault(); event.stopPropagation();
+      const endX = Math.max(0, Math.min(innerWidth, event.clientX)), endY = Math.max(0, Math.min(innerHeight, event.clientY));
+      const region = $('#screenshot-region'); region.hidden = false;
+      Object.assign(region.style, { left: `${Math.min(drag.x, endX)}px`, top: `${Math.min(drag.y, endY)}px`, width: `${Math.abs(endX - drag.x)}px`, height: `${Math.abs(endY - drag.y)}px` });
+    };
+    overlay.onpointerup = event => {
+      if (!drag) return;
+      event.preventDefault(); event.stopPropagation();
+      const endX = Math.max(0, Math.min(innerWidth, event.clientX)), endY = Math.max(0, Math.min(innerHeight, event.clientY));
+      const rect = { x: Math.min(drag.x, endX), y: Math.min(drag.y, endY), width: Math.abs(endX - drag.x), height: Math.abs(endY - drag.y) };
+      overlay.releasePointerCapture(event.pointerId);
+      if (rect.width < 8 || rect.height < 8) { drag = null; $('#screenshot-region').hidden = true; return; }
+      captureScreenshot(rect);
+    };
+    overlay.onpointercancel = () => finishScreenshotSelection();
+    overlay.onclick = event => { event.preventDefault(); event.stopPropagation(); };
+    overlay.addEventListener('wheel', event => { event.preventDefault(); event.stopPropagation(); }, { passive: false });
     $('#cancel-pick').onclick = exitSelection;
-    $('#whole').onclick = () => { if (!editable()) return; target = null; element = null; pinnedPage = pageURL(); highlight(null); summary(); };
+    $('#whole').onclick = () => { if (!editable()) return; target = null; element = null; pinnedPage = pageURL(); showScreenshot(null); highlight(null); summary(); };
     $('#outer').onclick = () => {
       if (!editable() || !target?.parentElement) return;
       target = target.parentElement; element = capture(target); highlight(target); summary();
     };
     $('#submit').onclick = submit;
     $('#new').onclick = () => {
-      if ((pending || (!submitted && $('#description').value)) && !confirm('丢弃未提交文字？结果未知的提交不能丢弃或重发新编号。')) return;
+      if (!editable() && !submitted) return;
+      if ((pending || (!submitted && ($('#description').value || screenshot))) && !confirm('丢弃未提交内容？结果未知的提交不能丢弃或重发新编号。')) return;
       reset();
     };
     $('#list').onclick = list;
@@ -270,23 +393,29 @@
     highlight(semantic(event.target));
   }, true);
   const intercept = event => {
+    if ((screenshotSelecting || capturing) && !event.composedPath().includes(host)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
     if (!selecting || event.composedPath().includes(host)) return;
     event.preventDefault(); event.stopImmediatePropagation();
     if (event.type !== 'click') return;
     const item = semantic(event.target);
     if (!(item instanceof HTMLElement)) { status('这个位置暂时无法选中，试试外层容器，或选择“改改整个页面”。'); exitSelection(); return; }
-    target = item; element = capture(item); pinnedPage = pageURL(); exitSelection(); summary();
+    target = item; element = capture(item); pinnedPage = pageURL(); showScreenshot(null); exitSelection(); summary();
   };
   for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'contextmenu']) {
     document.addEventListener(type, intercept, true);
   }
   document.addEventListener('keydown', event => {
+    if (screenshotSelecting) {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); finishScreenshotSelection(); $('#screenshot').focus(); }
+      else if (['Enter', ' ', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp'].includes(event.key)) { event.preventDefault(); event.stopImmediatePropagation(); }
+      return;
+    }
     if (selecting) {
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); exitSelection(); }
       else if (['Enter', ' '].includes(event.key)) { event.preventDefault(); event.stopImmediatePropagation(); }
     }
   }, true);
-  const reposition = () => { if (root && !$('#panel').hidden) highlight(target); };
+  const reposition = () => { if (screenshotSelecting) finishScreenshotSelection(); if (root && !$('#panel').hidden) highlight(target); };
   window.addEventListener('scroll', reposition, true);
   window.addEventListener('resize', reposition);
   setInterval(() => {
@@ -297,13 +426,16 @@
   async function ensure() {
     const meta = await send({ type: 'preview.meta' });
     if (!root) mount(meta);
+    screenshotSupported = meta.screenshotSupported === true;
+    $('#screenshot').disabled = !screenshotSupported || sending || !!pending || submitted || capturing;
+    $('#screenshot').title = screenshotSupported ? '截取当前可见页面的指定区域' : '当前 AI 会话未宣告图片输入能力';
     $('#environment').textContent = meta.name;
     $('#connection').textContent = '已连接 App · 执行状态自动同步';
     $('#connection').dataset.state = 'success';
-    $('#submit').disabled = sending || submitted;
+    $('#submit').disabled = sending || submitted || capturing;
   }
   async function synchronize() {
-    if (synchronizing) return;
+    if (synchronizing || capturing || screenshotSelecting) return;
     synchronizing = true;
     try { await ensure(); await list(); }
     catch (error) {
@@ -314,8 +446,13 @@
     } finally { synchronizing = false; }
   }
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (message.type !== 'panel.toggle') return;
-    ensure().then(() => { togglePanel(); respond({ ok: true }); },
+    if (!['panel.toggle', 'screenshot.select'].includes(message.type)) return;
+    ensure().then(() => {
+      if (message.type === 'screenshot.select') {
+        const selected = beginScreenshot();
+        respond({ ok: selected, error: selected ? undefined : '当前有未确认的反馈或会话不支持图片，请先处理。' });
+      } else { togglePanel(); respond({ ok: true }); }
+    },
       error => { alert(`点点改：${error.message}`); respond({ ok: false }); });
     return true;
   });

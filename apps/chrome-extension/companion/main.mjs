@@ -14,6 +14,7 @@ const { values } = parseArgs({ options: {
   ports: { type: 'string', default: '8080' },
   'preview-url': { type: 'string' },
   'access-mode': { type: 'string', default: 'direct' },
+  'image-input': { type: 'boolean', default: false },
   port: { type: 'string', default: '18420' },
   'owner-port': { type: 'string', default: '18421' },
   'data-dir': { type: 'string', default: new URL('../.local/', import.meta.url).pathname },
@@ -100,7 +101,7 @@ try {
   }
   const store = new Store(resolve(directory, 'feedback.json'));
   await store.load();
-  app = createCompanion({ store, binding, ports, preview, ...credentials });
+  app = createCompanion({ store, binding, ports, preview, imageInputSupported: values['image-input'], ...credentials });
   const listen = (server, port, host) => new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);

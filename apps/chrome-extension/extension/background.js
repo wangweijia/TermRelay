@@ -1,3 +1,5 @@
+import { captureRegion } from './capture.js';
+
 const HOST = 'page-gateway-local.nioint.com';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const projectOf = config => ({ url: new URL(config.previewURL || `https://${HOST}:8080/`), accessMode: config.accessMode || 'proxy' });
@@ -193,6 +195,20 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         await registerPage(config);
         return { authorized: true };
       }
+      if (message.type === 'screenshot.begin') {
+        const config = await configOf();
+        const meta = await request('/v1/meta');
+        verifyProjectMeta(config, meta);
+        if (!meta.screenshotSupported) throw new Error('当前 AI 会话不支持图片输入，请开发者更换支持图片的会话并重新开启共享。');
+        const values = await chrome.storage.local.get(['proxyEnabled', 'directPreviewEnabled', 'externalPreviewEnabled']);
+        if (!values.proxyEnabled && !values.directPreviewEnabled && !values.externalPreviewEnabled) throw new Error('请先开启共享连接。');
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !allowedPage(tab.url, config)) throw new Error('请先切换到当前分享的项目页面。');
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+        const reply = await chrome.tabs.sendMessage(tab.id, { type: 'screenshot.select' });
+        if (!reply?.ok) throw new Error(reply?.error || '页面尚未就绪，请刷新后重试。');
+        return { selecting: true };
+      }
       if (message.type === 'proxy.set') {
         await setProxy(message.enabled === true);
         if (message.enabled === true && message.consent === true) await chrome.storage.local.set({ previewConsent: true });
@@ -242,6 +258,17 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const page = new URL(sender.url);
     if (message.type === 'feedback.id') return crypto.randomUUID();
     if (message.type === 'preview.meta') return meta;
+    if (message.type === 'screenshot.capture') {
+      if (!meta.screenshotSupported) throw new Error('当前 AI 会话不支持图片输入。');
+      const values = await chrome.storage.local.get(['proxyEnabled', 'directPreviewEnabled', 'externalPreviewEnabled']);
+      if (!values.proxyEnabled && !values.directPreviewEnabled && !values.externalPreviewEnabled) throw new Error('共享连接已关闭。');
+      const tab = await chrome.tabs.get(sender.tab.id);
+      if (tab.url !== sender.url) throw new Error('页面已变化，请重新截图。');
+      return captureRegion(tab, message.rect, message.viewport);
+    }
+    if (message.type === 'feedback.screenshot' && UUID.test(message.id)) {
+      return request(`/v1/feedback/${message.id}/screenshot`);
+    }
     if (message.type === 'feedback.list') {
       const records = await request('/v1/feedback');
       return records.filter(record => record.page.startsWith(`${page.origin}/`));

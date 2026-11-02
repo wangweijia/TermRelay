@@ -17,6 +17,7 @@ protocol StructuredAgentRuntime: Actor {
     func start() async throws
     func createSession(_ request: AgentSessionRequest) async throws -> AgentSessionReference
     func send(_ action: ToolAction) async throws
+    func supportsImageInput() async -> Bool
     func configurationOptions() async throws -> [AgentConfigOption]
     func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption]
     func publishConfiguration(_ options: [AgentConfigOption]) async
@@ -36,6 +37,8 @@ struct AgentConfigOption: Sendable, Equatable {
 }
 
 extension StructuredAgentRuntime {
+    func supportsImageInput() async -> Bool { false }
+
     func configurationOptions() async throws -> [AgentConfigOption] { [] }
 
     func setConfiguration(id: String, value: String) async throws -> [AgentConfigOption] {

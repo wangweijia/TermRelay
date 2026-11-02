@@ -40,6 +40,8 @@ h1{font-size:17px;font-weight:600;line-height:1.5;margin:8px 0 3px;overflow-wrap
 .consent input{flex-shrink:0;margin-top:3px;accent-color:#237651}
 #message{color:#b34040;background:#fcf2f1;padding:8px;border-radius:4px;font-size:12px;overflow-wrap:anywhere}
 footer{display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid #e8ece9;gap:10px}
+.project-actions{display:flex;gap:6px;flex-wrap:wrap}
+#capture{background:#fff;color:#243e30;border-color:#d5dcd7}
 footer button{background:#243e30;color:#fff;border-color:#243e30}
 footer button:hover:not(:disabled){background:#31543f}
 #connection-label{font-size:11px;color:#828a84}

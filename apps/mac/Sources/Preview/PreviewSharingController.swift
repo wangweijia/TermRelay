@@ -158,10 +158,29 @@ private struct PreviewOwnerState: Decodable {
     let connection: Connection?
 }
 
+struct PreviewScreenshot: Decodable {
+    let dataURL: String
+    let width: Int
+    let height: Int
+
+    func imageInput() throws -> AgentImage {
+        let prefix = "data:image/png;base64,"
+        guard dataURL.hasPrefix(prefix), dataURL.utf8.count <= 1_398_126,
+              (1...1600).contains(width), (1...1600).contains(height),
+              let data = Data(base64Encoded: String(dataURL.dropFirst(prefix.count))), data.count <= 1_048_576,
+              data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]),
+              let image = NSBitmapImageRep(data: data), image.pixelsWide == width, image.pixelsHigh == height else {
+            throw PreviewSharingError("截图数据无效，未向 AI 发送，请重新截图。")
+        }
+        return AgentImage(data: data.base64EncodedString(), mimeType: "image/png")
+    }
+}
+
 private struct PreviewDispatch: Decodable {
     let commandId: UUID
     let text: String
     let binding: PreviewOwnerState.Binding
+    let screenshot: PreviewScreenshot?
 }
 
 private struct PreviewResponseFailure: Decodable {
@@ -213,6 +232,7 @@ final class PreviewSharingController: ObservableObject {
     private var output = ""
     private var pollTask: Task<Void, Never>?
     private var startLocalTurn: (@MainActor (String, UUID) async -> RemoteCommandResult)?
+    private var startLocalImageTurn: (@MainActor (String, UUID, AgentImage) async -> RemoteCommandResult)?
     private var canStartLocalTurn: (@MainActor () -> Bool)?
     private var execution: PreviewExecution?
     private var isSynchronizingExecution = false
@@ -250,6 +270,8 @@ final class PreviewSharingController: ObservableObject {
 
     func start(
         session: ManagedSession, deviceID: UUID, workspaceID: String, configuration: PreviewSharingConfiguration,
+        imageInputSupported: Bool = false,
+        startLocalImageTurn: (@MainActor (String, UUID, AgentImage) async -> RemoteCommandResult)? = nil,
         canStartLocalTurn: @escaping @MainActor () -> Bool = { true },
         startLocalTurn: @escaping @MainActor (String, UUID) async -> RemoteCommandResult
     ) async {
@@ -272,6 +294,7 @@ final class PreviewSharingController: ObservableObject {
         sessionName = session.displayName
         self.configuration = configuration
         self.startLocalTurn = startLocalTurn
+        self.startLocalImageTurn = startLocalImageTurn
         self.canStartLocalTurn = canStartLocalTurn
         execution = nil
         expectedDeviceID = deviceID.uuidString.lowercased()
@@ -300,6 +323,7 @@ final class PreviewSharingController: ObservableObject {
             if let previewURL = configuration.previewURL {
                 child.arguments?.append(contentsOf: ["--preview-url", previewURL, "--access-mode", configuration.accessMode])
             }
+            if imageInputSupported && startLocalImageTurn != nil { child.arguments?.append("--image-input") }
             child.environment = TerminalEnvironment.make(executableURL: node)
             let pipe = Pipe()
             child.standardOutput = pipe
@@ -429,7 +453,7 @@ final class PreviewSharingController: ObservableObject {
         guard isRunning, event.sessionID == sessionID, var current = execution, !current.isTerminal else { return }
         let command = current.commandID.uuidString.lowercased()
         if current.turnID == nil {
-            if case .userMessage(let messageID, _) = event.payload,
+            if case .userMessage(let messageID, _, _) = event.payload,
                messageID.lowercased() == command, let turnID = event.correlation.turnID {
                 current.turnID = turnID
                 current.revision += 1
@@ -516,7 +540,21 @@ final class PreviewSharingController: ObservableObject {
                 throw PreviewSharingError("反馈执行绑定与本机会话不一致，已拒绝执行。")
             }
             execution = PreviewExecution(recordID: record.id, commandID: dispatch.commandId)
-            let result = await startLocalTurn(dispatch.text, dispatch.commandId)
+            let result: RemoteCommandResult
+            if let screenshot = dispatch.screenshot {
+                if let startLocalImageTurn {
+                    do {
+                        let image = try screenshot.imageInput()
+                        result = await startLocalImageTurn(dispatch.text, dispatch.commandId, image)
+                    } catch {
+                        result = .rejected("invalid_screenshot", error.localizedDescription)
+                    }
+                } else {
+                    result = .rejected("image_input_unsupported", "当前绑定会话不支持图片输入，截图未发送。")
+                }
+            } else {
+                result = await startLocalTurn(dispatch.text, dispatch.commandId)
+            }
             guard generation == operation, isRunning else { return }
             if execution?.isTerminal == false {
                 if result.succeeded {

@@ -43,6 +43,16 @@ final class DSHACPClientTests: XCTestCase {
         let readyState = await coordinator.state
         XCTAssertEqual(readyState, .ready)
 
+        do {
+            try await coordinator.send(.startTurn(TurnInput(text: "Screenshot", images: [
+                AgentImage(data: "c3ludGhldGlj", mimeType: "image/png"),
+            ]), idempotencyKey: UUID()))
+            XCTFail("A provider without image capability must reject image input.")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("图片")) }
+        let afterRejectedImage = await coordinator.state
+        XCTAssertEqual(afterRejectedImage, .ready)
+        XCTAssertFalse(transport.sentMethods.contains("session/prompt"))
+
         try await coordinator.send(.startTurn(TurnInput(text: "检查项目"), idempotencyKey: UUID()))
         let prompt = try await transport.waitForSentMessage(at: 2)
         XCTAssertEqual(prompt["method"] as? String, "session/prompt")

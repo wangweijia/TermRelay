@@ -565,6 +565,55 @@ private extension ACPSendShortcut {
     }
 }
 
+struct AgentMessageImageView: View {
+    let image: AgentImage
+    @State private var isPreviewPresented = false
+
+    var body: some View {
+        if let data = Data(base64Encoded: image.data), let decoded = NSImage(data: data) {
+            Button {
+                isPreviewPresented = true
+            } label: {
+                Image(nsImage: decoded)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 320, maxHeight: 240, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help("放大查看图片")
+            .accessibilityLabel("查看消息图片")
+            .sheet(isPresented: $isPreviewPresented) {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("消息图片").font(.headline)
+                        Spacer()
+                        Button {
+                            isPreviewPresented = false
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut(.cancelAction)
+                        .help("关闭预览")
+                        .accessibilityLabel("关闭预览")
+                    }
+                    Image(nsImage: decoded)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(16)
+                .frame(minWidth: 360, idealWidth: 900, minHeight: 280, idealHeight: 650)
+            }
+        } else {
+            Label("图片无法显示", systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 private struct AgentTimelineRow: View {
     let item: AgentTimelineItem
     @ObservedObject var session: LocalStructuredAgentSession
@@ -582,6 +631,9 @@ private struct AgentTimelineRow: View {
                         AgentMarkdownView(text: message.text)
                     } else {
                         AgentMarkdownView(text: message.text, markdown: false)
+                    }
+                    ForEach(message.images.indices, id: \.self) { index in
+                        AgentMessageImageView(image: message.images[index])
                     }
                 }
                 .padding(12)

@@ -404,6 +404,7 @@ try {
     const directStore = new Store(join(directory, `direct-${configuredApps.length}.json`));
     await directStore.load();
     const directApp = createCompanion({ store: directStore, binding: { name: 'Direct project' },
+      imageInputSupported: configuredApps.length === 0,
       preview: { url: previewURL, accessMode: 'direct' }, reviewerToken: 'e'.repeat(64), proxyToken: 'f'.repeat(64), adminToken: '1'.repeat(64) });
     configuredApps.push(directApp);
     await new Promise(resolve => directApp.publicServer.listen(0, '127.0.0.1', resolve));
@@ -441,6 +442,69 @@ try {
       if(this.querySelector('#status').textContent.includes('已提交')){clearInterval(timer);resolve(true);}
       else if(++attempts>60){clearInterval(timer);resolve(false);}},100);});`), true);
     assert.equal(directStore.records[0].page, previewURL);
+    if (configuredApps.length === 1) {
+      await call('Page.bringToFront');
+      await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 2, mobile: false });
+      await within(`this.querySelector('#new').click();this.querySelector('#close').click();`);
+      await evaluate(`document.body.insertAdjacentHTML('beforeend','<div id="screenshot-fixture" style="position:fixed;left:80px;top:140px;width:240px;height:120px;background:rgb(22,144,105);color:white;padding:12px">Screenshot feedback</div>');`);
+      const { data: capturedPixels } = await call('Page.captureScreenshot', { format: 'png' });
+      const { targetInfos } = await call('Target.getTargets', {}, null);
+      const worker = targetInfos.find(target => target.type === 'service_worker' && target.url === `chrome-extension://${id}/background.js`);
+      assert.ok(worker, 'extension background worker is available');
+      const { sessionId: workerSession } = await call('Target.attachToTarget', { targetId: worker.targetId, flatten: true }, null);
+      await evaluate(`globalThis.realCapture=chrome.tabs.captureVisibleTab;chrome.tabs.captureVisibleTab=async()=>{throw new Error('Synthetic permission denial');};`, workerSession);
+      assert.equal((await evaluate(`chrome.runtime.sendMessage({type:'screenshot.begin'})`, popupSession)).ok, true, 'popup starts selection in the active project');
+      assert.equal(await within(`return !this.querySelector('#screenshot-overlay').hidden;`), true);
+      await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      assert.equal(await within(`return this.querySelector('#screenshot-overlay').hidden && !this.querySelector('#panel').hidden;`), true, 'Escape cancels screenshot selection');
+      async function dragScreenshot() {
+        await within(`this.querySelector('#screenshot').click();`);
+        await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 80, y: 140, button: 'left', clickCount: 1 });
+        await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 320, y: 260, button: 'left', buttons: 1 });
+        await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 320, y: 260, button: 'left', clickCount: 1 });
+      }
+      await dragScreenshot();
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#status').textContent.includes('截图未获授权')){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(this.querySelector('#status').textContent);}},50);});`), true, 'permission failure is recoverable');
+      assert.equal(await within(`return !this.querySelector('#description').disabled && getComputedStyle(this.host).visibility==='visible';`), true);
+      await evaluate(`chrome.tabs.captureVisibleTab=async()=>${JSON.stringify(`data:image/png;base64,${capturedPixels}`)};`, workerSession);
+      await dragScreenshot();
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        const image=this.querySelector('#screenshot-image');
+        if(!this.querySelector('#screenshot-preview').hidden && image.complete && image.naturalWidth){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(this.querySelector('#status').textContent);}},50);});`), true, 'cropped screenshot is decoded and previewed');
+      assert.equal(await within(`return this.querySelector('#object').textContent;`), '截图区域');
+      const imageEvidence = await within(`const image=this.querySelector('#screenshot-image'),canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+        const context=canvas.getContext('2d');context.drawImage(image,0,0);
+        return {width:canvas.width,height:canvas.height,pixel:Array.from(context.getImageData(canvas.width/2,canvas.height-5,1,1).data)};`);
+      assert.deepEqual(imageEvidence, { width: 480, height: 240, pixel: [22, 144, 105, 255] }, 'DPR-aware crop contains the selected real page pixels, not overlay or blank output');
+      await within(`this.querySelector('#description').value='Make the screenshot region easier to read';this.querySelector('#submit').click();`);
+      assert.match(await within(`return this.querySelector('#status').textContent;`), /确认截图内容/);
+      assert.equal(directStore.records.length, 1, 'no image is uploaded before explicit confirmation');
+      await screenshot('screenshot-preview-desktop', sessionId);
+      await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+      assert.equal(await within(`const panel=this.querySelector('#panel');return panel.scrollWidth<=panel.clientWidth;`), true);
+      await screenshot('screenshot-preview-narrow', sessionId);
+      await within(`this.querySelector('#screenshot-consent').checked=true;this.querySelector('#submit').click();`);
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#status').textContent.includes('已提交')){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true);
+      assert.equal(directStore.records[0].screenshot.width, 480);
+      assert.equal(directStore.records[0].screenshot.height, 240);
+      assert.equal(directStore.records[0].description, 'Make the screenshot region easier to read');
+      await within(`Array.from(this.querySelectorAll('#records button')).find(button=>button.textContent.startsWith('查看截图')).click();`);
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#image-viewer').open){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true, 'submitted image can be retrieved through the protected feedback endpoint');
+      await screenshot('screenshot-history', sessionId);
+      await within(`this.querySelector('#close-viewer').click();this.querySelector('#new').click();`);
+      assert.equal(await within(`return this.querySelector('#screenshot-preview').hidden;`), true, 'new feedback clears the previous screenshot');
+      await evaluate(`chrome.tabs.captureVisibleTab=globalThis.realCapture;`, workerSession);
+      await call('Emulation.clearDeviceMetricsOverride');
+    } else {
+      assert.equal(await within(`return this.querySelector('#screenshot').disabled;`), true, 'unsupported sessions keep text feedback but disable screenshots');
+    }
     await waitPopup(`document.querySelector('#power').checked && document.querySelector('#mode').textContent==='直接访问'`, 'popup displays the current direct project');
     await screenshot(`popup-direct-${configuredApps.length}`, popupSession);
     await evaluate(`document.querySelector('#power').checked=false;document.querySelector('#power').dispatchEvent(new Event('change'));`, popupSession);
@@ -448,7 +512,7 @@ try {
     await waitOptions(`document.querySelector('#connection-badge').textContent==='未连接' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'direct project disconnects');
     assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'direct disconnect preserves the external proxy');
   }
-  console.log('Chrome UI: popup quick toggle/configuration, shared live states, options hierarchy, legacy pairing, proxy ownership, ZeroOmega and dynamic direct IP/domain feedback passed.');
+  console.log('Chrome UI: popup, direct/proxy feedback, screenshot region/cancel/permission recovery, DPR pixels, consent, image submission/history and unsupported sessions passed.');
 } finally {
   clearTimeout(timeout);
   if (browser.exitCode === null) await call('Browser.close', {}, null).catch(() => {});

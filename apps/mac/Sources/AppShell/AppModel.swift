@@ -1221,6 +1221,15 @@ final class AppModel: ObservableObject {
         }
         await previewSharing.start(session: session, deviceID: deviceID,
                                    workspaceID: workspaceID(for: session.directory), configuration: configuration,
+                                                                     imageInputSupported: await structured.supportsImageInput(),
+                                                                     startLocalImageTurn: { [weak self, weak structured] text, commandID, image in
+                        guard let self, let structured, self.structuredSessions[sessionID] === structured,
+                                    self.sessions.contains(where: { $0.id == sessionID && $0.projectID == nil && $0.directory == session.directory }),
+                                    !structured.isExternal, structured.state == .ready else {
+                                return .rejected("agent_not_ready", "绑定的本地 ACP 会话已结束或尚未空闲，未执行反馈。")
+                        }
+                        return await structured.startTurn(text, idempotencyKey: commandID, images: [image])
+                },
                                    canStartLocalTurn: { [weak structured] in structured?.state == .ready }) { [weak self, weak structured] text, commandID in
             guard let self, let structured, self.structuredSessions[sessionID] === structured,
                   self.sessions.contains(where: { $0.id == sessionID && $0.projectID == nil && $0.directory == session.directory }),

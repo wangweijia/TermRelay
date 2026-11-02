@@ -46,14 +46,21 @@ final class CopilotACPClientTests: XCTestCase {
                 sessionID: sessionID, workspaceURL: URL(fileURLWithPath: "/tmp")
             ))
         }
-        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: ["protocolVersion": 1])
+        transport.respond(to: try await transport.waitForSentMessage(at: 0), result: [
+            "protocolVersion": 1, "agentCapabilities": ["promptCapabilities": ["image": true]],
+        ])
         transport.respond(to: try await transport.waitForSentMessage(at: 1), result: ["sessionId": "new-session"])
         try await starting.value
-        try await runtime.send(.startTurn(TurnInput(text: "Continue"), idempotencyKey: UUID()))
+        let image = AgentImage(data: "c3ludGhldGlj", mimeType: "image/png")
+        try await runtime.send(.startTurn(TurnInput(text: "Continue", images: [image]), idempotencyKey: UUID()))
         let first = try await transport.waitForSentMessage(at: 2)
         let prompt = (first["params"] as? [String: Any])?["prompt"] as? [[String: Any]]
         XCTAssertTrue((prompt?.first?["text"] as? String)?.contains("Previous work: fixed parser") == true)
         XCTAssertTrue((prompt?.first?["text"] as? String)?.contains("Continue") == true)
+        XCTAssertEqual(prompt?.count, 2)
+        XCTAssertEqual(prompt?.last?["type"] as? String, "image")
+        XCTAssertEqual(prompt?.last?["data"] as? String, image.data)
+        XCTAssertEqual(prompt?.last?["mimeType"] as? String, "image/png")
         await runtime.stop()
     }
 
@@ -141,7 +148,7 @@ final class CopilotACPClientTests: XCTestCase {
         XCTAssertEqual(reference?.opaqueID, "saved-copilot-session")
         let events = await replayed.value
         XCTAssertEqual(events.compactMap { event -> String? in
-            if case .userMessage(_, let text) = event.payload { return text }
+            if case .userMessage(_, let text, _) = event.payload { return text }
             return nil
         }, ["Original question"])
         XCTAssertEqual(events.compactMap { event -> String? in

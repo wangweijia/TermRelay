@@ -3,6 +3,43 @@ import XCTest
 @testable import TermRelay
 
 final class PreviewSharingTests: XCTestCase {
+    private let screenshotData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3XcAAAAASUVORK5CYII="
+
+    func testScreenshotDecodesPNGAndRejectsChangedDimensions() throws {
+        let image = try PreviewScreenshot(dataURL: "data:image/png;base64,\(screenshotData)", width: 1, height: 1).imageInput()
+        XCTAssertEqual(image.mimeType, "image/png")
+        XCTAssertEqual(image.data, screenshotData)
+        XCTAssertThrowsError(try PreviewScreenshot(dataURL: image.dataURL, width: 2, height: 1).imageInput())
+        XCTAssertThrowsError(try PreviewScreenshot(dataURL: "data:image/png;base64,broken", width: 1, height: 1).imageInput())
+    }
+
+    @MainActor
+    func testScreenshotFlowsFromFeedbackThroughHelperIntoImageTurnOnlyOnce() async throws {
+        try await withSharing { controller, managed, configuration in
+            var received: [AgentImage] = []
+            await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-image", configuration: configuration,
+                                   imageInputSupported: true,
+                                   startLocalImageTurn: { text, _, image in
+                XCTAssertTrue(text.contains("screenshot is attached"))
+                XCTAssertFalse(text.contains("base64"))
+                received.append(image)
+                return .completed
+            }) { _, _ in
+                XCTFail("Screenshot feedback must not silently use a text-only turn.")
+                return .completed
+            }
+            XCTAssertTrue(controller.isRunning, controller.errorMessage ?? "Sharing failed.")
+            _ = try await submitFeedback(configuration, pairing(controller), screenshot: [
+                "dataURL": "data:image/png;base64,\(screenshotData)", "width": 1, "height": 1,
+            ])
+            try await controller.synchronize()
+            try await controller.synchronize()
+            XCTAssertEqual(received.count, 1)
+            XCTAssertEqual(received.first?.data, screenshotData)
+            XCTAssertEqual(controller.feedback.first?.status, "running")
+        }
+    }
+
     func testProjectURLSupportsDirectLANAndCustomProxyHost() throws {
         let direct = try PreviewSharingConfiguration(previewURL: "http://192.168.1.20:5173/project/", accessMode: "direct",
             publicPort: "18420", ownerPort: "18421", shareHost: "10.1.2.3")
@@ -327,7 +364,7 @@ final class PreviewSharingTests: XCTestCase {
     }
 
     @MainActor
-    private func submitFeedback(_ configuration: PreviewSharingConfiguration, _ pairing: [String: String]) async throws -> String {
+    private func submitFeedback(_ configuration: PreviewSharingConfiguration, _ pairing: [String: String], screenshot: [String: Any]? = nil) async throws -> String {
         var connect = URLRequest(url: try XCTUnwrap(URL(string: "http://127.0.0.1:\(configuration.publicPort)/v1/connect")))
         connect.httpMethod = "POST"
         connect.setValue("Bearer \(try XCTUnwrap(pairing["reviewerToken"]))", forHTTPHeaderField: "Authorization")
@@ -345,10 +382,12 @@ final class PreviewSharingTests: XCTestCase {
         request.setValue(try XCTUnwrap(lease["connectionToken"] as? String), forHTTPHeaderField: "X-TermRelay-Connection-Token")
         request.setValue("Bearer \(try XCTUnwrap(pairing["reviewerToken"]))", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "id": id, "page": configuration.previewURLs[0],
             "description": "Move the button", "steps": "",
-        ])
+        ]
+        if let screenshot { body["screenshot"] = screenshot }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
         return id

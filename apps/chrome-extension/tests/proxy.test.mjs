@@ -4,8 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { connectionView } from '../extension/view-state.js';
+import { validateRegion, captureRegion } from '../extension/capture.js';
 
-const source = await readFile(new URL('../extension/background.js', import.meta.url), 'utf8');
+const source = (await readFile(new URL('../extension/background.js', import.meta.url), 'utf8'))
+  .replace("import { captureRegion } from './capture.js';", '');
 const config = { companionURL: 'http://192.168.1.20:18420', reviewerToken: 'a'.repeat(64), proxyToken: 'b'.repeat(64) };
 const HOST = 'page-gateway-local.nioint.com';
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -49,7 +51,7 @@ async function fixture(initial = {}, controller = 'available') {
     scripting: { async unregisterContentScripts() {}, async registerContentScripts(scripts) { calls.scripts.push(scripts); } },
   };
   runInNewContext(source, {
-    chrome, URL, crypto: { randomUUID }, AbortSignal,
+    chrome, URL, crypto: { randomUUID }, AbortSignal, captureRegion,
     console: { error: (...args) => calls.errors.push(args) },
     fetch: async (url, options) => {
       calls.fetch.push({ url, options });
@@ -77,6 +79,15 @@ async function fixture(initial = {}, controller = 'available') {
     },
   };
 }
+
+test('capture rectangles must be finite and contained in the visible viewport', () => {
+  const viewport = { width: 1200, height: 800 };
+  assert.equal(validateRegion({ x: 10, y: 20, width: 300, height: 200 }, viewport).rect.width, 300);
+  for (const rect of [null, { x: -1, y: 0, width: 20, height: 20 }, { x: 0, y: 0, width: 2, height: 20 },
+    { x: 1190, y: 0, width: 20, height: 20 }, { x: NaN, y: 0, width: 20, height: 20 }]) {
+    assert.throws(() => validateRegion(rect, viewport), /截图区域/);
+  }
+});
 
 test('connection presentation separates configuration, live connection, enabled state and faults', () => {
   assert.equal(connectionView({}).title, '尚未配置');

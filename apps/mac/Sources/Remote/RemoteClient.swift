@@ -1015,7 +1015,7 @@ extension RelayToolEvent {
             data = ["code": .string("provider_session_started"), "message": .string(reference.opaqueID)]
         case .turnStarted(let turnID):
             kind = "turn.started"; data = ["turnId": .string(turnID)]
-        case .userMessage(let messageID, let text):
+        case .userMessage(let messageID, let text, _):
             kind = "user.message"
             data = ["messageId": .string(messageID), "text": .string(text)]
         case .assistantTextDelta(let text):

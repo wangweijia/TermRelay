@@ -134,8 +134,15 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
         }
     }
 
-    func startTurn(_ text: String, idempotencyKey: UUID) async -> RemoteCommandResult {
-        await send(.startTurn(TurnInput(text: text), idempotencyKey: idempotencyKey))
+    func supportsImageInput() async -> Bool { await coordinator?.supportsImageInput() ?? false }
+
+    func startTurn(_ text: String, idempotencyKey: UUID, images: [AgentImage] = []) async -> RemoteCommandResult {
+        if !images.isEmpty {
+            guard await supportsImageInput() else {
+                return .rejected("image_input_unsupported", "当前 AI 会话不支持图片输入，请移除截图或切换支持图片的会话。")
+            }
+        }
+        return await send(.startTurn(TurnInput(text: text, images: images), idempotencyKey: idempotencyKey))
     }
 
     func interrupt() async -> RemoteCommandResult { await send(.interrupt) }

@@ -4,12 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { RequestError, UUID, promptFor, reviewerView, secretMatches, validateFeedback, previewConfiguration } from './model.mjs';
 import { attachProxy } from './proxy.mjs';
 
-async function bodyOf(request) {
+async function bodyOf(request, limit = 24_000) {
   let bytes = 0;
   const chunks = [];
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > 24_000) throw new RequestError(413, 'Feedback exceeds 24 KB.');
+    if (bytes > limit) throw new RequestError(413, '请求过大，请缩小截图区域后重试。');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -28,7 +28,7 @@ function authorize(request, token) {
   if (!secretMatches(request.headers.authorization, `Bearer ${token}`)) throw new RequestError(401, 'Invalid access token.');
 }
 
-export function createCompanion({ store, binding, ports = [8080], preview, reviewerToken, adminToken, proxyToken, now = Date.now }) {
+export function createCompanion({ store, binding, ports = [8080], preview, imageInputSupported = false, reviewerToken, adminToken, proxyToken, now = Date.now }) {
   const project = previewConfiguration(preview);
   const previewURLs = preview ? [project.url] : ports.map(port => `https://${new URL(project.url).hostname}:${port}/`);
   let busy = false;
@@ -84,7 +84,8 @@ export function createCompanion({ store, binding, ports = [8080], preview, revie
         authorize(request, adminToken);
         if (url.pathname === '/api/state' && request.method === 'GET') {
           const current = activeConnection();
-          json(response, 200, { binding, ports, busy, records: store.records, reviewerToken, proxyToken,
+          json(response, 200, { binding, ports, busy, records: store.records.map(record => ({ ...record,
+            ...(record.screenshot ? { screenshot: { width: record.screenshot.width, height: record.screenshot.height } } : {}) })), reviewerToken, proxyToken,
             connection: current ? { clientId: current.clientId, expiresAt: current.expiresAt } : null });
           return;
         }
@@ -117,7 +118,7 @@ export function createCompanion({ store, binding, ports = [8080], preview, revie
           return;
         }
         if (url.pathname === '/v1/meta' && request.method === 'GET') {
-          json(response, 200, { name: binding.name, ports, preview: project, previewURLs, connected: true, executionMode: 'automatic' });
+          json(response, 200, { name: binding.name, ports, preview: project, previewURLs, connected: true, executionMode: 'automatic', screenshotSupported: imageInputSupported });
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'GET') {
@@ -127,17 +128,22 @@ export function createCompanion({ store, binding, ports = [8080], preview, revie
           return;
         }
         if (url.pathname === '/v1/feedback' && request.method === 'POST') {
-          const input = validateFeedback(await bodyOf(request), project);
+          const input = validateFeedback(await bodyOf(request, 1_450_000), project);
+          if (input.screenshot && !imageInputSupported) throw new RequestError(409, '当前 AI 会话不支持截图，请移除图片或请开发者更换支持图片的会话并重新开启共享。');
           requireConnection(request);
           const prior = store.records.find(record => record.id === input.id);
           if (prior) {
-            const original = Object.fromEntries(Object.keys(input).map(key => [key, prior[key]]));
+            const original = validateFeedback(prior, project);
             if (JSON.stringify(original) !== JSON.stringify(input)) throw new RequestError(409, 'Feedback ID already used with different content.');
             await store.save();
             json(response, 200, reviewerView(prior));
             return;
           }
           if (store.records.length >= 1000) throw new RequestError(409, 'Feedback storage is full. Ask the owner to archive this preview.');
+          const screenshotBytes = store.records.reduce((total, record) => total + (record.screenshot?.dataURL.length ?? 0), 0);
+          if (screenshotBytes + (input.screenshot?.dataURL.length ?? 0) > 32 * 1024 * 1024) {
+            throw new RequestError(409, '截图存储已满，请联系开发者归档反馈；本条尚未提交。');
+          }
           const now = new Date().toISOString();
           const record = { ...input, status: 'pending', createdAt: now, updatedAt: now, note: '' };
           store.records.unshift(record);
@@ -147,6 +153,15 @@ export function createCompanion({ store, binding, ports = [8080], preview, revie
         }
       }
 
+      const imageMatch = /^\/(api|v1)\/feedback\/([^/]+)\/screenshot$/.exec(url.pathname);
+      if (imageMatch && request.method === 'GET' && UUID.test(imageMatch[2])) {
+        if (imageMatch[1] !== (admin ? 'api' : 'v1')) throw new RequestError(403, 'Invalid screenshot endpoint.');
+        const record = store.records.find(item => item.id === imageMatch[2]);
+        if (!record?.screenshot) throw new RequestError(404, 'Screenshot not found.');
+        if (!admin) validateFeedback(record, project);
+        json(response, 200, record.screenshot);
+        return;
+      }
       const match = /^\/(?:api|v1)\/feedback\/([^/]+)\/(deliver|result|review|verify)$/.exec(url.pathname);
       if (!match || request.method !== 'POST' || !UUID.test(match[1])) throw new RequestError(404, 'Not found.');
       const record = store.records.find(item => item.id === match[1]);
@@ -215,7 +230,8 @@ export function createCompanion({ store, binding, ports = [8080], preview, revie
       try {
         // The App must receive a durable intent before starting the local turn.
         await update(record, { status: 'sending', commandId: randomUUID(), revision: 0, turnId: null, note: '' });
-        json(response, 200, { commandId: record.commandId, text: promptFor(record), binding });
+        json(response, 200, { commandId: record.commandId, text: promptFor(record), binding,
+          ...(record.screenshot ? { screenshot: record.screenshot } : {}) });
       } finally { busy = false; }
     } catch (error) {
       if (!(error instanceof RequestError)) console.error('Companion request failed:', error.message);

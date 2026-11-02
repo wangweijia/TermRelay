@@ -24,6 +24,7 @@ function render() {
   $('#consent-label').textContent = view.external ? '我已配置 ZeroOmega 分流规则，并保留原有规则。'
     : '我使用独立 Chrome 用户配置，允许项目主机经开发者电脑转发、其他主机直连。代理凭据可访问开发者本机全部 TCP 端口。';
   $('#open-project').disabled = busy || !view.usable;
+  $('#capture').disabled = busy || !view.usable;
   $('#configure').disabled = busy && !!operation;
   $('#connection-label').textContent = state.connecting || operation === '连接中' ? 'App 连接中' : state.connected ? 'App 已连接' : 'App 未连接';
   $('#message').hidden = !failure;
@@ -71,6 +72,10 @@ $('#open-project').onclick = () => run(async () => {
     || (meta.ports?.[0] ? `https://page-gateway-local.nioint.com:${meta.ports[0]}/` : undefined);
   if (!entry || !['http:', 'https:'].includes(new URL(entry).protocol)) throw new Error('项目入口无效，请更新配对配置。');
   await chrome.tabs.create({ url: entry });
+}, '打开中');
+$('#capture').onclick = () => run(async () => {
+  await send({ type: 'screenshot.begin' });
+  window.close();
 }, '打开中');
 async function initialize() {
   try {

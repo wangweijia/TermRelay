@@ -11,7 +11,10 @@ import { connect } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { Store } from '../companion/store.mjs';
 import { createCompanion } from '../companion/server.mjs';
-import { HOST, cleanPageURL, validateFeedback, promptFor, previewConfiguration } from '../companion/model.mjs';
+import { HOST, cleanPageURL, validateFeedback, promptFor, previewConfiguration, validateScreenshot, reviewerView } from '../companion/model.mjs';
+
+const screenshot = () => ({ width: 1, height: 1,
+  dataURL: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3XcAAAAASUVORK5CYII=' });
 
 const binding = { sessionId: randomUUID(), deviceId: randomUUID(), workspaceId: `workspace-${randomUUID()}`, name: 'Local test' };
 const input = () => ({
@@ -31,7 +34,7 @@ async function fixture(t, options = {}) {
   const store = new Store(join(directory, 'feedback.json'));
   await store.load();
   const app = createCompanion({
-    store, binding, ports: [8080], reviewerToken: 'reviewer', adminToken: 'owner', proxyToken: 'proxy', ...options,
+    store, binding, ports: [8080], imageInputSupported: true, reviewerToken: 'reviewer', adminToken: 'owner', proxyToken: 'proxy', ...options,
   });
   const publicURL = await listen(app.publicServer), ownerURL = await listen(app.adminServer);
   t.after(async () => { app.closeProxy(); await Promise.all([close(app.publicServer), close(app.adminServer)]); await rm(directory, { recursive: true }); });
@@ -68,6 +71,48 @@ test('feedback accepts any valid HTTPS port on the exact preview hostname and sa
   assert.throws(() => validateFeedback({ ...body, description: ' ' }), /text/);
   assert.throws(() => validateFeedback({ ...body, element: { ...body.element, text: 'x'.repeat(501) } }), /text/);
   assert.match(promptFor(record), /untrusted observations/);
+});
+
+test('screenshot feedback validates bounded PNG data and keeps images out of list summaries and prompts', () => {
+  const record = validateFeedback({ ...input(), screenshot: screenshot() });
+  assert.deepEqual(record.screenshot, screenshot());
+  assert.deepEqual(reviewerView(record).screenshot, { width: 1, height: 1 });
+  assert.ok(!JSON.stringify(reviewerView(record)).includes('base64'));
+  assert.match(promptFor(record), /screenshot is attached/);
+  assert.ok(!promptFor(record).includes('base64'));
+  for (const invalid of [null, {}, { ...screenshot(), width: 2 }, { ...screenshot(), height: 0 },
+    { ...screenshot(), dataURL: 'data:image/svg+xml;base64,PHN2Zz4=' },
+    { ...screenshot(), dataURL: `data:image/png;base64,${'A'.repeat(1_500_000)}` }]) {
+    assert.throws(() => validateScreenshot(invalid), /截图/);
+  }
+});
+
+test('screenshots persist, require authorization, stay out of polling and reach local dispatch exactly once', async t => {
+  const f = await fixture(t);
+  const body = { ...input(), screenshot: screenshot() };
+  assert.equal((await f.request('/v1/feedback', body)).status, 201);
+  assert.equal((await f.request('/v1/feedback', body)).status, 200);
+  assert.equal((await f.request('/v1/feedback', { ...body, screenshot: undefined })).status, 409);
+  const imagePath = `/v1/feedback/${body.id}/screenshot`;
+  assert.deepEqual((await f.request(imagePath)).body, screenshot());
+  assert.equal((await f.request(imagePath, undefined, false, 'wrong')).status, 401);
+  assert.equal((await f.request(imagePath, undefined, false, 'reviewer', { 'X-TermRelay-Connection-Token': 'expired' })).status, 409);
+  assert.ok(!JSON.stringify((await f.request('/v1/feedback')).body).includes('base64'));
+  assert.ok(!JSON.stringify((await f.request('/api/state', undefined, true)).body).includes('base64'));
+  const restored = new Store(f.store.path);
+  await restored.load();
+  assert.deepEqual(restored.records[0].screenshot, screenshot());
+  const dispatch = await f.prepare(body.id);
+  assert.deepEqual(dispatch.screenshot, screenshot());
+  assert.equal((await f.request(`/api/feedback/${body.id}/deliver`, {}, true)).status, 409);
+});
+
+test('unsupported AI sessions reject screenshot feedback without creating a record', async t => {
+  const f = await fixture(t, { imageInputSupported: false });
+  assert.equal((await f.request('/v1/meta')).body.screenshotSupported, false);
+  assert.equal((await f.request('/v1/feedback', { ...input(), screenshot: screenshot() })).status, 409);
+  assert.equal(f.store.records.length, 0);
+  assert.equal((await f.request('/v1/feedback', input())).status, 201);
 });
 
 test('feedback API accepts an unlisted resource port but still rejects other hostnames', async t => {

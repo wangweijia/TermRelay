@@ -76,8 +76,24 @@ struct AgentSessionReference: Codable, Sendable, Equatable {
     let opaqueID: String
 }
 
+struct AgentImage: Sendable, Equatable {
+    let data: String
+    let mimeType: String
+
+    var dataURL: String { "data:\(mimeType);base64,\(data)" }
+    var acpContent: JSONValue {
+        .object(["type": .string("image"), "data": .string(data), "mimeType": .string(mimeType)])
+    }
+}
+
 struct TurnInput: Sendable, Equatable {
     let text: String
+    let images: [AgentImage]
+
+    init(text: String, images: [AgentImage] = []) {
+        self.text = text
+        self.images = images
+    }
 }
 
 enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
@@ -165,7 +181,7 @@ enum TurnCompletionStatus: String, Codable, Sendable {
 enum ToolEventPayload: Sendable, Equatable {
     case sessionStarted(reference: AgentSessionReference)
     case turnStarted(turnID: String)
-    case userMessage(messageID: String, text: String)
+    case userMessage(messageID: String, text: String, images: [AgentImage] = [])
     case assistantTextDelta(text: String)
     case assistantMessageCompleted(text: String)
     case reasoningDelta(text: String)

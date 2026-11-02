@@ -43,9 +43,14 @@ actor StructuredSessionCoordinator {
 
     func send(_ action: ToolAction) async throws {
         switch action {
-        case .startTurn:
+        case .startTurn(let input, _):
             guard state == .ready else {
                 throw AgentError.invalidState(expected: "ready", actual: state)
+            }
+            if !input.images.isEmpty {
+                guard await runtime.supportsImageInput() else {
+                    throw AgentError.unsupportedCapability("当前 AI 会话不支持图片输入，请移除截图或切换支持图片的会话。")
+                }
             }
             state = .running
         case .steer:
@@ -104,6 +109,8 @@ actor StructuredSessionCoordinator {
             throw error
         }
     }
+
+    func supportsImageInput() async -> Bool { await runtime.supportsImageInput() }
 
     func configurationOptions() async throws -> [AgentConfigOption] {
         guard state == .ready else { return [] }
