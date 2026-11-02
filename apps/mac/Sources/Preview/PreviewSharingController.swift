@@ -3,6 +3,11 @@ import Darwin
 import Foundation
 
 struct PreviewFeedback: Decodable, Identifiable, Sendable {
+    struct Screenshot: Decodable, Sendable {
+        let width: Int
+        let height: Int
+    }
+
     struct Element: Decodable, Sendable {
         let tag: String
         let text: String
@@ -15,13 +20,16 @@ struct PreviewFeedback: Decodable, Identifiable, Sendable {
     let steps: String
     let status: String
     let note: String
+    let response: String?
     let element: Element?
+    let screenshot: Screenshot?
 
     var statusLabel: String {
         switch status {
         case "pending": "已排队，等待 Chat 空闲"
-        case "sending": "正在启动修改"
-        case "running": "AI 正在修改"
+        case "sending": "正在向 AI 发送消息"
+        case "running": "AI 正在处理消息"
+        case "completed": "AI 已回复"
         case "awaiting_approval": "等待 Chat 工具审批"
         case "awaiting_input": "等待 Chat 问题回复"
         case "delivered": "已送达会话，待核实"
@@ -181,6 +189,7 @@ private struct PreviewDispatch: Decodable {
     let text: String
     let binding: PreviewOwnerState.Binding
     let screenshot: PreviewScreenshot?
+    let imageCount: Int?
 }
 
 private struct PreviewResponseFailure: Decodable {
@@ -198,8 +207,25 @@ private struct PreviewExecution {
     var bufferedEvents: [ToolEvent] = []
     var approvals = Set<String>()
     var questions = Set<String>()
+    var replyOrder: [String] = []
+    var replies: [String: String] = [:]
 
-    var isTerminal: Bool { ["awaiting_review", "failed", "unknown"].contains(status) }
+    var response: String {
+        let text = replyOrder.compactMap { replies[$0] }.joined(separator: "\n\n")
+        guard text.utf16.count >= 16000 else { return text }
+        return String(decoding: text.utf16.prefix(15940), as: UTF16.self) + "\n\n（回复较长，完整内容请在 App 中查看。）"
+    }
+
+    mutating func receiveReply(_ text: String, itemID: String, append: Bool) {
+        if replies[itemID] == nil {
+            if replyOrder.count == 32 { replies.removeValue(forKey: replyOrder.removeFirst()) }
+            replyOrder.append(itemID)
+        }
+        let combined = append ? (replies[itemID] ?? "") + text : text
+        replies[itemID] = String(decoding: combined.utf16.prefix(16000), as: UTF16.self)
+    }
+
+    var isTerminal: Bool { ["completed", "awaiting_review", "failed", "unknown"].contains(status) }
 
     mutating func update(_ status: String, note: String = "") {
         guard self.status != status || self.note != note else { return }
@@ -487,6 +513,10 @@ final class PreviewSharingController: ObservableObject {
         switch event.payload {
         case .turnStarted:
             current.update("running")
+        case .assistantTextDelta(let text):
+            current.receiveReply(text, itemID: event.correlation.itemID ?? "reply", append: true)
+        case .assistantMessageCompleted(let text):
+            current.receiveReply(text, itemID: event.correlation.itemID ?? "reply", append: false)
         case .approvalRequested(let approval):
             current.approvals.insert(approval.approvalID)
             current.update("awaiting_approval")
@@ -500,8 +530,8 @@ final class PreviewSharingController: ObservableObject {
             current.questions.remove(id)
             current.update(current.approvals.isEmpty ? (current.questions.isEmpty ? "running" : "awaiting_input") : "awaiting_approval")
         case .turnCompleted(_, let status):
-            current.update(status == .completed ? "awaiting_review" : "failed",
-                           note: status == .completed ? "AI 本轮修改已完成，请刷新业务页面核实并验收；执行完成不代表验收通过。" : "")
+            current.update(status == .completed ? "completed" : "failed",
+                           note: status == .completed && current.response.isEmpty ? "本轮处理已完成，未收到可显示的 AI 回复，请在 App 中查看。" : "")
         case .failed:
             current.update("unknown")
         default: break
@@ -517,11 +547,27 @@ final class PreviewSharingController: ObservableObject {
             let _: PreviewFeedback = try await request("/api/feedback/\(current.recordID)/result", body: [
                 "commandId": current.commandID.uuidString.lowercased(), "revision": current.revision,
                 "turnId": current.turnID.map { $0 as Any } ?? NSNull(), "status": current.status, "note": current.note,
+                "response": current.response,
             ])
             guard generation == operation, execution?.commandID == current.commandID else { return }
             execution?.synchronizedRevision = current.revision
             if execution?.revision == current.revision, current.isTerminal { execution = nil }
         }
+    }
+
+    func imageAttachment(for record: PreviewFeedback) async throws -> AgentImage {
+        let operation = generation
+        guard isRunning, let expected = record.screenshot,
+              UUID(uuidString: record.id) != nil,
+              feedback.contains(where: { $0.id == record.id }) else {
+            throw PreviewSharingError("当前消息没有可读取的图片附件。")
+        }
+        let screenshot: PreviewScreenshot = try await request("/api/feedback/\(record.id)/screenshot")
+        guard generation == operation, isRunning else { throw CancellationError() }
+        guard screenshot.width == expected.width, screenshot.height == expected.height else {
+            throw PreviewSharingError("图片与消息附件信息不一致，未显示。")
+        }
+        return try screenshot.imageInput()
     }
 
     func deliver(_ record: PreviewFeedback) async {
@@ -538,6 +584,11 @@ final class PreviewSharingController: ObservableObject {
             guard dispatch.binding.sessionId == sessionID?.uuidString.lowercased(),
                   dispatch.binding.deviceId == expectedDeviceID, dispatch.binding.workspaceId == expectedWorkspaceID else {
                 throw PreviewSharingError("反馈执行绑定与本机会话不一致，已拒绝执行。")
+            }
+            let actualImageCount = dispatch.screenshot == nil ? 0 : 1
+            guard dispatch.imageCount.map({ $0 == actualImageCount }) ?? true,
+                  record.screenshot == nil || actualImageCount == 1 else {
+                throw PreviewSharingError("图片附件在派发中缺失，消息未发送给 AI。请在 App 核实，勿作为纯文字重发。")
             }
             execution = PreviewExecution(recordID: record.id, commandID: dispatch.commandId)
             let result: RemoteCommandResult

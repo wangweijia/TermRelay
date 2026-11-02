@@ -1,7 +1,7 @@
 const $ = selector => document.querySelector(selector);
 let token = '';
 let loading = false;
-const labels = { pending: '等待 Chat 空闲后自动执行', sending: '正在启动修改', running: 'AI 正在修改',
+const labels = { pending: '等待 Chat 空闲', sending: '正在发送消息', running: 'AI 正在处理', completed: 'AI 已回复',
   awaiting_approval: '等待 Chat 工具审批', awaiting_input: '等待 Chat 问题回复',
   delivered: '已送达会话（不是修改完成）', unknown: '结果未知，需核实', failed: '执行失败',
   awaiting_review: '本轮修改完成，待验收', verified: '已验收', changes_requested: '需继续修改（请人工处理）' };
@@ -46,13 +46,14 @@ async function refresh() {
       if (record.steps) card.append(node('pre', record.steps));
       if (record.element) card.append(node('pre', JSON.stringify(record.element, null, 2)));
       if (record.note) card.append(node('p', record.note));
+      if (record.response) card.append(node('pre', record.response));
       if (record.status === 'pending') card.append(node('p', 'Mac App 会在绑定 Chat 空闲时自动执行，AI 工具审批策略保持不变。'));
       if (['delivered', 'unknown'].includes(record.status)) {
         const summary = document.createElement('textarea');
-        summary.placeholder = '先在 TermRelay 核实执行已经结束，再填写给业务方看的修改摘要。';
-        card.append(summary, button('已核实执行结束，交业务方验收', async () => {
-          if (!summary.value.trim()) throw new Error('请填写修改摘要。');
-          if (confirm('已在 TermRelay 核实没有正在执行的轮次，且修改结果可验收？')) {
+        summary.placeholder = '先在 TermRelay 核实本轮已经结束，再填写可分享的答复或结果摘要。';
+        card.append(summary, button('已核实完成，同步结果', async () => {
+          if (!summary.value.trim()) throw new Error('请填写结果摘要。');
+          if (confirm('已在 TermRelay 核实本轮结束，且摘要可分享？')) {
             await api(`/api/feedback/${record.id}/review`, { checked: true, note: summary.value });
           }
         }));

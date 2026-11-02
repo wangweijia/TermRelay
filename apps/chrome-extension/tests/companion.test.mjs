@@ -73,9 +73,38 @@ test('feedback accepts any valid HTTPS port on the exact preview hostname and sa
   assert.match(promptFor(record), /untrusted observations/);
 });
 
+test('page questions receive answers without mandatory review and follow-ups keep conversation context', async t => {
+  const f = await fixture(t);
+  const question = { ...input(), description: 'Explain what happens when this button is clicked.' };
+  await f.request('/v1/feedback', question);
+  const dispatch = await f.prepare(question.id);
+  assert.match(dispatch.text, /Do not edit files or change application state unless the user explicitly requests a change/);
+  const result = { commandId: dispatch.commandId, status: 'completed', note: '', revision: 1,
+    turnId: 'question-turn', response: 'The button validates the form, then calls the search API.' };
+  assert.equal((await f.request(`/api/feedback/${question.id}/result`, { ...result, response: 'x'.repeat(16001) }, true)).status, 409);
+  assert.equal((await f.request(`/api/feedback/${question.id}/result`, result, true)).status, 200);
+  assert.equal((await f.request(`/api/feedback/${question.id}/result`, result, true)).status, 200);
+  assert.equal((await f.request(`/api/feedback/${question.id}/result`, { ...result, response: 'Changed answer' }, true)).status, 409);
+  const shared = (await f.request('/v1/feedback')).body[0];
+  assert.equal(shared.status, 'completed');
+  assert.equal(shared.response, result.response);
+  const followup = { ...input(), description: 'Which fields are validated?', parentId: question.id };
+  assert.equal((await f.request('/v1/feedback', followup)).status, 201);
+  const next = await f.prepare(followup.id);
+  assert.match(next.text, /Which fields are validated/);
+  assert.ok(next.text.includes(result.response));
+  assert.ok(next.text.includes(question.description));
+  assert.equal((await f.request('/v1/feedback', { ...input(), parentId: followup.id })).status, 409);
+  assert.equal((await f.request('/v1/feedback', { ...input(), parentId: randomUUID() })).status, 404);
+  assert.equal((await f.request('/v1/feedback', { ...input(), parentId: 'invalid' })).status, 400);
+});
+
 test('screenshot feedback validates bounded PNG data and keeps images out of list summaries and prompts', () => {
   const record = validateFeedback({ ...input(), screenshot: screenshot() });
   assert.deepEqual(record.screenshot, screenshot());
+  assert.throws(() => validateFeedback({ ...input(), imageCount: 1 }), /图片附件数量不匹配/);
+  assert.throws(() => validateFeedback({ ...input(), imageCount: 0, screenshot: screenshot() }), /图片附件数量不匹配/);
+  assert.deepEqual(validateFeedback({ ...input(), imageCount: 1, screenshot: screenshot() }).screenshot, screenshot());
   assert.deepEqual(reviewerView(record).screenshot, { width: 1, height: 1 });
   assert.ok(!JSON.stringify(reviewerView(record)).includes('base64'));
   assert.match(promptFor(record), /screenshot is attached/);
@@ -262,6 +291,19 @@ test('developer can reconcile a lost dispatch response without restarting or cla
   assert.equal((await f.request(`/api/feedback/${body.id}/review`, { checked: true, outcome: 'failed', note: 'Verified no local turn is running.' }, true)).body.status, 'failed');
   assert.equal((await f.result(body.id, dispatch)).status, 409);
   assert.equal((await f.request(`/api/feedback/${body.id}/deliver`, {}, true)).status, 409);
+});
+
+test('manual completion shares a result without forcing acceptance', async t => {
+  const f = await fixture(t);
+  const question = { ...input(), description: 'Explain this interaction.' };
+  await f.request('/v1/feedback', question);
+  await f.prepare(question.id);
+  assert.equal((await f.request(`/api/feedback/${question.id}/review`, {
+    checked: true, outcome: 'completed', note: 'Checked in App: the button validates the form.',
+  }, true)).body.status, 'completed');
+  const record = (await f.request('/v1/feedback')).body[0];
+  assert.match(record.note, /validates the form/);
+  assert.equal((await f.request('/v1/feedback', { ...input(), parentId: question.id })).status, 201);
 });
 
 test('local runtime failure details stay private, and failed execution is never automatically resent', async t => {

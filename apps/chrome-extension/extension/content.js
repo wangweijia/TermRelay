@@ -3,7 +3,7 @@
   globalThis.__termrelayFeedbackLoaded = true;
   const pageURL = () => `${location.origin}${location.pathname}`;
   const labels = {
-    pending: '已排队，等待 Chat 空闲', sending: 'App 正在启动修改', running: 'AI 正在修改',
+    pending: '已排队，等待 Chat 空闲', sending: '正在向 AI 发送消息', running: 'AI 正在处理', completed: 'AI 已回复',
     awaiting_approval: '等待 Chat 工具审批', awaiting_input: '等待 Chat 问题回复',
     delivered: '已送达会话，等待开发者核实',
     unknown: '执行结果未知，等待核实', failed: '执行失败',
@@ -11,7 +11,7 @@
   };
   let host, root, target, element = null, selecting = false;
   let pinnedPage = pageURL(), pending = null, submitted = false, sending = false;
-  let submittedID = null;
+  let submittedID = null, replyTo = null, displayedReplyID = null;
   let synchronizing = false;
   let screenshot = null, screenshotSupported = false, screenshotSelecting = false, capturing = false, drag = null;
   let openedScreenshot = null, openedScreenshotID = null;
@@ -61,7 +61,7 @@
     Object.assign(box.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
   }
   function summary() {
-    $('#object').textContent = screenshot ? '截图区域' : element ? `${element.tag} · ${element.text.slice(0, 80) || element.role || '无可见文字'}` : '整个页面';
+    $('#object').textContent = element ? `${element.tag} · ${element.text.slice(0, 80) || element.role || '无可见文字'}${screenshot ? ' · 已附截图' : ''}` : screenshot ? '截图区域' : '整个页面';
     $('#page').textContent = pinnedPage;
     $('#page').title = pinnedPage;
     $('#context').textContent = JSON.stringify({ page: pinnedPage, element }, null, 2);
@@ -82,7 +82,7 @@
   function editable() {
     if (capturing || screenshotSelecting) return false;
     if (sending || pending) { status('先确认当前提交结果；不要修改后用同一编号重试。'); return false; }
-    if (submitted) { status('这个想法已经提交，点击“再来一个想法”就能继续。'); return false; }
+    if (submitted) { status('消息已发送，可在回复下继续对话，或开启新话题。'); return false; }
     return true;
   }
   function selectMode() {
@@ -99,7 +99,7 @@
     screenshot = value;
     $('#screenshot-preview').hidden = !value;
     $('#screenshot-image').src = value?.dataURL || '';
-    $('#screenshot-size').textContent = value ? `${value.width} × ${value.height}` : '';
+    $('#screenshot-size').textContent = value ? `${value.width} × ${value.height} · 尚未上传，随消息发送` : '';
     $('#screenshot-consent').checked = false;
     summary();
   }
@@ -138,7 +138,7 @@
         || innerWidth !== viewport.width || innerHeight !== viewport.height) throw new Error('页面或窗口已变化，请重新截图。');
       target = null; element = null; pinnedPage = pageURL(); highlight(null); summary();
       showScreenshot(image);
-      status('截图已准备，确认图片内容后填写修改建议。');
+      status('截图已准备，确认图片内容后输入问题或请求。');
     } catch (error) { status(error.message, 'error'); }
     finally {
       host.style.removeProperty('visibility');
@@ -149,23 +149,26 @@
   function reset() {
     if (pending) { status('提交结果待确认，请先用原编号重试查询。'); return; }
     target = null; element = null; submitted = false; pinnedPage = pageURL();
-    submittedID = null;
+    submittedID = null; displayedReplyID = null;
+    replyTo = null; $('#reply-context').hidden = true; $('#reply-context').textContent = '';
     $('#description').value = ''; $('#steps').value = '';
     $('#count').textContent = '0 / 4000';
     showScreenshot(null);
     freezeForm(false); highlight(null); summary(); status('');
     $('#submit').disabled = false;
-    $('#submit').textContent = '交给 AI 改一改';
+    $('#submit').textContent = '发送给 AI';
   }
   async function submit() {
     if (sending || submitted) return;
     const description = $('#description').value.trim();
-    if (!description) { status('先说说你的想法，比如希望哪里变得更好。', 'error'); $('#description').focus(); return; }
+    if (!description) { status('请输入问题或请求。', 'error'); $('#description').focus(); return; }
     if (capturing || screenshotSelecting) return;
     if (screenshot && !$('#screenshot-consent').checked) { status('请先确认截图内容可以发送给 AI。', 'error'); $('#screenshot-consent').focus(); return; }
     const draft = {
       page: pinnedPage, element,
       description, steps: $('#steps').value.trim(),
+      imageCount: screenshot ? 1 : 0,
+      ...(replyTo ? { parentId: replyTo } : {}),
       ...(screenshot ? { screenshot } : {}),
     };
     sending = true; freezeForm(true); $('#submit').disabled = true;
@@ -174,15 +177,19 @@
     try {
       if (!pending) pending = { ...draft, id: await send({ type: 'feedback.id' }) };
       const record = await send({ type: 'feedback.create', feedback: pending });
+      if (pending.screenshot && (!record.screenshot || record.screenshot.width !== pending.screenshot.width
+        || record.screenshot.height !== pending.screenshot.height)) {
+        throw new Error('App 未确认接收截图，不能确认本次附图发送成功。请保留当前编号，到 App 核实，勿作为纯文字重新发送');
+      }
       pending = null; submitted = true;
       submittedID = record.id;
-      status(`已提交 ${record.id.slice(0, 8)}，已排队自动执行；AI 工具审批遵循 Chat 原设置。`);
+      status(`已发送 ${record.id.slice(0, 8)}，等待 AI 处理；工具审批遵循 Chat 原设置。`);
       await list();
     } catch (error) {
       status(`提交未确认：${error.message}。草稿已保留，点击“确认上次提交”使用原编号查询，不会重复创建。`, 'error');
     } finally {
       sending = false; $('#submit').disabled = submitted;
-      $('#submit').textContent = submitted ? '已提交，进度见下方' : '确认上次提交';
+      $('#submit').textContent = submitted ? '已发送' : '确认上次提交';
       if (!$('#panel').hidden) $('#status').scrollIntoView({ block: 'nearest' });
     }
   }
@@ -190,15 +197,17 @@
     try {
       const records = await send({ type: 'feedback.list' });
       const current = records.find(record => record.id === submittedID);
-      if (current) status(`已提交 ${current.id.slice(0, 8)} · ${labels[current.status] || current.status}${current.note ? `：${current.note}` : ''}`);
+      if (current) status(`已发送 ${current.id.slice(0, 8)} · ${current.screenshot ? `App 已接收截图 ${current.screenshot.width} × ${current.screenshot.height} · ` : '本条无图片 · '}${labels[current.status] || current.status}${current.note ? `：${current.note}` : ''}`);
       $('#records').replaceChildren();
+      let latestReply = null;
       for (const record of records.slice(0, 100)) {
         const card = node('article', '');
         const heading = node('div', ''), badge = node('span', labels[record.status] || record.status);
         heading.className = 'record-heading'; badge.className = 'record-badge'; badge.dataset.state = record.status;
         heading.append(badge, node('small', record.id.slice(0, 8)));
         const page = node('small', record.page); page.className = 'record-page'; page.title = record.page;
-        card.append(heading, node('p', record.description), page);
+        card.append(heading, node('strong', '你'), node('p', record.description), page);
+        if (record.parentId) card.append(node('small', `接续 ${record.parentId.slice(0, 8)}`));
         if (record.screenshot) {
           const button = node('button', `查看截图 · ${record.screenshot.width} × ${record.screenshot.height}`);
           button.onclick = async () => {
@@ -215,6 +224,32 @@
           card.append(button);
         }
         if (record.note) { const note = node('p', record.note); note.className = 'record-note'; card.append(note); }
+        if (record.response) {
+          const response = node('p', record.response); response.className = 'record-response';
+          card.append(node('strong', 'AI'), response);
+          if (record.id === submittedID && record.status === 'completed') latestReply = response;
+        }
+        if (['completed', 'awaiting_review', 'verified', 'changes_requested'].includes(record.status)) {
+          const followup = node('button', '继续对话');
+          followup.onclick = () => {
+            if (sending || pending || capturing || screenshotSelecting) { status('请先处理当前未确认的消息或截图。'); return; }
+            if (!submitted && ($('#description').value.trim() || screenshot) && !confirm('丢弃当前草稿，继续这条对话？')) return;
+            reset(); replyTo = record.id; pinnedPage = record.page; element = record.element;
+            $('#reply-context').textContent = `接续对话：${record.description.slice(0, 120)}`;
+            $('#reply-context').hidden = false;
+            summary(); $('#description').focus(); $('#description').scrollIntoView({ block: 'nearest' });
+          };
+          card.append(followup);
+        }
+        if (record.status === 'completed') {
+          const verify = node('button', '确认结果');
+          verify.onclick = async () => {
+            verify.disabled = true;
+            try { await send({ type: 'feedback.verify', id: record.id, status: 'verified', note: '' }); await list(); }
+            catch (error) { status(error.message, 'error'); verify.disabled = false; }
+          };
+          card.append(verify);
+        }
         if (record.status === 'awaiting_review') {
           for (const [label, next] of [['效果满意', 'verified'], ['再调一调', 'changes_requested']]) {
             const button = node('button', label);
@@ -230,8 +265,11 @@
         }
         $('#records').append(card);
       }
+      if (latestReply && displayedReplyID !== submittedID && !$('#panel').hidden) {
+        latestReply.parentElement.scrollIntoView({ block: 'end' }); displayedReplyID = submittedID;
+      }
       if (!records.length) {
-        const empty = node('p', '还没有小想法。点选一个位置，说说你想怎么改。');
+        const empty = node('p', '暂无对话');
         empty.className = 'empty'; $('#records').append(empty);
       }
     } catch (error) { status(error.message, 'error'); }
@@ -290,6 +328,9 @@
         article p{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 6px}
         .record-page{display:block;font-size:11px;color:#777;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
         article .record-note{font-size:12px;color:#666;margin:8px 0}
+        article .record-response{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+        article strong{display:block;margin-top:8px}
+        #reply-context{font-size:12px;color:#555;overflow-wrap:anywhere}
         article button{font-size:12px;margin:8px 6px 0 0}
         .empty{font-size:12px;color:#777;margin:12px 0 0}
         #hint{position:fixed;top:16px;left:16px;max-width:calc(100vw - 32px);background:#fff;padding:10px 12px;border:1px solid #ccc;border-radius:4px}
@@ -313,25 +354,26 @@
       <div id="highlight" hidden></div>
       <div id="hint" hidden>移动鼠标定位，点击选中；Esc 退出 <button id="cancel-pick">取消选择</button></div>
       <div id="screenshot-overlay" hidden><div id="screenshot-region" hidden></div><div id="screenshot-toolbar"><span>框选截图区域</span><button id="cancel-screenshot">取消</button></div></div>
-      <dialog id="image-viewer" aria-label="反馈截图"><button id="close-viewer">关闭</button><img id="viewer-image" alt="反馈截图"></dialog>
+      <dialog id="image-viewer" aria-label="对话截图"><button id="close-viewer">关闭</button><img id="viewer-image" alt="对话截图"></dialog>
       <button id="toggle" aria-controls="panel" aria-expanded="false">点点改</button>
       <section id="panel" aria-labelledby="panel-title" hidden>
         <header class="panel-header"><h2 id="panel-title">点点改</h2><button id="close" aria-label="收起点点改">收起</button></header>
         <div class="panel-body">
           <div class="connection"><p id="environment"></p><p id="connection" role="status"></p></div>
-          <h3 class="step-heading">修改范围</h3>
-          <div class="pick-actions"><button id="pick">点选页面位置</button><button id="whole">改改整个页面</button><button id="screenshot" disabled>框选截图</button></div>
+          <h3 class="step-heading">页面上下文</h3>
+          <div class="pick-actions"><button id="pick">选择元素</button><button id="whole">当前页面</button><button id="screenshot" disabled>框选截图</button></div>
           <div class="selection"><div class="selection-heading"><p id="object"></p><button id="outer">扩大范围</button></div><small id="page"></small></div>
           <div id="screenshot-preview" hidden><button id="screenshot-expand" title="查看截图"><img id="screenshot-image" alt="待提交截图"></button><div class="screenshot-actions"><span id="screenshot-size"></span><button id="remove-screenshot">移除截图</button></div><label class="screenshot-consent"><input id="screenshot-consent" type="checkbox"><span>我确认图片可发送给绑定 AI，已检查其中的表单、账号及其他敏感内容。</span></label></div>
-          <label for="description" class="step-heading">修改描述</label>
-          <textarea id="description" maxlength="4000" required placeholder="比如：查询按钮换成主色，再和旁边的输入框对齐。"></textarea><small id="count">0 / 4000</small>
-          <details><summary>补充重现步骤（选填）</summary><textarea id="steps" maxlength="2000" aria-label="重现步骤" placeholder="如果需要特定操作才能看到问题，可以写在这里。"></textarea></details>
-          <details><summary>会带上哪些页面信息？</summary><p class="privacy-copy">当前页面地址、选中元素的有限文字与结构，以及你明确添加的局部截图。截图可能包含可见的表单和账号信息，确认后随建议发送给绑定 AI；不自动采集图片或网址查询参数。</p><pre id="context"></pre></details>
+          <p id="reply-context" hidden></p>
+          <label for="description" class="step-heading">消息</label>
+          <textarea id="description" maxlength="4000" required placeholder="输入问题或请求…"></textarea><small id="count">0 / 4000</small>
+          <details><summary>补充上下文（选填）</summary><textarea id="steps" maxlength="2000" aria-label="补充上下文" placeholder="操作步骤、预期行为或其他背景"></textarea></details>
+          <details><summary>页面信息</summary><p class="privacy-copy">发送当前页面地址、可选的元素文字与结构，以及明确添加的截图。截图可能含敏感信息，发送前请确认。AI 答复会在本共享连接中可见。</p><pre id="context"></pre></details>
           <p class="privacy-copy">提交即自动进入绑定 Chat；AI 工具审批沿用 Chat 原设置。</p>
-          <div class="submit-actions"><button id="submit">交给 AI 改一改</button><button id="new">再来一个想法</button></div>
+          <div class="submit-actions"><button id="submit">发送给 AI</button><button id="new">新话题</button></div>
           <p id="status" role="status" aria-live="polite" hidden></p>
-          <div class="history-heading"><h3>改动进度</h3><button id="list">刷新进度</button></div>
-          <p class="history-help">本预览端口的记录共享可见 · 进度自动更新</p>
+          <div class="history-heading"><h3>对话记录</h3><button id="list">刷新</button></div>
+          <p class="history-help">本共享连接内的对话与答复共享可见</p>
           <div id="records"></div>
         </div>
       </section>`;
@@ -374,7 +416,11 @@
     overlay.onclick = event => { event.preventDefault(); event.stopPropagation(); };
     overlay.addEventListener('wheel', event => { event.preventDefault(); event.stopPropagation(); }, { passive: false });
     $('#cancel-pick').onclick = exitSelection;
-    $('#whole').onclick = () => { if (!editable()) return; target = null; element = null; pinnedPage = pageURL(); showScreenshot(null); highlight(null); summary(); };
+    $('#whole').onclick = () => {
+      if (!editable()) return;
+      if (screenshot && pinnedPage !== pageURL()) { status('页面已变化，请先移除旧截图或重新截图，避免发送错误的图片。', 'error'); return; }
+      target = null; element = null; pinnedPage = pageURL(); highlight(null); summary();
+    };
     $('#outer').onclick = () => {
       if (!editable() || !target?.parentElement) return;
       target = target.parentElement; element = capture(target); highlight(target); summary();
@@ -399,7 +445,10 @@
     if (event.type !== 'click') return;
     const item = semantic(event.target);
     if (!(item instanceof HTMLElement)) { status('这个位置暂时无法选中，试试外层容器，或选择“改改整个页面”。'); exitSelection(); return; }
-    target = item; element = capture(item); pinnedPage = pageURL(); showScreenshot(null); exitSelection(); summary();
+    if (screenshot && pinnedPage !== pageURL()) {
+      exitSelection(); status('页面已变化，请先移除旧截图或重新截图，避免发送错误的图片。', 'error'); return;
+    }
+    target = item; element = capture(item); pinnedPage = pageURL(); exitSelection(); summary();
   };
   for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'contextmenu']) {
     document.addEventListener(type, intercept, true);
@@ -421,7 +470,7 @@
   setInterval(() => {
     if (!root || $('#panel').hidden) return;
     if (target && !target.isConnected) { highlight(null); status('原元素已变化，保留原摘要；可以重新选择。'); }
-    else if (!submitted && pinnedPage !== pageURL()) status('页面已变化，草稿仍关联原页面；重新点选位置或选择“改改整个页面”可更新范围。');
+    else if (!submitted && pinnedPage !== pageURL()) status('页面已变化，草稿仍关联原页面；重新选择元素或“当前页面”可更新上下文。');
   }, 1000);
   async function ensure() {
     const meta = await send({ type: 'preview.meta' });

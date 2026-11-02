@@ -1,8 +1,18 @@
 # Chrome 预览与反馈：进展与待办
 
 > 更新日期：2026-11-02。
-> 当前阶段：用户反馈原有局域网预览与反馈功能已验收、基本可用；截图链路及 Mac 聊天图片回显完成自动化验证与 Release 打包，新增截图尚未完成真实 AI 修改验收。
+> 当前阶段：已按网页 AI 交互工具定位修正提示词、插件对话入口、AI 答复回传与关联追问；扩展测试、Chrome 合成流程及完整门禁通过，Release 已打包。真实 AI 问答 / 修改仍待人工验收；此前用户对基础预览功能的验收结论保留。
 > 使用方法见 [README](README.md)，产品交互与未决策项见 [需求草案](../../docs/CHROME_PREVIEW_FEEDBACK_REQUIREMENTS.md)。
+
+## 网页 AI 交互定位修正（2026-11-02）
+
+- 纠正默认要求修改代码的提示词：提问时分析与回答，仅当前明确修改请求授权改动；历史消息、页面和图片保持不可信上下文边界，不增加强制模式选择。
+- 插件使用“页面上下文 / 消息 / 发送给 AI / 对话记录”，截图入口改为“截图对话”；App 入口改为“共享预览与对话 / 页面对话”。
+- App 只聚合关联轮次的公开 AI 答复，流式与最终消息按 ID 去重，不回传思考、工具输出或原始运行错误。回复限制 16000 个 UTF-16 单元，超长提示到 App 查看；目前不是逐 token 实时回显。
+- 新轮次成功后为“已回复”，无需先验收即可继续对话；追问关联上一条已完成消息并携带最多 8 条祖先消息上下文。“新话题”清除关联，不创建隔离会话。结果确认可选，旧验收记录兼容；人工核实完成同样不强制验收。
+- 验证：扩展 42 项单测通过；JavaScript 静态检查通过；真实隔离 Chrome 中验证答复可见、HTML 按文本安全显示、追问提交、新话题清除关联、截图与旧可选验收回归。截图位于 `/tmp/termrelay-page-conversation/conversation-answer-{desktop,narrow}.png`，已检查面板内答复无裁剪。
+- `pnpm check` 完整通过，Mac 143 项 / 6 项条件跳过 / 0 失败。Mac 专项覆盖无关轮次隔离、早到事件与答复去重。未发送真实模型请求，浏览器使用合成答复，截图临时授权仍沿用 CDP 捕获替身的既有验证边界。
+- `pnpm release:mac --allow-dirty` 成功，Release 编译与签名校验通过；更新同路径 arm64 DMG / ZIP，ad-hoc 签名、未公证。没有修改 TermRelay Server、数据库或远程协议，也未替换运行中的 App。安装新版、重新加载扩展并重启共享后人工验收。
 
 ## 聊天图片回显补齐（2026-11-02）
 
@@ -25,10 +35,10 @@ Mac 原生入口、托管进程与反馈管理已接入 `apps/mac`。
 App 控制：
 项目会话 -> 共享预览与反馈 -> 开启共享 / 复制配对 / 查看反馈 / 停止共享
 
-反馈执行：
-Chrome 插件 -> App 托管的本机反馈桥接 -> 自动排队等待绑定 Chat 空闲
-    -> App 直接启动已有本地普通 ACP 会话，AI 工具审批沿用原策略
-    -> App 关联真实轮次并同步开始 / 等待 / 完成状态 -> 业务方验收
+网页对话：
+Chrome 插件 -> App 托管的本机桥接 -> 自动排队等待绑定 Chat 空闲
+    -> 绑定会话按当前意图回答 / 分析 / 明确请求的修改，AI 工具审批沿用原策略
+    -> 同步公开答复与真实轮次状态 -> 继续追问 / 按需确认结果
 ```
 
 本机桥接不连接 Server；网页、反馈和验收在受信局域网 / 本机闭环，
@@ -44,6 +54,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | --- | --- | --- |
 | 独立项目 | Node.js 22+，无需额外安装依赖，独立启动与检查命令 | `package.json`、`scripts/check.mjs` |
 | Chrome 扩展 | Manifest V3、配对设置页、连接测试、扩展图标入口 | `extension/manifest.json`、`options.*`、`background.js` |
+| 网页上下文 AI 对话 | 问答 / 分析 / 明确请求的修改，公开答复回传、关联追问、新话题、可选结果确认；不强制验收 | `content.js`、`companion/model.mjs`、`server.mjs`、Mac Preview |
 | 快捷连接与配置层级 | 工具栏轻量 popup，快速开启 / 关闭、项目入口与独立配置按钮；设置页突出当前项目、实际模式与连接状态，已保存配对默认收起 | `extension/popup.*`、`view-state.js`、`options.*`、`background.js` |
 | 局部截图修改建议 | 框选可见区域、取消 / 预览 / 移除、隐私确认、同编号提交与历史图片读取；图片随绑定轮次进入支持图片的 Codex / ACP 会话 | `extension/capture.js`、`content.js`、`companion/model.mjs`、`server.mjs`、Mac Preview / Agents |
 | Mac 聊天图片显示 | 携图用户消息显示等比缩略图、点击放大、关闭 / Escape、解码失败提示；文字更新保留图片 | `AgentModels.swift`、`AgentSessionPresentation.swift`、`ContentView.swift`、三个 Provider adapter |
@@ -67,7 +78,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 真实轮次跟踪 | 关联命令 ID 与 Provider 轮次，支持早于命令响应的事件；自动同步运行、等待审批 / 问答及完成 / 失败 | `PreviewSharingController.swift`、`AppModel.swift`、`extension/content.js` |
 | 提交与执行去重 | 反馈 UUID 幂等；执行意图先落盘；已经尝试发送的记录不自动重发 | `companion/server.mjs`、`store.mjs` |
 | 未知结果保护 | 本地执行结果不确定或发送中重启标记未知；丢失响应时允许人工核实发送中记录，禁止自动重发 | `PreviewSharingController.swift`、`store.mjs`、`server.mjs` |
-| 人工验收闭环 | 关联轮次成功完成后自动交业务方验收；业务方选择通过或填写继续修改意见，未知结果由开发者核实 | `PreviewSharingController.swift`、`extension/content.js` |
+| 对话结果与可选确认 | 关联轮次完成后显示答复，支持继续追问与可选结果确认；旧验收记录兼容，未知结果由开发者核实 | `PreviewSharingController.swift`、`extension/content.js` |
 | 本地持久化 | 私有凭据文件、JSON 反馈记录、单数据目录进程锁、正常停止清理锁 | `companion/main.mjs`、`store.mjs` |
 | Mac 会话入口 | 会话顶部打开“共享预览与反馈”，固定绑定此会话，不跟随主窗口切换 | `apps/mac/Sources/AppShell/ContentView.swift`、`PreviewSharingView.swift` |
 | 原生共享面板 | “共享与配对 / 页面反馈”页签，端口与本机 IP 配置、启停、显示插件目录、复制配对 JSON | `apps/mac/Sources/AppShell/PreviewSharingView.swift` |

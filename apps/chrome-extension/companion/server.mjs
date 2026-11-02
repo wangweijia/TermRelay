@@ -139,6 +139,14 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
             json(response, 200, reviewerView(prior));
             return;
           }
+          if (input.parentId) {
+            const parent = store.records.find(item => item.id === input.parentId);
+            if (!parent) throw new RequestError(404, 'Conversation parent not found.');
+            validateFeedback(parent, project);
+            if (!['completed', 'awaiting_review', 'verified', 'changes_requested'].includes(parent.status)) {
+              throw new RequestError(409, 'Wait for the previous reply before continuing the conversation.');
+            }
+          }
           if (store.records.length >= 1000) throw new RequestError(409, 'Feedback storage is full. Ask the owner to archive this preview.');
           const screenshotBytes = store.records.reduce((total, record) => total + (record.screenshot?.dataURL.length ?? 0), 0);
           if (screenshotBytes + (input.screenshot?.dataURL.length ?? 0) > 32 * 1024 * 1024) {
@@ -171,7 +179,7 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
         validateFeedback(record, project);
         const body = await bodyOf(request);
         requireConnection(request);
-        if (record.status !== 'awaiting_review' || !['verified', 'changes_requested'].includes(body.status)) {
+        if (!['completed', 'awaiting_review'].includes(record.status) || !['verified', 'changes_requested'].includes(body.status)) {
           throw new RequestError(409, 'Feedback is not awaiting review.');
         }
         if (typeof body.note !== 'string' || body.note.length > 2000 || (body.status === 'changes_requested' && !body.note.trim())) {
@@ -183,16 +191,19 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
       }
       if (!admin || !url.pathname.startsWith('/api/')) throw new RequestError(403, 'Only the local App may dispatch feedback.');
       if (action === 'result') {
-        const body = await bodyOf(request);
-        const states = ['running', 'awaiting_approval', 'awaiting_input', 'awaiting_review', 'unknown', 'failed'];
+        const body = await bodyOf(request, 120_000);
+        const responseText = body.response ?? '';
+        const states = ['running', 'awaiting_approval', 'awaiting_input', 'awaiting_review', 'completed', 'unknown', 'failed'];
         if (busy || body.commandId !== record.commandId || !Number.isSafeInteger(body.revision) || body.revision < 1
           || !states.includes(body.status) || (body.turnId !== null && (typeof body.turnId !== 'string' || !body.turnId || body.turnId.length > 256))
-          || typeof body.note !== 'string' || body.note.length > 2000) {
+          || typeof body.note !== 'string' || body.note.length > 2000
+          || typeof responseText !== 'string' || responseText.length > 16000) {
           throw new RequestError(409, 'Local dispatch result does not match the pending execution.');
         }
         if (body.revision === record.revision && body.turnId === record.turnId
+          && responseText === (record.response ?? '')
           && ((body.status === record.status && body.note === record.note)
-            || (body.status === 'awaiting_review' && ['verified', 'changes_requested'].includes(record.status)))) {
+            || (['completed', 'awaiting_review'].includes(body.status) && ['verified', 'changes_requested'].includes(record.status)))) {
           await store.save();
           json(response, 200, record);
           return;
@@ -203,7 +214,7 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
         }
         busy = true;
         try {
-          await update(record, { status: body.status, note: body.note, turnId: body.turnId, revision: body.revision });
+          await update(record, { status: body.status, note: body.note, response: responseText, turnId: body.turnId, revision: body.revision });
           json(response, 200, record);
         } finally { busy = false; }
         return;
@@ -217,7 +228,7 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
         }
         busy = true;
         try {
-          await update(record, { status: body.outcome === 'failed' ? 'failed' : 'awaiting_review', note: body.note.trim() });
+          await update(record, { status: body.outcome === 'failed' ? 'failed' : 'completed', note: body.note.trim() });
           json(response, 200, record);
         } finally { busy = false; }
         return;
@@ -228,9 +239,20 @@ export function createCompanion({ store, binding, ports = [8080], preview, image
       }
       busy = true;
       try {
+        const history = [];
+        let parentId = record.parentId;
+        while (parentId && history.length < 8) {
+          const parent = store.records.find(item => item.id === parentId);
+          if (!parent) break;
+          validateFeedback(parent, project);
+          history.unshift({ id: parent.id, page: parent.page, element: parent.element,
+            request: parent.description, response: (parent.response ?? '').slice(0, 8000) });
+          parentId = parent.parentId;
+        }
         // The App must receive a durable intent before starting the local turn.
         await update(record, { status: 'sending', commandId: randomUUID(), revision: 0, turnId: null, note: '' });
-        json(response, 200, { commandId: record.commandId, text: promptFor(record), binding,
+        json(response, 200, { commandId: record.commandId, text: promptFor(record, history), binding,
+          imageCount: record.screenshot ? 1 : 0,
           ...(record.screenshot ? { screenshot: record.screenshot } : {}) });
       } finally { busy = false; }
     } catch (error) {

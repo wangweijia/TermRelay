@@ -361,7 +361,7 @@ try {
   assert.equal(feedback.element.text, 'Query');
   assert.equal(feedback.page, 'https://page-gateway-local.nioint.com:8101/debug/test');
   assert.ok(!JSON.stringify(feedback).includes('DO-NOT-COLLECT'));
-  assert.match(await within("return this.querySelector('#status').textContent;"), /已提交/);
+  assert.match(await within("return this.querySelector('#status').textContent;"), /已发送/);
   assert.match(await within("return this.querySelector('#connection').textContent;"), /已连接 App/);
   async function waitForLabel(label) {
     assert.equal(await within(`return new Promise(resolve=>{
@@ -372,7 +372,7 @@ try {
     });`), true, `extension must automatically show ${label} without a refresh click`);
   }
   for (const [status, label] of [
-    ['running', 'AI 正在修改'],
+    ['running', 'AI 正在处理'],
     ['awaiting_approval', '等待 Chat 工具审批'],
     ['awaiting_review', '本轮修改完成'],
   ]) {
@@ -439,7 +439,7 @@ try {
     ({ object } = await call('DOM.resolveNode', { nodeId: findHost(directTree).shadowRoots[0].nodeId }));
     await within(`this.querySelector('#toggle').click();this.querySelector('#whole').click();this.querySelector('#description').value='Direct project feedback';this.querySelector('#submit').click();`);
     assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
-      if(this.querySelector('#status').textContent.includes('已提交')){clearInterval(timer);resolve(true);}
+      if(this.querySelector('#status').textContent.includes('已发送')){clearInterval(timer);resolve(true);}
       else if(++attempts>60){clearInterval(timer);resolve(false);}},100);});`), true);
     assert.equal(directStore.records[0].page, previewURL);
     if (configuredApps.length === 1) {
@@ -479,6 +479,11 @@ try {
         const context=canvas.getContext('2d');context.drawImage(image,0,0);
         return {width:canvas.width,height:canvas.height,pixel:Array.from(context.getImageData(canvas.width/2,canvas.height-5,1,1).data)};`);
       assert.deepEqual(imageEvidence, { width: 480, height: 240, pixel: [22, 144, 105, 255] }, 'DPR-aware crop contains the selected real page pixels, not overlay or blank output');
+      await within(`this.querySelector('#pick').click();`);
+      await evaluate(`document.querySelector('#screenshot-fixture').click();`);
+      assert.equal(await within(`return !this.querySelector('#screenshot-preview').hidden && this.querySelector('#object').textContent.includes('已附截图');`), true, 'selecting an element must not silently remove the screenshot');
+      await within(`this.querySelector('#whole').click();`);
+      assert.equal(await within(`return !this.querySelector('#screenshot-preview').hidden;`), true, 'page context must not silently remove the screenshot');
       await within(`this.querySelector('#description').value='Make the screenshot region easier to read';this.querySelector('#submit').click();`);
       assert.match(await within(`return this.querySelector('#status').textContent;`), /确认截图内容/);
       assert.equal(directStore.records.length, 1, 'no image is uploaded before explicit confirmation');
@@ -486,19 +491,64 @@ try {
       await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
       assert.equal(await within(`const panel=this.querySelector('#panel');return panel.scrollWidth<=panel.clientWidth;`), true);
       await screenshot('screenshot-preview-narrow', sessionId);
+      await evaluate(`globalThis.receiptFetch=fetch;globalThis.omitImageReceipt=true;globalThis.fetch=async(...args)=>{
+        const response=await receiptFetch(...args);
+        if(omitImageReceipt && String(args[0]).endsWith('/v1/feedback') && args[1]?.method==='POST'){
+          omitImageReceipt=false;const body=await response.json();delete body.screenshot;
+          return new Response(JSON.stringify(body),{status:response.status,headers:response.headers});
+        }
+        return response;
+      };`, workerSession);
       await within(`this.querySelector('#screenshot-consent').checked=true;this.querySelector('#submit').click();`);
       assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
-        if(this.querySelector('#status').textContent.includes('已提交')){clearInterval(timer);resolve(true);}
+        if(this.querySelector('#status').textContent.includes('App 未确认接收截图')){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true, 'missing image receipts must not look like successful image delivery');
+      assert.equal(directStore.records.length, 2);
+      const originalImageID = directStore.records[0].id;
+      await evaluate(`globalThis.fetch=receiptFetch;`, workerSession);
+      await within(`this.querySelector('#submit').click();`);
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#status').textContent.includes('已发送')){clearInterval(timer);resolve(true);}
         else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true);
       assert.equal(directStore.records[0].screenshot.width, 480);
+      assert.equal(directStore.records.length, 2, 'receipt recovery must not duplicate the original message');
+      assert.equal(directStore.records[0].id, originalImageID);
       assert.equal(directStore.records[0].screenshot.height, 240);
       assert.equal(directStore.records[0].description, 'Make the screenshot region easier to read');
+      await within(`this.querySelector('#list').click();`);
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#status').textContent.includes('App 已接收截图 480 × 240')){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true, 'image upload has an explicit receipt from the App bridge');
       await within(`Array.from(this.querySelectorAll('#records button')).find(button=>button.textContent.startsWith('查看截图')).click();`);
       assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
         if(this.querySelector('#image-viewer').open){clearInterval(timer);resolve(true);}
         else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true, 'submitted image can be retrieved through the protected feedback endpoint');
       await screenshot('screenshot-history', sessionId);
-      await within(`this.querySelector('#close-viewer').click();this.querySelector('#new').click();`);
+      await within(`this.querySelector('#close-viewer').click();`);
+      const answered = directStore.records[0];
+      answered.status = 'completed'; answered.response = 'The button validates the form before calling the search API. <script>not executable</script>';
+      await directStore.save();
+      await within(`this.querySelector('#list').click();`);
+      await waitForLabel('AI 已回复');
+      assert.equal(await within(`return this.querySelector('.record-response').textContent;`), answered.response);
+      assert.equal(await within(`return this.querySelector('.record-response script') === null;`), true, 'AI replies render as text, not executable markup');
+      assert.equal(await within(`return Array.from(this.querySelectorAll('#records button')).some(button=>button.textContent==='效果满意');`), false, 'questions do not require page acceptance');
+      assert.equal(await within(`const reply=this.querySelector('.record-response').getBoundingClientRect(),panel=this.querySelector('#panel').getBoundingClientRect();return reply.top>=panel.top+50 && reply.bottom<=panel.bottom-8;`), true, 'new AI replies automatically enter the visible panel without container clipping');
+      assert.equal(await within(`const panel=this.querySelector('#panel');return panel.scrollWidth<=panel.clientWidth;`), true);
+      await screenshot('conversation-answer-narrow', sessionId);
+      await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+      await within(`this.querySelector('.record-response').scrollIntoView({block:'center'});`);
+      await screenshot('conversation-answer-desktop', sessionId);
+      await within(`Array.from(this.querySelectorAll('#records button')).find(button=>button.textContent==='继续对话').click();`);
+      assert.equal(await within(`return !this.querySelector('#reply-context').hidden;`), true);
+      await within(`this.querySelector('#description').value='Which fields are validated?';this.querySelector('#submit').click();`);
+      assert.equal(await within(`return new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{
+        if(this.querySelector('#status').textContent.includes('已发送')){clearInterval(timer);resolve(true);}
+        else if(++attempts>100){clearInterval(timer);resolve(false);}},50);});`), true);
+      assert.equal(directStore.records[0].parentId, answered.id);
+      assert.equal(directStore.records[0].description, 'Which fields are validated?');
+      await within(`this.querySelector('#new').click();`);
+      assert.equal(await within(`return this.querySelector('#reply-context').hidden;`), true, 'new topics clear the conversation parent');
       assert.equal(await within(`return this.querySelector('#screenshot-preview').hidden;`), true, 'new feedback clears the previous screenshot');
       await evaluate(`chrome.tabs.captureVisibleTab=globalThis.realCapture;`, workerSession);
       await call('Emulation.clearDeviceMetricsOverride');
@@ -512,7 +562,7 @@ try {
     await waitOptions(`document.querySelector('#connection-badge').textContent==='未连接' && document.querySelector('main').getAttribute('aria-busy')==='false'`, 'direct project disconnects');
     assert.deepEqual(await evaluate(`chrome.proxy.settings.get({incognito:false})`, optionSession), externalState, 'direct disconnect preserves the external proxy');
   }
-  console.log('Chrome UI: popup, direct/proxy feedback, screenshot region/cancel/permission recovery, DPR pixels, consent, image submission/history and unsupported sessions passed.');
+  console.log('Chrome UI: popup, direct/proxy, screenshots, AI answers, safe reply rendering, follow-up conversations, new topics and legacy optional review passed.');
 } finally {
   clearTimeout(timeout);
   if (browser.exitCode === null) await call('Browser.close', {}, null).catch(() => {});

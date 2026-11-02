@@ -10,7 +10,7 @@ struct PreviewSharingButton: View {
         Button {
             isPresented = true
         } label: {
-            Label(sharing.isRunning && sharing.sessionID == session.id ? "管理共享与反馈" : "共享预览与反馈",
+            Label(sharing.isRunning && sharing.sessionID == session.id ? "管理共享与对话" : "共享预览与对话",
                   systemImage: sharing.isRunning && sharing.sessionID == session.id ? "dot.radiowaves.left.and.right" : "square.and.arrow.up")
         }
         .help("此入口固定绑定本项目会话，不随窗口选择自动切换。")
@@ -50,7 +50,7 @@ private struct PreviewSharingView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("共享预览与反馈").font(.title2.bold())
+                    Text("共享预览与对话").font(.title2.bold())
                     Text("\(displayName) · \(session.directory.lastPathComponent)").font(.headline)
                 }
                 Spacer()
@@ -65,7 +65,7 @@ private struct PreviewSharingView: View {
             }
             Picker("管理", selection: $selectedTab) {
                 Text("共享与配对").tag("setup")
-                Text("页面反馈 \(isBoundHere ? sharing.feedback.filter { $0.status == "pending" }.count : 0)").tag("feedback")
+                Text("页面对话 \(isBoundHere ? sharing.feedback.filter { $0.status == "pending" }.count : 0)").tag("feedback")
             }.pickerStyle(.segmented)
             if selectedTab == "setup" { setup } else { feedback }
             if let message = error ?? sharing.errorMessage {
@@ -219,15 +219,15 @@ private struct PreviewSharingView: View {
     private var feedback: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("插件反馈自动排队进入此 Chat；AI 工具审批保持原设置。").font(.caption)
+                Text("网页消息自动排队进入此 Chat；AI 工具审批保持原设置。").font(.caption)
                 Spacer()
                 Button("刷新") {
                     Task { do { try await sharing.synchronize() } catch { self.error = error.localizedDescription } }
                 }.disabled(!isBoundHere || !sharing.isRunning)
             }
             if !isBoundHere || sharing.feedback.isEmpty {
-                ContentUnavailableView("暂无页面反馈", systemImage: "text.bubble",
-                                       description: Text("开启共享并配对插件后，让业务方在页面选择元素并提交文字反馈。"))
+                ContentUnavailableView("暂无页面对话", systemImage: "text.bubble",
+                                       description: Text("开启共享并配对插件后，即可围绕页面提问、分析交互或提出修改请求。"))
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
@@ -238,7 +238,7 @@ private struct PreviewSharingView: View {
                     }
                 }
             }
-            Text("开始、等待审批与完成状态自动同步到插件；完成仅代表本轮执行结束，不代表验收通过。未知结果须人工核实，不自动重发。")
+            Text("AI 答复与处理状态同步到插件；问答无需验收，页面改动请按需核实。未知结果须人工核实，不自动重发。")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -251,6 +251,8 @@ private struct PreviewFeedbackCard: View {
     @State private var summary = ""
     @State private var confirmResolution = false
     @State private var resolutionFailed = false
+    @State private var attachment: AgentImage?
+    @State private var attachmentError: String?
 
     var body: some View {
         GroupBox {
@@ -261,17 +263,37 @@ private struct PreviewFeedbackCard: View {
                     Text(String(record.id.prefix(8))).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 Text(record.description).textSelection(.enabled)
+                if let screenshot = record.screenshot {
+                    if let attachment {
+                        Label("截图已接收 · \(screenshot.width) × \(screenshot.height)", systemImage: "photo")
+                            .font(.caption).foregroundStyle(.secondary)
+                        AgentMessageImageView(image: attachment)
+                    } else if let attachmentError {
+                        Label(attachmentError, systemImage: "exclamationmark.triangle").font(.caption)
+                        Button { Task { await loadAttachment() } } label: {
+                            Label("重试读取截图", systemImage: "arrow.clockwise")
+                        }
+                    } else {
+                        ProgressView("正在读取截图…").controlSize(.small)
+                    }
+                } else {
+                    Label("本条消息未附图片", systemImage: "text.bubble")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text(record.page).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 if let element = record.element {
                     Text("元素：\(element.tag) · \(element.text)").font(.caption).lineLimit(3)
                 }
                 if !record.steps.isEmpty { Text("复现：\(record.steps)").font(.caption) }
                 if !record.note.isEmpty { Text(record.note).font(.caption).textSelection(.enabled) }
+                if let response = record.response, !response.isEmpty {
+                    AgentMarkdownView(text: response)
+                }
                 if ["sending", "delivered", "unknown"].contains(record.status) {
                     TextField("核实结果后，填写给业务方看的摘要", text: $summary, axis: .vertical)
                         .lineLimit(2...4)
                     HStack {
-                        Button("已完成，交业务方验收") { resolutionFailed = false; confirmResolution = true }
+                        Button("已核实完成，同步结果") { resolutionFailed = false; confirmResolution = true }
                         Button("已核实失败 / 未执行") { resolutionFailed = true; confirmResolution = true }
                     }.disabled(!canExecute || sharing.isSending || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -280,12 +302,21 @@ private struct PreviewFeedbackCard: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
         }
+        .task(id: record.id) { await loadAttachment() }
         .alert("确认已在会话中核实执行结束？", isPresented: $confirmResolution) {
             Button("取消", role: .cancel) {}
             Button("确认") { Task { await sharing.resolve(record, summary: summary, failed: resolutionFailed) } }
                 .disabled(!canExecute || sharing.isSending)
         } message: {
-            Text(resolutionFailed ? "记录将标为失败，不会自动重发。" : "记录将交业务方验收，不代表已经验收通过。")
+            Text(resolutionFailed ? "记录将标为失败，不会自动重发。" : "核实摘要将同步到网页对话，不代表页面改动已通过验收。")
         }
+    }
+
+    private func loadAttachment() async {
+        guard record.screenshot != nil else { return }
+        attachmentError = nil
+        do { attachment = try await sharing.imageAttachment(for: record) }
+        catch is CancellationError { }
+        catch { attachmentError = "截图读取失败，尚未确认图片内容。" }
     }
 }

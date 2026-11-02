@@ -36,6 +36,12 @@ final class PreviewSharingTests: XCTestCase {
             try await controller.synchronize()
             XCTAssertEqual(received.count, 1)
             XCTAssertEqual(received.first?.data, screenshotData)
+            let record = try XCTUnwrap(controller.feedback.first)
+            XCTAssertEqual(record.screenshot?.width, 1)
+            XCTAssertEqual(record.screenshot?.height, 1)
+            let attachment = try await controller.imageAttachment(for: record)
+            XCTAssertEqual(attachment.data, screenshotData)
+            XCTAssertEqual(attachment.mimeType, "image/png")
             XCTAssertEqual(controller.feedback.first?.status, "running")
         }
     }
@@ -213,7 +219,7 @@ final class PreviewSharingTests: XCTestCase {
             await runtime.emit(.userInputResolved(requestID: "question", turnID: turnID, answers: [:]))
             try await waitForStatus("running", controller: controller)
             await runtime.emit(.turnCompleted(turnID: turnID, status: .completed))
-            try await waitForStatus("awaiting_review", controller: controller)
+            try await waitForStatus("completed", controller: controller)
             XCTAssertFalse(controller.hasUnresolvedExecution)
             await local.stop()
             controller.stopIfBound(to: managed.id)
@@ -284,7 +290,7 @@ final class PreviewSharingTests: XCTestCase {
             controller.observe(event(.turnCompleted(turnID: "provider-turn", status: .completed), turn: "provider-turn", sequence: 2))
             controller.observe(event(.userMessage(messageID: commands[0].uuidString.lowercased(), text: ""), turn: "provider-turn", sequence: 3))
             try await controller.synchronize()
-            XCTAssertEqual(controller.feedback.first(where: { $0.id == first })?.status, "awaiting_review")
+            XCTAssertEqual(controller.feedback.first(where: { $0.id == first })?.status, "completed")
             XCTAssertEqual(commands.count, 1)
             ready = true
             try await controller.synchronize()

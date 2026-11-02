@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "点点改 · TermRelay",
   "version": "0.1.0",
-  "description": "在受信局域网预览页面，点选位置、说出想法，让绑定的 TermRelay 会话修改并同步进度。",
+  "description": "围绕当前网页与绑定的 TermRelay AI 会话对话，支持提问、分析交互和请求修改，可附加页面元素与截图。",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "proxy", "webRequest", "webRequestAuthProvider", "alarms", "scripting", "activeTab"],
   "host_permissions": ["https://page-gateway-local.nioint.com/*", "http://*/*"],

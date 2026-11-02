@@ -49,10 +49,10 @@ function render() {
   $('.proxy-modes').hidden = direct;
   $('#mode-help').hidden = direct;
   $('#access-warning').textContent = direct
-    ? '仅向可信验收者分享。页面内容与反馈通过开发者共享的局域网服务提交。'
-    : '仅限受信局域网。项目代理主机可连接开发者 Mac 的所有本地 TCP 端口；仅向可信验收者分享，不绕过公司网络管理策略。';
+    ? '仅向可信协作者分享。消息、所选页面上下文与 AI 答复通过开发者的局域网服务传递。'
+    : '仅限受信局域网。项目代理主机可连接开发者 Mac 的所有本地 TCP 端口；仅向可信协作者分享，不绕过公司网络管理策略。';
   $('#connection-help').textContent = connectionIssue || state.connectionError ? '连接遇到问题，请确认开发者 Mac 已开启共享且局域网可达，再重新连接。'
-    : direct ? connected ? '已连接开发者 Mac。点击“打开项目”即可访问并提交反馈，不修改浏览器代理。' : '直接访问项目；打开项目时会自动连接反馈服务。'
+    : direct ? connected ? '已连接开发者 Mac。打开项目即可围绕页面与 AI 对话，不修改浏览器代理。' : '直接访问项目；打开项目时会自动连接对话服务。'
     : external ? previewing && connected ? 'App 已连接；ZeroOmega 分流尚未验证。打开下方入口，确认页面可以访问。'
       : '按高级设置中的方案配置 ZeroOmega，再确认并打开预览。点点改不会接管浏览器代理。'
     : previewing && state.proxyError ? `内置代理报错：${state.proxyError}。请确认 Mac 共享服务与网络可达，再重新开启预览。`
@@ -217,10 +217,10 @@ $('#enable').onclick = () => {
   await send({ type: 'proxy.set', enabled: true, consent: $('#consent').checked });
   try { await chrome.tabs.create({ url: entry }); }
   catch { throw new Error('预览已开启，但未能打开新标签页。请点击上方预览入口重试。'); }
-  return state.config?.accessMode === 'direct' ? '已打开项目，反馈服务已连接；浏览器代理设置未修改。在页面点击“点点改”提交反馈。'
+  return state.config?.accessMode === 'direct' ? '已打开项目，对话服务已连接；浏览器代理设置未修改。'
     : state.proxyMode === 'zeroomega'
     ? '已打开预览入口，分流由 ZeroOmega 管理；尚未验证规则是否生效。请在页面确认访问效果，并关闭旧预览标签页。'
-    : '已开启代理并打开预览。进入业务页面后点击“点点改”提交反馈；旧预览标签页请关闭。';
+    : '已开启代理并打开预览，可在页面与 AI 对话；旧预览标签页请关闭。';
   }, '正在连接并打开项目…');
 };
 $('#test').onclick = () => run(async () => { await connect(); return 'App 连接正常，可以继续预览与提交想法。'; }, '正在检查 App 连接…');
@@ -231,7 +231,7 @@ $('#disconnect').onclick = () => run(async () => {
   return state.config?.accessMode === 'direct' ? '已结束反馈连接，项目的直接访问与原浏览器代理设置不受影响。'
     : state.proxyMode === 'zeroomega'
     ? '已结束连接，撤销本次代理认证并关闭已有预览隧道。ZeroOmega 配置未修改，请按需停用预览规则；其他验收者现在可以接入。'
-    : '已结束连接并关闭代理。其他验收者现在可以接入；已经提交的改动任务不会因此取消。';
+    : '已结束连接并关闭代理。其他协作者现在可以接入；已经发送的消息不会因此取消。';
 }, '正在结束连接…');
 $('#disable').onclick = () => run(async () => {
   await send({ type: 'proxy.set', enabled: false });
