@@ -4,6 +4,7 @@ const root = new URL('../', import.meta.url);
 const indexURL = new URL('./generated/typescript/index.ts', root);
 let source = await readFile(indexURL, 'utf8');
 for (const [name, path, next] of [
+  ['toolTurnStartSchema', './commands/tool-turn-start.schema.json', 'toolTurnInterruptSchema'],
   ['deviceRegisterSchema', './events/device-register.schema.json', 'deviceHeartbeatSchema'],
   ['toolEventSchema', './events/tool-event.schema.json', 'toolTurnStartSchema'],
   ['toolConfigSetSchema', './commands/tool-config-set.schema.json', 'toolTurnStartSchema'],
@@ -22,6 +23,7 @@ for (const [name, path, next] of [
     source = source.slice(0, end) + declaration + source.slice(end);
   }
 }
+source = source.replace(/export interface ToolTurnStartPayload \{[^}]*\}/, 'export interface ToolTurnStartPayload {\n  text: string;\n  attachments?: string[];\n}');
 const deviceRegister = JSON.parse(await readFile(new URL('./events/device-register.schema.json', root), 'utf8'));
 const toolEvent = JSON.parse(await readFile(new URL('./events/tool-event.schema.json', root), 'utf8'));
 source = source.replace(/export type ToolEventKind =[\s\S]*?;/,
@@ -31,6 +33,7 @@ source = source.replace(/export interface DeviceRegisterPayload \{[\s\S]*?\n\}/,
   appVersion: string;
   platform: ${deviceRegister.properties.platform.enum.map(value => JSON.stringify(value)).join(' | ')};
   tools: string[];
+  chatAttachments?: boolean;
 }`);
 const historySchemas = [
   ['sessionHistoryListSchema', 'session-history-list'],
@@ -49,10 +52,23 @@ const shortcutSchemas = [
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
 const filePreviewSchemas = [
+  ['attachmentRequestSchema', 'commands/attachment-request'],
+  ['attachmentResultSchema', 'events/attachment-result'],
   ['filePreviewRequestSchema', 'commands/file-preview-request'],
   ['filePreviewResultSchema', 'events/file-preview-result'],
 ];
-const filePreviewTypes = `export interface FilePreviewRequestPayload {
+const filePreviewTypes = `export interface AttachmentMetadata {
+  id: string; name: string; mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown"; size: number;
+}
+export interface AttachmentRequestPayload {
+  requestId: string; workspaceId: string; operation: "upload" | "read" | "delete" | "purge"; attachmentId: string; offset: number;
+  attachment?: AttachmentMetadata; data?: string; final?: boolean;
+}
+export interface AttachmentResultPayload {
+  requestId: string; status: "ok" | "error"; attachment?: AttachmentMetadata; data?: string; message?: string;
+}
+
+export interface FilePreviewRequestPayload {
   requestId: string;
   workspaceId: string;
   path: string;
@@ -211,6 +227,13 @@ await writeFile(indexURL, source + historyTypes + historyDeclarations.join('') +
 
 const swiftURL = new URL('./generated/swift/ProtocolTypes.swift', root);
 let swift = await readFile(swiftURL, 'utf8');
+swift = swift.replace(/public struct DeviceRegisterPayload:[\s\S]*?\n\}/, `public struct DeviceRegisterPayload: Codable, Sendable {
+    public let name: String
+    public let appVersion: String
+    public let platform: String
+    public let tools: [String]
+    public let chatAttachments: Bool?
+}`);
 swift = swift.replace(/public struct WorkspaceRegisteredPayload:[\s\S]*?\n\}/, `public struct WorkspaceRegisteredPayload: Codable, Sendable {
     public let workspaceId: String
     public let displayName: String

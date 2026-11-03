@@ -88,12 +88,8 @@ struct AgentImage: Sendable, Equatable {
 
 struct TurnInput: Sendable, Equatable {
     let text: String
-    let images: [AgentImage]
-
-    init(text: String, images: [AgentImage] = []) {
-        self.text = text
-        self.images = images
-    }
+    var images: [AgentImage] = []
+    var attachments: [PreparedAttachment] = []
 }
 
 enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
@@ -181,7 +177,7 @@ enum TurnCompletionStatus: String, Codable, Sendable {
 enum ToolEventPayload: Sendable, Equatable {
     case sessionStarted(reference: AgentSessionReference)
     case turnStarted(turnID: String)
-    case userMessage(messageID: String, text: String, images: [AgentImage] = [])
+    case userMessage(messageID: String, text: String, images: [AgentImage] = [], attachments: [ChatAttachment] = [])
     case assistantTextDelta(text: String)
     case assistantMessageCompleted(text: String)
     case reasoningDelta(text: String)

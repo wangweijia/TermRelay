@@ -1,3 +1,5 @@
+import { AttachmentsService } from './attachments.service';
+import { AttachmentsController } from './attachments.controller';
 import { Module } from '@nestjs/common';
 import { DevicesModule } from '../devices/devices.module';
 import { SessionRepository } from './session.repository';
@@ -12,8 +14,8 @@ import { SessionStartRepository } from './session-start.repository';
 
 @Module({
   imports: [DevicesModule],
-  controllers: [SessionsController, FilePreviewController, SessionStartController],
-  providers: [WorkspaceRepository, SessionRepository, SessionsService, FilePreviewService, SessionStartService, SessionStartRepository],
-  exports: [SessionsService, FilePreviewService, SessionStartService],
+  controllers: [AttachmentsController, SessionsController, FilePreviewController, SessionStartController],
+  providers: [AttachmentsService, WorkspaceRepository, SessionRepository, SessionsService, FilePreviewService, SessionStartService, SessionStartRepository],
+  exports: [AttachmentsService, SessionsService, FilePreviewService, SessionStartService],
 })
 export class SessionsModule {}

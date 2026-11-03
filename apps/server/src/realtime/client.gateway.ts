@@ -1,3 +1,4 @@
+import { AttachmentsService } from '../sessions/attachments.service';
 import { Logger, Optional } from '@nestjs/common';
 import {
   ConnectedSocket,
@@ -70,6 +71,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly previews?: FilePreviewService,
     @Optional() private readonly ai?: AIService,
     @Optional() private readonly starts?: SessionStartService,
+    @Optional() private readonly attachments?: AttachmentsService,
   ) {}
 
   handleConnection(client: WebSocket): void {
@@ -191,6 +193,11 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
+      return;
+    }
+
+    if (result.message.type === 'attachment.result') {
+      this.attachments?.accept(client, result.message.envelope);
       return;
     }
 
@@ -375,6 +382,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
         return;
       }
+      this.attachments?.cleanup(session);
       this.sendEnvelope<SessionHistoryDeletedPayload>(client, {
         type: 'session.history.deleted',
         protocolVersion: '2',
@@ -394,7 +402,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client: WebSocket,
     message: Exclude<
       ValidClientMessage,
-      { type: 'ai.capabilities' | 'ai.update' | 'device.register' | 'device.heartbeat' | 'command.ack' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
+      { type: 'ai.capabilities' | 'ai.update' | 'device.register' | 'device.heartbeat' | 'command.ack' | 'attachment.result' | 'file.preview.result' | 'session.sync' | 'session.history.list' | 'session.history.request' | 'session.history.delete' | 'shortcut.catalog' | 'shortcut.run.update' | 'shortcut.run.input.ack' }
     >,
   ): Promise<void> {
     const { envelope } = message;

@@ -17,6 +17,9 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
     @Published private(set) var autoApproveEnabled = false
     @Published private(set) var configurationOptions: [AgentConfigOption] = []
     @Published private(set) var configurationUpdating = false
+    @Published var draftAttachments: [ChatAttachment] = []
+    @Published var attachmentError: String?
+    @Published var preparingAttachments = false
     @Published var promptDraft = ""
     @Published var manualModelDraft = ""
     @Published var userInputSelections: [String: [String: String]] = [:]
@@ -136,13 +139,60 @@ final class LocalStructuredAgentSession: ObservableObject, Identifiable {
 
     func supportsImageInput() async -> Bool { await coordinator?.supportsImageInput() ?? false }
 
-    func startTurn(_ text: String, idempotencyKey: UUID, images: [AgentImage] = []) async -> RemoteCommandResult {
+    func startTurn(_ text: String, attachmentIDs: [String] = [], idempotencyKey: UUID, images: [AgentImage] = []) async -> RemoteCommandResult {
         if !images.isEmpty {
             guard await supportsImageInput() else {
                 return .rejected("image_input_unsupported", "当前 AI 会话不支持图片输入，请移除截图或切换支持图片的会话。")
             }
         }
-        return await send(.startTurn(TurnInput(text: text, images: images), idempotencyKey: idempotencyKey))
+        guard !preparingAttachments else { return .rejected("attachment_busy", "正在处理附件") }
+        preparingAttachments = true
+        defer { preparingAttachments = false }
+        do {
+            let attachments = try await AttachmentStore.shared.prepare(sessionID: id, ids: attachmentIDs)
+            let result = await send(.startTurn(TurnInput(text: text, images: images, attachments: attachments), idempotencyKey: idempotencyKey))
+            attachmentError = result.message
+            do { try await AttachmentStore.shared.release(sessionID: id, attachments: attachments, used: result.succeeded) }
+            catch { attachmentError = "消息提交结果已确认，但附件保留状态未能写入：\(error.localizedDescription)" }
+            return result
+        } catch {
+            let message = (error as? AgentError)?.localizedDescription ?? "附件不存在、已清理或无法读取，请重新添加"
+            attachmentError = message
+            return .rejected("attachment_failed", message)
+        }
+    }
+
+    func addAttachments(_ urls: [URL]) async {
+        guard !isExternal, !preparingAttachments else { return }
+        preparingAttachments = true
+        defer { preparingAttachments = false }
+        attachmentError = nil
+        do { try await AttachmentStore.shared.bind(sessionID: id, workspace: directory) }
+        catch { attachmentError = error.localizedDescription; return }
+        for url in urls {
+            guard draftAttachments.count < 8 else { attachmentError = "每条消息最多 8 个附件"; break }
+            do { draftAttachments.append(try await AttachmentStore.shared.importFile(sessionID: id, source: url)) }
+            catch { attachmentError = error.localizedDescription }
+        }
+    }
+
+    func pasteImage(_ data: Data) async {
+        guard !isExternal, !preparingAttachments, draftAttachments.count < 8 else { return }
+        preparingAttachments = true
+        defer { preparingAttachments = false }
+        do {
+            try await AttachmentStore.shared.bind(sessionID: id, workspace: directory)
+            draftAttachments.append(try await AttachmentStore.shared.importData(sessionID: id,
+                name: "粘贴图片.png", mime: "image/png", data: data))
+        } catch { attachmentError = error.localizedDescription }
+    }
+
+    func removeAttachment(_ attachment: ChatAttachment) {
+        guard !preparingAttachments else { return }
+        draftAttachments.removeAll { $0.id == attachment.id }
+        if let attachmentID = UUID(uuidString: attachment.id) {
+            Task { try? await AttachmentStore.shared.removeDraft(sessionID: id, id: attachmentID) }
+        }
     }
 
     func interrupt() async -> RemoteCommandResult { await send(.interrupt) }

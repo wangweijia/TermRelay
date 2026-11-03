@@ -169,9 +169,11 @@ final class StructuredAgentCoreTests: XCTestCase {
     func testUserMessageRetainsImagesWhenTextIsUpdated() throws {
         let sessionID = UUID()
         let image = AgentImage(data: "aW1hZ2U=", mimeType: "image/png")
+        let attachment = ChatAttachment(id: UUID().uuidString.lowercased(), name: "image.png", mimeType: "image/png", size: 5)
         var items: [AgentTimelineItem] = []
         for (sequence, payload) in [
             ToolEventPayload.userMessage(messageID: "user-a", text: "修改截图", images: [image]),
+            .userMessage(messageID: "user-a", text: "修改截图", attachments: [attachment]),
             .userMessage(messageID: "user-a", text: "修改截图中的按钮"),
         ].enumerated() {
             AgentTimelineProjector.apply(ToolEvent(
@@ -185,6 +187,7 @@ final class StructuredAgentCoreTests: XCTestCase {
             return XCTFail("Expected a user message")
         }
         XCTAssertEqual(message.images, [image])
+        XCTAssertEqual(message.attachments, [attachment])
         XCTAssertEqual(message.text, "修改截图中的按钮")
         XCTAssertEqual(message.turnID, "turn-a")
     }

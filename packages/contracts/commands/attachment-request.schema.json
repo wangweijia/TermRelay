@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/attachment-request.schema.json",
+  "title": "attachment.request payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "workspaceId",
+    "operation",
+    "attachmentId",
+    "offset"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "operation": {
+      "enum": [
+        "upload",
+        "read",
+        "delete",
+        "purge"
+      ]
+    },
+    "attachmentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20971520
+    },
+    "attachment": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "mimeType",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/pdf",
+            "text/plain",
+            "text/markdown"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "string",
+      "maxLength": 262144,
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+    },
+    "final": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,3 +1,4 @@
+import { attachmentResultSchema, type AttachmentResultPayload } from '@termrelay/contracts';
 import { Injectable } from '@nestjs/common';
 import type {
   CommandAckPayload,
@@ -60,6 +61,7 @@ export type ValidClientMessage =
   | { type: 'shortcut.catalog'; envelope: Envelope<ShortcutCatalogPayload> }
   | { type: 'shortcut.run.update'; envelope: Envelope<ShortcutRunUpdatePayload> }
   | { type: 'shortcut.run.input.ack'; envelope: Envelope<ShortcutRunInputAckPayload> }
+  | { type: 'attachment.result'; envelope: Envelope<AttachmentResultPayload> }
   | { type: 'file.preview.result'; envelope: Envelope<FilePreviewResultPayload> };
 
 export type ProtocolValidationResult = SchemaValidationResult<ValidClientMessage>;
@@ -88,6 +90,7 @@ export class ProtocolValidator {
     'shortcut.catalog': shortcutCatalogSchema,
     'shortcut.run.update': shortcutRunUpdateSchema,
     'shortcut.run.input.ack': shortcutRunInputAckSchema,
+    'attachment.result': attachmentResultSchema,
     'file.preview.result': filePreviewResultSchema,
   });
 
@@ -103,7 +106,7 @@ export class ProtocolValidator {
         const providers = message.envelope.payload.providers;
         if (new Set(providers.map(p => p.provider)).size !== providers.length) return invalidContext(envelope,'AI providers must be unique.');
       }
-    } else if (envelope.type === 'file.preview.result') {
+    } else if ((envelope.type === 'file.preview.result' || envelope.type === 'attachment.result')) {
       if (!envelope.sessionId || envelope.seq !== undefined || envelope.commandId !== undefined) {
         return invalidContext(envelope, 'file.preview.result requires sessionId and must not include seq or commandId.');
       }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var appModel: AppModel
@@ -343,6 +344,9 @@ private struct CopilotHistoryView: View {
                             } else {
                                 AgentMarkdownView(text: message.text, markdown: false)
                             }
+                            ForEach(message.attachments) { attachment in
+                                ChatAttachmentCard(attachment: attachment, sessionID: archive.id)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -470,11 +474,45 @@ private struct StructuredAgentSessionView: View {
                 if let configurationError {
                     Text(configurationError).font(.caption).foregroundStyle(.red)
                 }
-                TextEditor(text: $session.promptDraft)
-                    .disabled(session.isExternal)
+                if !session.draftAttachments.isEmpty {
+                    ScrollView(.horizontal) {
+                        HStack {
+                            ForEach(session.draftAttachments) { attachment in
+                                ChatAttachmentCard(attachment: attachment, sessionID: session.id) {
+                                    session.removeAttachment(attachment)
+                                }
+                            }
+                        }
+                    }
+                }
+                if let error = session.attachmentError { Text(error).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    Button("添加图片 / 文件") { chooseAttachments() }
+                        .disabled(session.isExternal || session.preparingAttachments || session.draftAttachments.count >= 8)
+                    Text(session.preparingAttachments ? "正在处理附件…" : "支持粘贴图片、拖入文件；每条最多 8 个，单文件 20 MiB")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                AttachmentTextEditor(text: $session.promptDraft, disabled: session.isExternal,
+                    onFiles: { urls in Task { await session.addAttachments(urls) } },
+                    onImage: { data in Task { await session.pasteImage(data) } },
+                    onKey: { event in
+                        guard event.keyCode == 36 || event.keyCode == 76 else { return false }
+                        var modifiers: EventModifiers = []
+                        if event.modifierFlags.contains(.command) { modifiers.insert(.command) }
+                        if event.modifierFlags.contains(.control) { modifiers.insert(.control) }
+                        if event.modifierFlags.contains(.option) { modifiers.insert(.option) }
+                        if event.modifierFlags.contains(.shift) { modifiers.insert(.shift) }
+                        guard appModel.acpSendShortcut.matches(modifiers) else { return false }
+                        submitPrompt(); return true
+                    })
                     .font(.body)
                     .frame(minHeight: 56, maxHeight: 110)
                     .overlay { RoundedRectangle(cornerRadius: 6).stroke(.separator) }
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard !session.isExternal, !session.preparingAttachments else { return false }
+                        Task { await session.addAttachments(urls) }
+                        return true
+                    }
                     .onKeyPress(phases: .down) { keyPress in
                         guard keyPress.key == .return,
                               appModel.acpSendShortcut.matches(keyPress.modifiers) else {
@@ -513,8 +551,8 @@ private struct StructuredAgentSessionView: View {
     }
 
     private var canSend: Bool {
-        !session.isExternal && !session.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && session.state == .ready
+        !session.isExternal && (!session.promptDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !session.draftAttachments.isEmpty)
+            && session.state == .ready && !session.preparingAttachments
     }
 
     private var visibleTimeline: [AgentTimelineItem] {
@@ -544,8 +582,26 @@ private struct StructuredAgentSessionView: View {
     private func submitPrompt() {
         guard canSend else { return }
         let text = session.promptDraft
-        session.promptDraft = ""
-        Task { _ = await session.startTurn(text, idempotencyKey: UUID()) }
+        let attachments = session.draftAttachments
+        Task {
+            let result = await session.startTurn(text, attachmentIDs: attachments.map(\.id), idempotencyKey: UUID())
+            if result.succeeded {
+                if session.promptDraft == text { session.promptDraft = "" }
+                session.draftAttachments.removeAll { sent in attachments.contains { $0.id == sent.id } }
+            }
+        }
+    }
+
+    private func chooseAttachments() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.png, .jpeg, .webP, .pdf, .plainText, UTType(filenameExtension: "md") ?? .plainText]
+        panel.begin { response in
+            guard response == .OK else { return }
+            let urls = panel.urls
+            Task { @MainActor in await session.addAttachments(urls) }
+        }
     }
 
 }
@@ -631,6 +687,9 @@ private struct AgentTimelineRow: View {
                         AgentMarkdownView(text: message.text)
                     } else {
                         AgentMarkdownView(text: message.text, markdown: false)
+                        ForEach(message.attachments) { attachment in
+                            ChatAttachmentCard(attachment: attachment, sessionID: session.id)
+                        }
                     }
                     ForEach(message.images.indices, id: \.self) { index in
                         AgentMessageImageView(image: message.images[index])

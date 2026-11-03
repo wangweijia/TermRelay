@@ -8,6 +8,7 @@
     "name": { "type": "string", "minLength": 1, "maxLength": 128 },
     "appVersion": { "type": "string", "minLength": 1 },
     "platform": { "enum": ["macOS", "linux"] },
+    "chatAttachments": { "type": "boolean" },
     "tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
   },
   "additionalProperties": false

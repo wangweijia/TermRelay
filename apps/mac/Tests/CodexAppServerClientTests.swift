@@ -46,17 +46,22 @@ final class CodexAppServerClientTests: XCTestCase {
         let changedOptions = try await changing.value
         XCTAssertEqual(changedOptions.last?.currentValue, "high")
 
-        let image = AgentImage(data: "c3ludGhldGlj", mimeType: "image/png")
-        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello", images: [image]), idempotencyKey: UUID())) }
+    let screenshot = AgentImage(data: "c3ludGhldGlj", mimeType: "image/png")
+        let image = PreparedAttachment(metadata: ChatAttachment(id: UUID().uuidString.lowercased(), name: "screenshot.png", mimeType: "image/png", size: 10), url: URL(fileURLWithPath: "/tmp/screenshot.png"), extractedText: nil)
+        let document = PreparedAttachment(metadata: ChatAttachment(id: UUID().uuidString.lowercased(), name: "notes.txt", mimeType: "text/plain", size: 10), url: URL(fileURLWithPath: "/tmp/notes.txt"), extractedText: "Document context")
+    let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello", images: [screenshot], attachments: [image, document]), idempotencyKey: UUID())) }
         let turn = try await transport.waitForSentMessage(at: 5)
         let params = try XCTUnwrap(turn["params"] as? [String: Any])
         XCTAssertEqual(params["threadId"] as? String, "thread-model")
         XCTAssertEqual(params["model"] as? String, "model-a")
         XCTAssertEqual(params["effort"] as? String, "high")
-        let content = try XCTUnwrap(params["input"] as? [[String: Any]])
-        XCTAssertEqual(content.count, 2)
-        XCTAssertEqual(content[1]["type"] as? String, "image")
-        XCTAssertEqual(content[1]["url"] as? String, image.dataURL)
+        let inputs = try XCTUnwrap(params["input"] as? [[String: Any]])
+    XCTAssertEqual(inputs.count, 3)
+        XCTAssertTrue((inputs.first?["text"] as? String)?.contains("Document context") == true)
+    XCTAssertEqual(inputs[1]["type"] as? String, "localImage")
+    XCTAssertEqual(inputs[1]["path"] as? String, "/tmp/screenshot.png")
+    XCTAssertEqual(inputs[2]["type"] as? String, "image")
+    XCTAssertEqual(inputs[2]["url"] as? String, screenshot.dataURL)
         try await transport.respondToRequest(at: 5, result: ["turn": ["id": "turn-model"]])
         try await sending.value
         await runtime.stop()

@@ -105,6 +105,7 @@ export class CodexRuntime implements AgentRuntime {
     if (this.closing || !this.threadId) throw new Error('Codex session is not ready');
     switch (kind) {
       case 'tool.turn.start': {
+        if (Array.isArray(payload.attachments) && payload.attachments.length) throw new Error('Chat attachments currently require the Mac client');
         const message = text(payload.text, 65536);
         if (!message.trim() || this.busy) throw new Error('Empty prompt or a turn is already running');
         this.busy = true;

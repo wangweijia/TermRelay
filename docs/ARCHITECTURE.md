@@ -174,6 +174,15 @@ Server 的设备端与浏览器端校验器共用 `ProtocolSchemaValidator` 校�
 公网设备网关显式声明自身身份，不依赖类名识别；仍要求设备凭据，且不接收 AI 能力发布。
 会话事件去重和 AI 请求指纹共用递归排序的 JSON 序列化，数组顺序保持不变。
 
+## 聊天附件
+
+Mac 拥有附件文件与工作区绑定，Web 仅使用不透明附件 ID。设备注册通过可选的 `chatAttachments`
+声明附件能力；未声明的设备不开放上传。HTTP 附件请求经 Server 的受限中转发送到原设备，
+每次最多 192 KiB，通过独立 `attachment.request` / `attachment.result` 确认；不写入有序消息 journal。
+Mac 校验会话 / 工作区、文件格式与限额后保存副本；轮次只引用已完成附件，消息历史只保存附件元数据。
+Codex 图片映射为 `localImage`，ACP 图片按握手能力映射为图片内容块；文档内容由 Mac 提取。
+PDFKit、沙箱可读性、缓存与离线删除限制见[聊天附件](CHAT_ATTACHMENTS.md)。
+
 ## Codex 集成决策
 
 Codex 的结构化增强直接使用官方 App Server Protocol，不通过 `codex-acp`。Mac App 在本机

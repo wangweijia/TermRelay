@@ -13,6 +13,7 @@ struct CopilotHistorySession: Identifiable, Sendable {
 struct CopilotHistoryMessage: Sendable, Equatable {
     let role: String
     let text: String
+    var attachments: [ChatAttachment] = []
 }
 
 struct RelayHistorySession: Decodable, Sendable {
@@ -39,10 +40,12 @@ enum CopilotHistory {
             guard event.type == "tool.event",
                   let payload = event.payload.object,
                   let kind = payload["kind"]?.string,
-                  let text = payload["data"]?.object?["text"]?.string,
-                  !text.isEmpty else { return nil }
+                  let data = payload["data"]?.object,
+                  let text = data["text"]?.string else { return nil }
+            let attachments = ChatAttachment.decodeList(data["attachments"])
+            guard !text.isEmpty || !attachments.isEmpty else { return nil }
             switch kind {
-            case "user.message": return CopilotHistoryMessage(role: "用户", text: text)
+            case "user.message": return CopilotHistoryMessage(role: "用户", text: text, attachments: attachments)
             case "assistant.completed": return CopilotHistoryMessage(role: assistantName, text: text)
             default: return nil
             }

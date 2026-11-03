@@ -479,7 +479,7 @@ final class PreviewSharingController: ObservableObject {
         guard isRunning, event.sessionID == sessionID, var current = execution, !current.isTerminal else { return }
         let command = current.commandID.uuidString.lowercased()
         if current.turnID == nil {
-            if case .userMessage(let messageID, _, _) = event.payload,
+            if case .userMessage(let messageID, _, _, _) = event.payload,
                messageID.lowercased() == command, let turnID = event.correlation.turnID {
                 current.turnID = turnID
                 current.revision += 1

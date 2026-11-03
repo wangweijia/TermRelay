@@ -36,6 +36,8 @@ const dirtyCacheSessions = new Set<string>();
 let realtimeFlushFrame: number | undefined;
 let cacheWriteTimer: number | undefined;
 
+const pendingTurnCommands = new Map<string, (succeeded: boolean) => void>();
+
 export const useRelayStore = defineStore('relay', {
   state: () => ({
     sessions: [] as SessionRecord[],
@@ -438,10 +440,20 @@ export const useRelayStore = defineStore('relay', {
       this.sendCommand('session.stop', {});
     },
 
-    startToolTurn(text: string): void {
+    async startToolTurn(text: string, attachments: string[] = []): Promise<boolean> {
       const trimmed = text.trim();
-      if (!trimmed) return;
-      this.sendCommand('tool.turn.start', { text: trimmed });
+      const session = this.selectedSession;
+      if ((!trimmed && !attachments.length) || !session) return false;
+      const id = this.sendCommandForSession(session.id, 'tool.turn.start', { text: trimmed, ...(attachments.length ? { attachments } : {}) });
+      if (!id) return false;
+      return new Promise(resolve => {
+        const timer = setTimeout(() => {
+          pendingTurnCommands.delete(id);
+          this.error = '发送结果未确认，请检查聊天记录后再决定是否重发。';
+          resolve(false);
+        }, 35_000);
+        pendingTurnCommands.set(id, succeeded => { clearTimeout(timer); resolve(succeeded); });
+      });
     },
 
     setToolConfiguration(id: string, value: string): void {
@@ -522,6 +534,11 @@ export const useRelayStore = defineStore('relay', {
           this.commandStatus = `命令 ${shortId(payload.commandId)}：${payload.status}`;
           if (payload.status === 'failed' || payload.status === 'rejected') {
             this.error = payload.message ?? `命令执行失败 (${payload.errorCode ?? payload.status})`;
+          }
+          if (payload.status !== 'accepted') {
+            const complete = pendingTurnCommands.get(payload.commandId);
+            pendingTurnCommands.delete(payload.commandId);
+            complete?.(payload.status === 'completed');
           }
           const approvalId = pendingApprovalCommands.get(payload.commandId);
           if (approvalId && payload.status !== 'accepted') {

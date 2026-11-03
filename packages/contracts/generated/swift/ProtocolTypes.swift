@@ -18,6 +18,7 @@ public struct DeviceRegisterPayload: Codable, Sendable {
     public let appVersion: String
     public let platform: String
     public let tools: [String]
+    public let chatAttachments: Bool?
 }
 
 public struct DeviceRegisteredPayload: Codable, Sendable {

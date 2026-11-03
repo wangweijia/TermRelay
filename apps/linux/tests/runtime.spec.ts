@@ -160,3 +160,12 @@ test('questions reject malformed booleans and expired answers', async () => {
   runtime.questions.get(id)!.deadline = 0;
   await assert.rejects(runtime.command('tool.user-input.resolve', { requestId: id, turnId: 'turn', answers: { q: ['yes'] } }, randomUUID()), /expired/);
 });
+
+test('rejects chat attachments before starting a text-only Linux turn', async () => {
+  const client = new MemoryClient(), events: ToolEventPayload[] = [];
+  const runtime = new CodexRuntime('unused', tmpdir(), event => events.push(event), () => client);
+  runtime.threadId = 'thread';
+  await assert.rejects(runtime.command('tool.turn.start', { text: 'inspect this file', attachments: [randomUUID()] }, randomUUID()), /require the Mac client/);
+  assert.equal(runtime.busy, false);
+  assert.equal(events.length, 0);
+});

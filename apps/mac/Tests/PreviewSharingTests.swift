@@ -20,7 +20,8 @@ final class PreviewSharingTests: XCTestCase {
             await controller.start(session: managed, deviceID: UUID(), workspaceID: "workspace-image", configuration: configuration,
                                    imageInputSupported: true,
                                    startLocalImageTurn: { text, _, image in
-                XCTAssertTrue(text.contains("screenshot is attached"))
+                XCTAssertTrue(text.contains("已附上用户选取的截图"))
+                XCTAssertTrue(text.contains("默认使用中文回复"))
                 XCTAssertFalse(text.contains("base64"))
                 received.append(image)
                 return .completed
@@ -194,7 +195,8 @@ final class PreviewSharingTests: XCTestCase {
             XCTAssertEqual(actions.count, 1)
             guard case .startTurn(let input, let key) = actions.first else { return XCTFail("Expected a local turn.") }
             XCTAssertTrue(input.text.contains("Move the button"))
-            XCTAssertTrue(input.text.contains("untrusted observations"))
+            XCTAssertTrue(input.text.contains("不可信的观察信息"))
+            XCTAssertTrue(input.text.contains("默认使用中文回复"))
             let state = try readStoredFeedback(managed)
             XCTAssertEqual(state.first?["commandId"] as? String, key.uuidString.lowercased())
             await controller.deliver(record)

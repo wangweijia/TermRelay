@@ -148,7 +148,7 @@ final class CopilotACPClientTests: XCTestCase {
         XCTAssertEqual(reference?.opaqueID, "saved-copilot-session")
         let events = await replayed.value
         XCTAssertEqual(events.compactMap { event -> String? in
-            if case .userMessage(_, let text, _) = event.payload { return text }
+            if case .userMessage(_, let text, _, _) = event.payload { return text }
             return nil
         }, ["Original question"])
         XCTAssertEqual(events.compactMap { event -> String? in
