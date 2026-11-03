@@ -513,14 +513,6 @@ private struct StructuredAgentSessionView: View {
                         Task { await session.addAttachments(urls) }
                         return true
                     }
-                    .onKeyPress(phases: .down) { keyPress in
-                        guard keyPress.key == .return,
-                              appModel.acpSendShortcut.matches(keyPress.modifiers) else {
-                            return .ignored
-                        }
-                        submitPrompt()
-                        return .handled
-                    }
                 HStack {
                     Text("发送快捷键：\(appModel.acpSendShortcut.displayName)")
                         .font(.caption)

@@ -64,8 +64,8 @@ struct AttachmentTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let view = scroll.documentView as? AttachmentPasteTextView else { return }
         context.coordinator.parent = self
-        if view.string != text { view.string = text }
-        view.isEditable = !disabled
+        if !view.hasMarkedText(), view.string != text { view.string = text }
+        if view.isEditable != !disabled { view.isEditable = !disabled }
         view.onFiles = onFiles
         view.onImage = onImage
         view.onKey = onKey
@@ -86,7 +86,7 @@ struct AttachmentTextEditor: NSViewRepresentable {
     var onImage: ((Data) -> Void)?
     var onKey: ((NSEvent) -> Bool)?
     override func keyDown(with event: NSEvent) {
-        if isEditable, onKey?(event) == true { return }
+        if isEditable, !hasMarkedText(), onKey?(event) == true { return }
         super.keyDown(with: event)
     }
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
