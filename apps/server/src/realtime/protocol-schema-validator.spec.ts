@@ -16,6 +16,7 @@ test('every supported client message preserves its validated type, envelope and 
       'payload' | 'sessionId' | 'seq' | 'commandId'
     >;
   } = {
+    'attachment.result': { sessionId: 'session-a', payload: { requestId: randomUUID(), status: 'ok' } },
     'ai.capabilities': { payload: { providers: [{ provider: 'codex', capacity: 1, workspaceEnabled: false }] } },
     'ai.update': { payload: { id: randomUUID(), status: 'ready' } },
     'device.register': { payload: { name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['codex'] } },

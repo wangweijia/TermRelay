@@ -9,6 +9,7 @@ struct AgentMessageViewState: Identifiable, Sendable, Equatable {
     var isStreaming: Bool
     let sourceID: String
     let turnID: String?
+    var attachments: [ChatAttachment] = []
 }
 
 struct AgentCommandViewState: Identifiable, Sendable, Equatable {
@@ -72,11 +73,11 @@ enum AgentTimelineProjector {
             break
         case .turnStarted(let turnID):
             upsertNotice(id: "turn-start-\(turnID)", text: "开始执行", isError: false, in: &items)
-        case .userMessage(let messageID, let text):
+        case .userMessage(let messageID, let text, let attachments):
             upsertMessage(
                 AgentMessageViewState(
                     id: messageID, role: .user, text: text, isStreaming: false,
-                    sourceID: messageID, turnID: event.correlation.turnID
+                    sourceID: messageID, turnID: event.correlation.turnID, attachments: attachments
                 ),
                 append: false,
                 in: &items

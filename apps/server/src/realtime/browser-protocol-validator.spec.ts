@@ -77,3 +77,13 @@ function envelope(type: string, payload: Record<string, unknown>) {
     payload,
   };
 }
+
+test('attachment-only turns require at least one unique ID and obey the eight-file limit', () => {
+  const id = randomUUID();
+  const turn = (payload: Record<string, unknown>) => ({ ...envelope('tool.turn.start', payload), commandId: randomUUID() });
+  assert.equal(validator.validate(turn({ text: '', attachments: [id] })).ok, true);
+  assert.equal(validator.validate(turn({ text: '', attachments: [] })).ok, false);
+  assert.equal(validator.validate(turn({ text: '', attachments: [id, id] })).ok, false);
+  assert.equal(validator.validate(turn({ text: 'read', attachments: Array.from({ length: 9 }, () => randomUUID()) })).ok, false);
+  assert.equal(validator.validate(turn({ text: '', attachments: ['/Users/me/file.pdf'] })).ok, false);
+});

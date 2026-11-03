@@ -176,6 +176,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
     private var assistantMessages: [String: String] = [:]
     private var assistantMessageOrder: [String] = []
     private var sequence: UInt64 = 0
+    private var supportsImageInput = false
     private var stopped = false
 
     init(
@@ -206,6 +207,7 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
 
     func start() async throws {
         let initialized = try await client.start()
+        supportsImageInput = initialized.object?["agentCapabilities"]?.object?["promptCapabilities"]?.object?["image"]?.bool == true
         guard initialized.object?["protocolVersion"]?.integer == 1 else {
             throw AgentError.protocolFailure("Copilot CLI 未协商到 ACP v1")
         }
@@ -337,19 +339,24 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
                 throw AgentError.invalidState(expected: "no active prompt", actual: .running)
             }
             let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { throw AgentError.protocolFailure("Turn 输入不能为空") }
+            guard !text.isEmpty || !input.attachments.isEmpty else { throw AgentError.protocolFailure("Turn 输入不能为空") }
+            let content = try input.acpContent(supportsImages: supportsImageInput)
             let turnID = idempotencyKey.uuidString.lowercased()
             activeTurnID = turnID
             assistantMessages.removeAll()
             assistantMessageOrder.removeAll()
-            emit(.userMessage(messageID: turnID, text: input.text), turnID: turnID, itemID: turnID)
+            emit(.userMessage(messageID: turnID, text: input.text, attachments: input.attachments.map(\.metadata)), turnID: turnID, itemID: turnID)
             emit(.turnStarted(turnID: turnID), turnID: turnID)
             let prompt = initialContext.map {
                 "\($0)\n\n当前用户请求（优先执行这一条）：\n\(input.text)"
             }.flatMap { input.text.hasPrefix("/model --session ") ? nil : $0 } ?? input.text
+            var initialContextContent = content
+            if prompt != input.text {
+                initialContextContent[0] = .object(["type": .string("text"), "text": .string(prompt + String(input.textWithDocuments.dropFirst(input.text.count)))])
+            }
             if !input.text.hasPrefix("/model --session ") { initialContext = nil }
             promptTask = Task { [weak self] in
-                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, text: prompt)
+                await self?.runPrompt(sessionID: providerSessionID, turnID: turnID, content: initialContextContent)
             }
         case .steer:
             throw AgentError.unsupportedCapability("steering")
@@ -422,14 +429,11 @@ actor CopilotStructuredRuntime: StructuredAgentRuntime {
         continuation.finish()
     }
 
-    private func runPrompt(sessionID: String, turnID: String, text: String) async {
+    private func runPrompt(sessionID: String, turnID: String, content: [JSONValue]) async {
         do {
             let result = try await client.request(method: "session/prompt", params: .object([
                 "sessionId": .string(sessionID),
-                "prompt": .array([.object([
-                    "type": .string("text"),
-                    "text": .string(text),
-                ])]),
+                "prompt": .array(content),
             ]), timeout: nil)
             guard activeTurnID == turnID else { return }
             for messageID in assistantMessageOrder {

@@ -1,3 +1,4 @@
+import { AttachmentsService } from './attachments.service';
 import {
   BadRequestException,
   ConflictException,
@@ -9,6 +10,7 @@ import {
   Body,
   Put,
   Query,
+  Optional,
 } from '@nestjs/common';
 import type {
   PendingApprovalRecord,
@@ -19,7 +21,7 @@ import { SessionsService } from './sessions.service';
 
 @Controller('api/sessions')
 export class SessionsController {
-  constructor(private readonly sessions: SessionsService) {}
+  constructor(private readonly sessions: SessionsService, @Optional() private readonly attachments?: AttachmentsService) {}
 
   @Get()
   list(): Promise<SessionRecord[]> {
@@ -88,11 +90,13 @@ export class SessionsController {
     @Query('purge') rawPurge?: string,
   ): Promise<{ deleted: true; purged: boolean }> {
     const purge = parseBoolean(rawPurge, false);
+    const existing = this.attachments ? await this.sessions.findById(id) : undefined;
     const result = await this.sessions.deleteFinished(id, purge);
     if (result === 'not_found') throw new NotFoundException('session not found');
     if (result === 'not_finished') {
       throw new ConflictException('only ended sessions can be deleted');
     }
+    if (existing) this.attachments?.cleanup(existing);
     return { deleted: true, purged: purge };
   }
 }

@@ -22,7 +22,7 @@ enum ProjectHistory {
                     result.append(.init(role: provider, text: text))
                 }
             case "user.message":
-                if let text = data["text"]?.string { result.append(.init(role: "用户", text: text)) }
+                if let text = data["text"]?.string { result.append(.init(role: "用户", text: text, attachments: ChatAttachment.decodeList(data["attachments"]))) }
             case "reasoning.delta", "plan.updated":
                 if let text = data["text"]?.string {
                     let detailKey = "\(kind):\(key)"

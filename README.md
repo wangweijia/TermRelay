@@ -10,6 +10,7 @@
 
 - 远程使用终端，输入命令、查看输出。
 - 与 Codex、GitHub Copilot CLI、DeepSeek DSH 对话。
+- 在 Mac 和 Web / 手机的聊天中添加图片、PDF、TXT、Markdown 文件；详见[聊天附件](docs/CHAT_ATTACHMENTS.md)。
 - 在手机上处理 AI 的审批和提问，可选开启 iPhone 推送。
 
 主要支持 Mac；[Linux 版本](apps/linux/README.md)还在完善中，目前支持 Shell 和 Codex。

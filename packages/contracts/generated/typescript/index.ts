@@ -18,6 +18,7 @@ export interface DeviceRegisterPayload {
   appVersion: string;
   platform: "macOS" | "linux";
   tools: string[];
+  chatAttachments?: boolean;
 }
 
 export interface DeviceRegisteredPayload {
@@ -135,6 +136,9 @@ export const deviceRegisterSchema = {
         "macOS",
         "linux"
       ]
+    },
+    "chatAttachments": {
+      "type": "boolean"
     },
     "tools": {
       "type": "array",
@@ -328,7 +332,10 @@ export interface ToolEventPayload {
   data: Record<string, unknown>;
 }
 
-export interface ToolTurnStartPayload { text: string; }
+export interface ToolTurnStartPayload {
+  text: string;
+  attachments?: string[];
+}
 export type ToolTurnInterruptPayload = Record<string, never>;
 export interface ToolApprovalResolvePayload {
   approvalId: string;
@@ -904,6 +911,78 @@ export const toolEventSchema = {
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "user.message"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "messageId",
+              "text"
+            ],
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 65536
+              },
+              "attachments": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "mimeType",
+                    "size"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255
+                    },
+                    "mimeType": {
+                      "enum": [
+                        "image/png",
+                        "image/jpeg",
+                        "image/webp",
+                        "application/pdf",
+                        "text/plain",
+                        "text/markdown"
+                      ]
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 20971520
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
     }
   ],
   "additionalProperties": false
@@ -935,9 +1014,50 @@ export const toolConfigSetSchema = {
 } as const;
 
 export const toolTurnStartSchema = {
-  type: 'object', required: ['text'],
-  properties: { text: { type: 'string', minLength: 1, maxLength: 65_536 } },
-  additionalProperties: false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/tool-turn-start.schema.json",
+  "title": "tool.turn.start payload",
+  "type": "object",
+  "required": [
+    "text"
+  ],
+  "properties": {
+    "text": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        }
+      }
+    },
+    {
+      "required": [
+        "attachments"
+      ],
+      "properties": {
+        "attachments": {
+          "minItems": 1,
+          "type": "array"
+        }
+      }
+    }
+  ]
 } as const;
 
 export const toolTurnInterruptSchema = {
@@ -1676,6 +1796,17 @@ export const shortcutRunInputAckSchema = {
   "additionalProperties": false
 } as const;
 
+export interface AttachmentMetadata {
+  id: string; name: string; mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown"; size: number;
+}
+export interface AttachmentRequestPayload {
+  requestId: string; workspaceId: string; operation: "upload" | "read" | "delete" | "purge"; attachmentId: string; offset: number;
+  attachment?: AttachmentMetadata; data?: string; final?: boolean;
+}
+export interface AttachmentResultPayload {
+  requestId: string; status: "ok" | "error"; attachment?: AttachmentMetadata; data?: string; message?: string;
+}
+
 export interface FilePreviewRequestPayload {
   requestId: string;
   workspaceId: string;
@@ -1688,6 +1819,162 @@ export interface FilePreviewResultPayload {
   name?: string;
   content?: string;
 }
+
+export const attachmentRequestSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/attachment-request.schema.json",
+  "title": "attachment.request payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "workspaceId",
+    "operation",
+    "attachmentId",
+    "offset"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "operation": {
+      "enum": [
+        "upload",
+        "read",
+        "delete",
+        "purge"
+      ]
+    },
+    "attachmentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20971520
+    },
+    "attachment": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "mimeType",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/pdf",
+            "text/plain",
+            "text/markdown"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "string",
+      "maxLength": 262144,
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+    },
+    "final": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const attachmentResultSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/attachment-result.schema.json",
+  "title": "attachment.result payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "status"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "error"
+      ]
+    },
+    "attachment": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "mimeType",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/pdf",
+            "text/plain",
+            "text/markdown"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "string",
+      "maxLength": 262144,
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 512
+    }
+  },
+  "additionalProperties": false
+} as const;
 
 export const filePreviewRequestSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",

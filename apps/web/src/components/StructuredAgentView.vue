@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { useVirtualizer } from '@tanstack/vue-virtual';
-import { computed, nextTick, onDeactivated, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onDeactivated, onMounted, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
 import { isAgentMarkdown, localPreviewPath, renderAgentMarkdown } from '../agent-markdown';
 import { approvalPresentation } from '../approval-presentation';
 import FilePreview from './FilePreview.vue';
+import ChatAttachmentCard from './ChatAttachmentCard.vue';
+import { attachmentAccept, attachmentMetadata, transferAttachment, uploadAttachment } from '../attachments';
+import type { AttachmentMetadata } from '@termrelay/contracts';
 
 type Decision = 'allowOnce' | 'allowSession' | 'allowPolicy' | 'deny' | 'cancel';
 type TimelineItem = { id: string; kind: string; data: Record<string, unknown>; text?: string; resolved?: boolean; decision?: unknown; sourceId?: string; turnId?: string; isStreaming?: boolean };
@@ -27,6 +30,7 @@ const props = withDefaults(defineProps<{
   sessionId: string;
   events: SessionEventRecord[];
   interactive: boolean;
+  sendTurn: (text: string, attachments?: string[]) => Promise<boolean>;
   external?: boolean;
   shortcutEnabled?: boolean;
   scrollRevision?: number;
@@ -51,6 +55,71 @@ const emit = defineEmits<{
   setConfiguration: [id: string, value: string];
 }>();
 const prompt = ref('');
+type DraftAttachment = { metadata: AttachmentMetadata; file: File; progress: number; state: 'uploading' | 'ready' | 'failed'; preview?: string };
+const draftAttachments = ref<DraftAttachment[]>([]);
+const attachmentError = ref('');
+const attachmentsSupported = ref(false);
+watch(() => [props.sessionId, props.interactive] as const, async ([sessionId]) => {
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`);
+    if (response.ok) attachmentsSupported.value = (await response.json() as { supported?: boolean }).supported === true;
+  } catch { /* Text chat remains available when capability lookup fails. */ }
+}, { immediate: true });
+const sending = ref(false);
+const fileInput = ref<HTMLInputElement>();
+const uploadController = new AbortController();
+const uploading = computed(() => draftAttachments.value.some(item => item.state === 'uploading'));
+onBeforeUnmount(() => {
+  uploadController.abort();
+  for (const item of draftAttachments.value) if (item.preview) URL.revokeObjectURL(item.preview);
+});
+async function addFiles(files: File[]): Promise<void> {
+  if (!props.interactive || props.external || sending.value || !attachmentsSupported.value) return;
+  attachmentError.value = '';
+  for (const file of files) {
+    if (draftAttachments.value.length >= 8) { attachmentError.value = '每条消息最多 8 个附件'; break; }
+    try {
+      const metadata = attachmentMetadata(file);
+      const item: DraftAttachment = { metadata, file, progress: 0, state: 'uploading',
+        ...(metadata.mimeType.startsWith('image/') ? { preview: URL.createObjectURL(file) } : {}) };
+      draftAttachments.value.push(item);
+      void runUpload(metadata.id);
+    } catch (error) { attachmentError.value = error instanceof Error ? error.message : '无法添加附件'; }
+  }
+}
+async function runUpload(id: string): Promise<void> {
+  const item = draftAttachments.value.find(entry => entry.metadata.id === id);
+  if (!item) return;
+  item.state = 'uploading';
+  try {
+    await uploadAttachment(props.sessionId, item.file, item.metadata, value => { item.progress = value; }, uploadController.signal);
+    item.state = 'ready';
+  } catch (error) {
+    item.state = 'failed';
+    attachmentError.value = error instanceof Error ? error.message : '上传失败';
+  }
+}
+function removeAttachment(id: string): void {
+  const item = draftAttachments.value.find(entry => entry.metadata.id === id);
+  if (!item || item.state === 'uploading' || sending.value) return;
+  if (item.preview) URL.revokeObjectURL(item.preview);
+  draftAttachments.value = draftAttachments.value.filter(entry => entry.metadata.id !== id);
+  void transferAttachment(props.sessionId, { operation: 'delete', attachmentId: id, offset: 0 }).catch(() => {});
+}
+function chooseFiles(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  void addFiles(Array.from(input.files ?? [])); input.value = '';
+}
+function pasteFiles(event: ClipboardEvent): void {
+  const files = Array.from(event.clipboardData?.files ?? []);
+  if (files.length) { event.preventDefault(); void addFiles(files); }
+}
+function dropFiles(event: DragEvent): void {
+  if (event.dataTransfer?.files.length) { event.preventDefault(); void addFiles(Array.from(event.dataTransfer.files)); }
+}
+function messageAttachments(data: Record<string, unknown>): AttachmentMetadata[] {
+  return records(data.attachments).filter(item => typeof item.id === 'string' && typeof item.name === 'string' && typeof item.size === 'number' && typeof item.mimeType === 'string') as unknown as AttachmentMetadata[];
+}
 const previewPath = ref<string>();
 onDeactivated(() => { previewPath.value = undefined; });
 function openFileLink(event: MouseEvent): void {
@@ -266,12 +335,19 @@ function itemLabel(kind: string): string {
   return kind;
 }
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
-function submitTurn(): void {
+async function submitTurn(): Promise<void> {
   const value = prompt.value.trim();
-  if (props.interactive && !turnActive.value && value) {
-    emit('startTurn', value);
-    prompt.value = '';
-  }
+  if (!props.interactive || turnActive.value || sending.value || uploading.value
+    || draftAttachments.value.some(item => item.state !== 'ready') || (!value && !draftAttachments.value.length)) return;
+  sending.value = true; attachmentError.value = '';
+  const sent = draftAttachments.value.map(item => item.metadata.id);
+  try {
+    if (await props.sendTurn(value, sent)) {
+      if (prompt.value.trim() === value) prompt.value = '';
+      for (const item of draftAttachments.value) if (item.preview) URL.revokeObjectURL(item.preview);
+      draftAttachments.value = [];
+    } else { attachmentError.value = '消息未确认发送成功；已保留文字和附件，请查看状态提示。'; }
+  } finally { sending.value = false; }
 }
 function setOption(option: ConfigOption, event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -300,7 +376,7 @@ function matchesSendShortcut(event: KeyboardEvent): boolean {
 function handlePromptKeydown(event: KeyboardEvent): void {
   if (!props.shortcutEnabled || event.key !== 'Enter' || event.isComposing || !matchesSendShortcut(event)) return;
   event.preventDefault();
-  if (props.interactive && prompt.value.trim()) submitTurn();
+  if (props.interactive && (prompt.value.trim() || draftAttachments.value.length)) void submitTurn();
 }
 let timelinePinnedToBottom = true;
 function requestOlderHistory(): void {
@@ -393,6 +469,7 @@ function submitAnswers(item: TimelineItem): void {
         <template v-if="['user.message', 'assistant', 'reasoning.delta', 'plan.updated'].includes(item.kind)">
           <div v-if="item.kind !== 'user.message' && item.text && isAgentMarkdown(item.text)" class="agent-markdown" v-html="renderAgentMarkdown(item.text)" />
           <p v-else>{{ item.text }}</p>
+          <ChatAttachmentCard v-for="attachment in messageAttachments(item.data)" :key="attachment.id" :session-id="sessionId" :attachment="attachment" @resize="virtualizer.measure()" />
         </template>
         <div v-else-if="item.kind === 'command'">
           <pre v-if="text(item.data, 'command')">{{ text(item.data, 'command') }}</pre>
@@ -441,7 +518,7 @@ function submitAnswers(item: TimelineItem): void {
     <p v-if="external">项目调用：新一轮由项目 API 提交，审批由 Mac 自动处理。
       <button type="button" :disabled="!interactive || !turnActive" @click="emit('interrupt')">中断当前任务</button>
     </p>
-    <form v-if="!external" class="agent-composer" @submit.prevent="submitTurn">
+    <form v-if="!external" class="agent-composer" @submit.prevent="submitTurn" @dragover.prevent @drop="dropFiles">
       <div v-if="configOptions.length" class="agent-config" aria-label="会话配置">
         <template v-for="option in configOptions" :key="option.id">
           <label v-if="option.choices.length" class="shortcut-picker">
@@ -457,7 +534,21 @@ function submitAnswers(item: TimelineItem): void {
           </div>
         </template>
       </div>
-      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Agent…" :disabled="!interactive" @keydown="handlePromptKeydown" />
+      <div class="draft-attachments">
+        <div v-for="item in draftAttachments" :key="item.metadata.id" class="draft-attachment">
+          <img v-if="item.preview" :src="item.preview" :alt="item.metadata.name">
+          <span>{{ item.metadata.name }} · {{ item.state === 'ready' ? '已就绪' : item.state === 'failed' ? '上传失败' : `${item.progress}%` }}</span>
+          <button v-if="item.state === 'failed'" type="button" :disabled="sending" @click="runUpload(item.metadata.id)">重试</button>
+          <button type="button" :disabled="item.state === 'uploading' || sending" @click="removeAttachment(item.metadata.id)">移除</button>
+        </div>
+      </div>
+      <p v-if="attachmentError" role="alert">{{ attachmentError }}</p>
+      <div v-if="attachmentsSupported" class="attachment-picker">
+        <input ref="fileInput" type="file" :accept="attachmentAccept" multiple hidden @change="chooseFiles">
+        <button type="button" :disabled="!interactive || sending || draftAttachments.length >= 8" @click="fileInput?.click()">添加图片 / 文件</button>
+        <small>支持粘贴、拖入；每条最多 8 个，单文件 20 MiB</small>
+      </div>
+      <textarea v-model="prompt" rows="3" placeholder="发送消息给 Agent…" :disabled="!interactive || sending" @paste="pasteFiles" @keydown="handlePromptKeydown" />
       <div class="composer-actions">
         <label v-if="shortcutEnabled" class="shortcut-picker">
           <span>发送快捷键</span>
@@ -471,10 +562,17 @@ function submitAnswers(item: TimelineItem): void {
             <span>自动审批通过</span>
           </label>
           <button type="button" class="interrupt-turn" title="取消本次发送后正在执行的任务；不会关闭会话，也不能从中断处继续" :disabled="!interactive || !turnActive" @click="emit('interrupt')">中断当前任务</button>
-          <button type="submit" class="approve" :disabled="!interactive || turnActive || !prompt.trim()">发送并执行</button>
+          <button type="submit" class="approve" :disabled="!interactive || turnActive || sending || uploading || draftAttachments.some(item => item.state !== 'ready') || (!prompt.trim() && !draftAttachments.length)">发送并执行</button>
         </div>
       </div>
     </form>
   </section>
   <FilePreview v-if="previewPath" :session-id="sessionId" :path="previewPath" @close="previewPath = undefined" />
 </template>
+
+<style scoped>
+.draft-attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+.draft-attachment { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px solid #485065; border-radius: 8px; max-width: 100%; overflow-wrap: anywhere; }
+.draft-attachment img { width: 56px; height: 48px; object-fit: contain; }
+.attachment-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+</style>

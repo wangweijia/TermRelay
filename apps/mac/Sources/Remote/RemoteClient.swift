@@ -19,6 +19,7 @@ actor RemoteClient {
     private let quickActionHandler: QuickActionHandler
     private let quickActionInputHandler: QuickActionInputHandler
     private let filePreviewWorkspaceHandler: FilePreviewWorkspaceHandler
+    private let attachmentWorkspaceHandler: FilePreviewWorkspaceHandler
     private let aiHandler: AIHandler
     private let sessionStartHandler: SessionStartHandler
     private var sessionStarts: [UUID: (RemoteSessionStart, Task<RemoteCommandResult, Never>)] = [:]
@@ -60,6 +61,7 @@ actor RemoteClient {
         quickActionHandler: @escaping QuickActionHandler = { _ in },
         quickActionInputHandler: @escaping QuickActionInputHandler = { _ in .rejected("Mac App 不可用") },
         filePreviewWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
+        attachmentWorkspaceHandler: @escaping FilePreviewWorkspaceHandler = { _, _ in nil },
         aiHandler: @escaping AIHandler = { _, _ in },
         sessionStartHandler: @escaping SessionStartHandler = { _ in .rejected("unavailable", "Remote creation is unavailable") },
         outboxDirectory: URL? = nil
@@ -72,6 +74,7 @@ actor RemoteClient {
         self.quickActionHandler = quickActionHandler
         self.quickActionInputHandler = quickActionInputHandler
         self.filePreviewWorkspaceHandler = filePreviewWorkspaceHandler
+        self.attachmentWorkspaceHandler = attachmentWorkspaceHandler
         self.aiHandler = aiHandler
         self.sessionStartHandler = sessionStartHandler
         outbox = RelayOutboxStore(deviceID: deviceID, directory: outboxDirectory)
@@ -475,6 +478,17 @@ actor RemoteClient {
             await reconcileSession(sessionID, lastAcceptedSequence: UInt64(accepted))
             return
         }
+        if registered, envelope.type == "attachment.request" {
+            guard envelope.commandId == nil,
+                  let sessionID = envelope.sessionId.flatMap(UUID.init(uuidString:)),
+                  let data = try? JSONEncoder().encode(envelope.payload),
+                  let request = try? JSONDecoder().decode(AttachmentTransfer.self, from: data) else { return }
+            let currentGeneration = generation
+            Task { [weak self] in
+                await self?.handleAttachment(sessionID: sessionID, request: request, generation: currentGeneration)
+            }
+            return
+        }
         if registered, envelope.type == "file.preview.request" {
             if let request = decodeFilePreviewRequest(envelope) {
                 let currentGeneration = generation
@@ -539,6 +553,22 @@ actor RemoteClient {
             if completedCommands.count > 512 { completedCommands.removeFirst(128) }
         }
         await acknowledge(command, result: result)
+    }
+
+    private func handleAttachment(sessionID: UUID, request: AttachmentTransfer, generation expected: Int) async {
+        let result: AttachmentTransferResult
+        if !externalSessions.contains(sessionID), let workspace = await attachmentWorkspaceHandler(sessionID, request.workspaceId) {
+            do {
+                try await AttachmentStore.shared.bind(sessionID: sessionID, workspace: workspace)
+                result = await AttachmentStore.shared.transfer(sessionID: sessionID, request: request)
+            } catch {
+                result = AttachmentTransferResult(requestId: request.requestId, status: "error", message: "附件工作区不匹配")
+            }
+        } else {
+            result = AttachmentTransferResult(requestId: request.requestId, status: "error", message: "会话或工作区不可用")
+        }
+        guard generation == expected else { return }
+        _ = await send(type: "attachment.result", sessionId: sessionID.uuidString.lowercased(), payload: result)
     }
 
     func decodeFilePreviewRequest(_ envelope: IncomingRelayEnvelope)
@@ -657,9 +687,12 @@ actor RemoteClient {
         case "session.interrupt": return .interrupt(commandId: commandId, sessionId: sessionId)
         case "session.stop": return .stop(commandId: commandId, sessionId: sessionId)
         case "tool.turn.start":
-            guard let text = payload["text"]?.string,
-                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            return .startTurn(commandId: commandId, sessionId: sessionId, text: text)
+            guard let text = payload["text"]?.string, text.count <= 65536 else { return nil }
+            let attachments = payload["attachments"]?.array?.compactMap(\.string) ?? []
+            guard attachments.count <= 8, Set(attachments).count == attachments.count,
+                  attachments.allSatisfy({ UUID(uuidString: $0) != nil }),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return nil }
+            return .startTurn(commandId: commandId, sessionId: sessionId, text: text, attachments: attachments)
           case "tool.config.set":
             guard let id = payload["id"]?.string, ["model", "effort"].contains(id),
                 let value = payload["value"]?.string, !value.isEmpty, value.count <= 128 else { return nil }
@@ -1015,9 +1048,10 @@ extension RelayToolEvent {
             data = ["code": .string("provider_session_started"), "message": .string(reference.opaqueID)]
         case .turnStarted(let turnID):
             kind = "turn.started"; data = ["turnId": .string(turnID)]
-        case .userMessage(let messageID, let text):
+        case .userMessage(let messageID, let text, let attachments):
             kind = "user.message"
             data = ["messageId": .string(messageID), "text": .string(text)]
+                .merging(attachments.isEmpty ? [:] : ["attachments": .array(attachments.map(\.json))]) { _, value in value }
         case .assistantTextDelta(let text):
             kind = "assistant.delta"; data = ["text": .string(text)]
         case .assistantMessageCompleted(let text):

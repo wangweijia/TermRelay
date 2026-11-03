@@ -11,6 +11,7 @@ export interface DeviceSnapshot {
   appVersion: string;
   platform: DeviceRegisterPayload['platform'];
   tools: string[];
+  chatAttachments?: boolean;
   presence: DevicePresence;
   connectionState: DeviceHeartbeatPayload['connectionState'];
   activeSessionCount: number;
@@ -103,6 +104,7 @@ export class DeviceConnectionRegistry implements OnModuleInit, OnModuleDestroy {
       appVersion: payload.appVersion,
       platform: payload.platform,
       tools: [...payload.tools],
+      ...(payload.chatAttachments !== undefined ? { chatAttachments: payload.chatAttachments } : {}),
       presence: 'online',
       connectionState: 'connected',
       activeSessionCount: 0,

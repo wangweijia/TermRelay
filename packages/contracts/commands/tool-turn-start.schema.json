@@ -3,9 +3,44 @@
   "$id": "https://termrelay.local/contracts/commands/tool-turn-start.schema.json",
   "title": "tool.turn.start payload",
   "type": "object",
-  "required": ["text"],
+  "required": [
+    "text"
+  ],
   "properties": {
-    "text": { "type": "string", "minLength": 1, "maxLength": 65536 }
+    "text": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "anyOf": [
+    {
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        }
+      }
+    },
+    {
+      "required": [
+        "attachments"
+      ],
+      "properties": {
+        "attachments": {
+          "minItems": 1,
+          "type": "array"
+        }
+      }
+    }
+  ]
 }

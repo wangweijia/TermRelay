@@ -272,7 +272,7 @@ final class RemoteClientTests: XCTestCase {
             type: "tool.turn.start",
             payload: .object(["text": .string("fix the tests")])
         ))
-        guard case .startTurn(_, _, let text) = turn else {
+        guard case .startTurn(_, _, let text, _) = turn else {
             return XCTFail("Expected structured turn command")
         }
         XCTAssertEqual(text, "fix the tests")

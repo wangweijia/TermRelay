@@ -137,7 +137,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
             protocolVersion: "v2",
             capabilities: [
                 .streamingText, .reasoning, .commandExecution, .commandOutput,
-                .fileChanges, .approvals, .plans,
+                .fileChanges, .approvals, .plans, .images,
             ]
         )
         let stream = AsyncStream<ToolEvent>.makeStream()
@@ -190,15 +190,16 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
         }
         switch action {
         case .startTurn(let input, let idempotencyKey):
-            guard !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            guard !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !input.attachments.isEmpty else {
                 throw AgentError.protocolFailure("Turn 输入不能为空")
             }
             var params: [String: JSONValue] = [
                 "threadId": .string(threadID),
                 "clientUserMessageId": .string(idempotencyKey.uuidString.lowercased()),
-                "input": .array([
-                    .object(["type": .string("text"), "text": .string(input.text)]),
-                ]),
+                "input": .array([.object(["type": .string("text"), "text": .string(input.textWithDocuments)])]
+                    + input.attachments.filter { $0.metadata.mimeType.hasPrefix("image/") }.map {
+                        .object(["type": .string("localImage"), "path": .string($0.url.path)])
+                    }),
             ]
             if let selectedModel { params["model"] = .string(selectedModel) }
             if let selectedEffort { params["effort"] = .string(selectedEffort) }
@@ -207,7 +208,7 @@ actor CodexStructuredRuntime: StructuredAgentRuntime {
                 throw AgentError.protocolFailure("turn/start 未返回 turn.id")
             }
             emit(
-                .userMessage(messageID: idempotencyKey.uuidString.lowercased(), text: input.text),
+                .userMessage(messageID: idempotencyKey.uuidString.lowercased(), text: input.text, attachments: input.attachments.map(\.metadata)),
                 turnID: turnID,
                 itemID: idempotencyKey.uuidString.lowercased()
             )

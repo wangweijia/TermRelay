@@ -78,6 +78,7 @@ struct AgentSessionReference: Codable, Sendable, Equatable {
 
 struct TurnInput: Sendable, Equatable {
     let text: String
+    var attachments: [PreparedAttachment] = []
 }
 
 enum ApprovalDecision: String, Codable, CaseIterable, Sendable {
@@ -165,7 +166,7 @@ enum TurnCompletionStatus: String, Codable, Sendable {
 enum ToolEventPayload: Sendable, Equatable {
     case sessionStarted(reference: AgentSessionReference)
     case turnStarted(turnID: String)
-    case userMessage(messageID: String, text: String)
+    case userMessage(messageID: String, text: String, attachments: [ChatAttachment] = [])
     case assistantTextDelta(text: String)
     case assistantMessageCompleted(text: String)
     case reasoningDelta(text: String)

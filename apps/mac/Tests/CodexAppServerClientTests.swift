@@ -46,12 +46,18 @@ final class CodexAppServerClientTests: XCTestCase {
         let changedOptions = try await changing.value
         XCTAssertEqual(changedOptions.last?.currentValue, "high")
 
-        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello"), idempotencyKey: UUID())) }
+        let image = PreparedAttachment(metadata: ChatAttachment(id: UUID().uuidString.lowercased(), name: "screenshot.png", mimeType: "image/png", size: 10), url: URL(fileURLWithPath: "/tmp/screenshot.png"), extractedText: nil)
+        let document = PreparedAttachment(metadata: ChatAttachment(id: UUID().uuidString.lowercased(), name: "notes.txt", mimeType: "text/plain", size: 10), url: URL(fileURLWithPath: "/tmp/notes.txt"), extractedText: "Document context")
+        let sending = Task { try await runtime.send(.startTurn(TurnInput(text: "hello", attachments: [image, document]), idempotencyKey: UUID())) }
         let turn = try await transport.waitForSentMessage(at: 5)
         let params = try XCTUnwrap(turn["params"] as? [String: Any])
         XCTAssertEqual(params["threadId"] as? String, "thread-model")
         XCTAssertEqual(params["model"] as? String, "model-a")
         XCTAssertEqual(params["effort"] as? String, "high")
+        let inputs = try XCTUnwrap(params["input"] as? [[String: Any]])
+        XCTAssertTrue((inputs.first?["text"] as? String)?.contains("Document context") == true)
+        XCTAssertEqual(inputs.last?["type"] as? String, "localImage")
+        XCTAssertEqual(inputs.last?["path"] as? String, "/tmp/screenshot.png")
         try await transport.respondToRequest(at: 5, result: ["turn": ["id": "turn-model"]])
         try await sending.value
         await runtime.stop()

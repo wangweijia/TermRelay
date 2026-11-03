@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
             :loading-older="relay.loadingOlderHistory"
             :auto-approve-enabled="relay.selectedSession.autoApproveEnabled"
             :auto-approve-updating="relay.updatingAutoApprove[relay.selectedSession.id] ?? false"
-            @start-turn="relay.startToolTurn"
+            :send-turn="relay.startToolTurn" @start-turn="relay.startToolTurn"
             @set-configuration="relay.setToolConfiguration"
             @interrupt="relay.interruptToolTurn"
             @load-older="relay.loadOlderHistory"

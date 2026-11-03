@@ -174,6 +174,9 @@ final class AppModel: ObservableObject {
             filePreviewWorkspaceHandler: { [weak self] sessionID, workspaceID in
                 await self?.filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID)
             },
+            attachmentWorkspaceHandler: { [weak self] sessionID, workspaceID in
+                await self?.attachmentWorkspace(sessionID: sessionID, workspaceID: workspaceID)
+            },
             aiHandler: { [weak self] type,payload in
                 guard let self else { return }
                 await self.aiRuntime.handle(type:type,payload:payload)
@@ -609,6 +612,7 @@ final class AppModel: ObservableObject {
         }
         guard let remoteClient else { throw AgentError.providerUnavailable("Server 未连接") }
         try await remoteClient.deleteCopilotHistory(sessionID: archive.id, purge: purge)
+        try await AttachmentStore.shared.removeSession(archive.id)
         projectHistory.removeAll { UUID(uuidString: $0.id) == archive.id }
         copilotHistory.removeAll { $0.id == archive.id }
         historyMessages[archive.id] = nil
@@ -979,12 +983,12 @@ final class AppModel: ObservableObject {
 
     private func handleRemoteCommand(_ command: RemoteTerminalCommand) async -> RemoteCommandResult {
         switch command {
-        case .startTurn(let commandID, let sessionID, let text):
+        case .startTurn(let commandID, let sessionID, let text, let attachments):
             guard let session = structuredSessions[sessionID] else {
                 return .rejected("unknown_session", "The requested structured session is not active.")
             }
 
-            return await session.startTurn(text, idempotencyKey: commandID)
+            return await session.startTurn(text, attachmentIDs: attachments, idempotencyKey: commandID)
         case .setConfiguration(_, let sessionID, let id, let value):
             guard let session = structuredSessions[sessionID] else {
                 return .rejected("unknown_session", "The requested structured session is not active.")
@@ -1204,6 +1208,14 @@ final class AppModel: ObservableObject {
         identifiers[directory.path] = identifier
         defaults.set(identifiers, forKey: Keys.workspaceIDs)
         return identifier
+    }
+
+    private func attachmentWorkspace(sessionID: UUID, workspaceID: String) async -> URL? {
+        if let active = filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID) { return active }
+        guard let original = await AttachmentStore.shared.workspace(sessionID: sessionID),
+              let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String],
+              identifiers[original.path] == workspaceID else { return nil }
+        return original
     }
 
     private func filePreviewWorkspace(sessionID: UUID, workspaceID: String) -> URL? {

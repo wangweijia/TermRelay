@@ -286,10 +286,11 @@ test('lists only owned Copilot history in bounded pages on a registered connecti
     await gateway.handleMessage(registeredClient, envelope('device-a', 'device.register', {
       name: 'Mac', appVersion: '1', platform: 'macOS', tools: ['copilot'],
     }));
+    const historyUpdatedAt = new Date().toISOString();
     sessions.historySessions = Array.from({ length: 101 }, (_, index) => ({
       id: `session-${String(100 - index).padStart(3, '0')}`, deviceId: 'device-a', workspaceId: 'workspace-a',
       toolKey: 'copilot', displayName: null, runtimeMode: 'acp', status: 'finished',
-      startedAt: null, updatedAt: new Date().toISOString(),
+      startedAt: null, updatedAt: historyUpdatedAt,
     }));
     const firstRequest = envelope('device-a', 'session.history.list', {});
     await gateway.handleMessage(registeredClient, firstRequest);

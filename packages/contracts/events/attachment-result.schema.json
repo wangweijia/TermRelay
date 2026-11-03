@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/attachment-result.schema.json",
+  "title": "attachment.result payload",
+  "type": "object",
+  "required": [
+    "requestId",
+    "status"
+  ],
+  "properties": {
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "error"
+      ]
+    },
+    "attachment": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "mimeType",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "mimeType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "application/pdf",
+            "text/plain",
+            "text/markdown"
+          ]
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "string",
+      "maxLength": 262144,
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 512
+    }
+  },
+  "additionalProperties": false
+}
