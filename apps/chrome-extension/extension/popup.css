@@ -4,7 +4,7 @@
 body{margin:0;width:344px}
 main{padding:18px 20px}
 button,input{font:inherit}
-button{cursor:pointer;border:1px solid #d5dcd7;background:#fff;border-radius:6px;color:#243b30;padding:7px 12px}
+button{cursor:pointer;border:1px solid #dfe7e2;background:#fff;border-radius:9px;color:#52655b;padding:8px 12px;transition:background .15s,border-color .15s}
 button:hover:not(:disabled){background:#f1f6f3}
 button:disabled{opacity:.45;cursor:not-allowed}
 :focus-visible{outline:2px solid #23805c;outline-offset:3px}
@@ -42,8 +42,8 @@ h1{font-size:17px;font-weight:600;line-height:1.5;margin:8px 0 3px;overflow-wrap
 footer{display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid #e8ece9;gap:10px}
 .project-actions{display:flex;gap:6px;flex-wrap:wrap}
 #capture{background:#fff;color:#243e30;border-color:#d5dcd7}
-footer button{background:#243e30;color:#fff;border-color:#243e30}
-footer button:hover:not(:disabled){background:#31543f}
+footer button{background:#246344;color:#fff;border-color:#246344}
+footer button:hover:not(:disabled){background:#194d33}
 #connection-label{font-size:11px;color:#828a84}
 @keyframes pulse{50%{opacity:.3}}
 @media(prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}

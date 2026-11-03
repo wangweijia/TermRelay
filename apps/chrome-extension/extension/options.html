@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>点点改 · TermRelay</title>
+  <title>连接配置 · TermRelay</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
   <main class="shell">
     <header class="page-header">
-      <div class="brand"><img src="icons/icon-32.png" width="32" height="32" alt=""><div><h1>点点改</h1><span class="muted small">TermRelay</span></div></div>
+      <div class="brand"><img src="icons/icon-32.png" width="32" height="32" alt=""><h1 class="sr-only">插件设置</h1></div>
       <span class="page-label">连接配置</span>
     </header>
 
@@ -59,7 +59,7 @@
               <summary>首次使用：创建专用用户配置</summary>
               <ol class="small">
                 <li>点击 Chrome 右上角头像，添加用户配置，选择不登录账号继续，命名为“项目验收”。</li>
-                <li>在新用户配置中安装点点改，打开本设置页，粘贴开发者发来的配对配置。</li>
+                <li>在新用户配置中安装插件，打开本设置页，粘贴开发者发来的配对配置。</li>
                 <li>业务系统在此用户配置中单独登录；以后从“项目验收”进入。</li>
               </ol>
               <p class="notice">普通新窗口或新标签页不会隔离代理设置。插件不会自动创建用户配置，也无法确认当前是否为专用配置。</p>
@@ -68,7 +68,7 @@
           <fieldset class="proxy-modes">
             <legend>代理方式</legend>
             <label class="mode-choice"><input type="radio" name="proxy-mode" value="builtin" checked><span><strong>专用用户配置 · 内置代理（推荐）</strong><small>预览域名走开发者 Mac，其他域名直连；不与日常用户配置共享代理设置。</small></span></label>
-            <label class="mode-choice"><input type="radio" name="proxy-mode" value="zeroomega"><span><strong>现有用户配置 · ZeroOmega 分流</strong><small>高级兼容方式，需手动配置；保留现有规则，点点改不接管代理。</small></span></label>
+            <label class="mode-choice"><input type="radio" name="proxy-mode" value="zeroomega"><span><strong>现有用户配置 · ZeroOmega 分流</strong><small>高级兼容方式，需手动配置；保留现有规则，插件不接管代理。</small></span></label>
           </fieldset>
           <p id="mode-help" class="notice"></p>
           <div id="zeroomega-setup" class="zeroomega-setup" hidden>

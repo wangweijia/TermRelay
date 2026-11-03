@@ -17,7 +17,7 @@ export async function captureRegion(tab, rect, viewport) {
   await active();
   let captured;
   try { captured = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); }
-  catch { throw new Error('截图未获授权。请先点击工具栏“点点改”图标，再选择“截图对话”。'); }
+  catch { throw new Error('截图未获授权。请先点击工具栏中的扩展图标，再选择“截图对话”。'); }
   await active();
   const bitmap = await createImageBitmap(await (await fetch(captured)).blob());
   try {

@@ -54,18 +54,18 @@ function render() {
   $('#connection-help').textContent = connectionIssue || state.connectionError ? '连接遇到问题，请确认开发者 Mac 已开启共享且局域网可达，再重新连接。'
     : direct ? connected ? '已连接开发者 Mac。打开项目即可围绕页面与 AI 对话，不修改浏览器代理。' : '直接访问项目；打开项目时会自动连接对话服务。'
     : external ? previewing && connected ? 'App 已连接；ZeroOmega 分流尚未验证。打开下方入口，确认页面可以访问。'
-      : '按高级设置中的方案配置 ZeroOmega，再确认并打开预览。点点改不会接管浏览器代理。'
+      : '按高级设置中的方案配置 ZeroOmega，再确认并打开预览。插件不会接管浏览器代理。'
     : previewing && state.proxyError ? `内置代理报错：${state.proxyError}。请确认 Mac 共享服务与网络可达，再重新开启预览。`
-    : previewing && connected ? '一切就绪。打开下方入口，在业务页面点击「点点改」。'
+    : previewing && connected ? '一切就绪。打开下方入口，在业务页面点击右下角的对话图标。'
       : connected ? '已连接开发者 Mac。确认专用用户配置后，点击“打开预览”。'
         : configured ? '配置已保存。打开预览时会自动连接 App。' : '先粘贴开发者发来的配对配置。';
   $('#preview-help').textContent = direct ? '直接打开 App 配置的项目地址。首次打开时授权该站点以启用反馈；无需专用 Chrome 用户配置，原代理规则保持不变。' : external
     ? '当前使用 ZeroOmega 分流。配置方案在高级设置中，确认规则后打开预览。'
-    : proxyBlocked ? '当前代理由其他扩展或管理员控制，点点改不会接管。请在验收专用用户配置中使用；确需 ZeroOmega 时，在高级设置中切换。'
+    : proxyBlocked ? '当前代理由其他扩展或管理员控制，插件不会接管。请在验收专用用户配置中使用；确需 ZeroOmega 时，在高级设置中切换。'
       : '使用内置代理，无需配置分流规则。点击后自动连接并打开项目；结束连接时关闭本插件代理。';
   for (const input of document.querySelectorAll('[name="proxy-mode"]')) input.checked = input.value === state.proxyMode;
   $('#mode-help').textContent = external
-    ? '由 ZeroOmega 管理所有分流。切换到此模式会释放点点改自己的代理设置，不修改 ZeroOmega 的配置。'
+    ? '由 ZeroOmega 管理所有分流。切换到此模式会释放插件自己的代理设置，不修改 ZeroOmega 的配置。'
     : '仅接管当前 Chrome 用户配置的代理，不合并公司代理规则。请使用独立的验收用户配置；日常用户配置不受影响。';
   $('#zeroomega-setup').hidden = !external;
   $('#zeroomega-unconfigured').hidden = configured;
@@ -74,18 +74,18 @@ function render() {
     const url = new URL(state.config.companionURL);
     const guide = [
       'ZeroOmega 快速配置（不覆盖原有规则）',
-      '1. 新建「代理服务器」情景模式，名称：点点改预览',
+      '1. 新建「代理服务器」情景模式，名称：插件预览',
       '   代理协议：HTTP（支持 HTTP 转发与 HTTPS CONNECT）',
       `   代理服务器：${url.hostname}`,
       `   代理端口：${url.port || 80}`,
-      '   用户名、密码：留空；由点点改按当前连接自动认证，请勿填写配对密钥。',
+      '   用户名、密码：留空；由插件按当前连接自动认证，请勿填写配对密钥。',
       '2. 在你现有的「自动切换」情景顶部添加以下两条规则：',
       `   主机名通配符：${url.hostname} → 直接连接（Mac 服务与反馈接口）`,
-      `   主机名通配符：${new URL(state.config.previewURL || 'https://page-gateway-local.nioint.com/').hostname} → 点点改预览（所有端口）`,
-      '   保留其余规则与默认情景，不要把默认情景改成「点点改预览」。',
+      `   主机名通配符：${new URL(state.config.previewURL || 'https://page-gateway-local.nioint.com/').hostname} → 插件预览（所有端口）`,
+      '   保留其余规则与默认情景，不要把默认情景改成「插件预览」。',
       '3. 点击「应用选项」，在 ZeroOmega 工具栏菜单选择上述「自动切换」情景。',
-      '4. 回到点点改，在上方“页面预览”勾选确认，点击“使用 ZeroOmega 打开预览”验证页面。',
-      '断开点点改后认证会失效；ZeroOmega 规则仍保留，需自行停用或删除。',
+      '4. 回到插件，在上方“页面预览”勾选确认，点击“使用 ZeroOmega 打开预览”验证页面。',
+      '断开插件后认证会失效；ZeroOmega 规则仍保留，需自行停用或删除。',
     ].join('\n');
     if ($('#zeroomega-guide').value !== guide) $('#zeroomega-guide').value = guide;
   } else $('#zeroomega-guide').value = '';
@@ -177,7 +177,7 @@ for (const input of document.querySelectorAll('[name="proxy-mode"]')) {
     await send({ type: 'proxy.mode', mode: input.value });
     $('#consent').checked = false;
     return input.value === 'zeroomega'
-      ? '已切换到 ZeroOmega，点点改已释放自己的代理设置。请按方案配置分流，再确认开启。'
+      ? '已切换到 ZeroOmega，插件已释放自己的代理设置。请按方案配置分流，再确认开启。'
       : '已切换到内置代理，尚未接管 Chrome。请确认正在使用验收专用用户配置，再打开预览。';
   }, '正在切换代理方式…');
 }

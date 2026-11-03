@@ -5,11 +5,11 @@ body{margin:0}
 button,input,textarea,select{font:inherit}
 button,a,input,textarea,select,summary{outline-offset:3px}
 :focus-visible{outline:2px solid var(--green)}
-button{border:1px solid #cfd8d1;border-radius:6px;padding:9px 16px;background:#fff;color:#34473b;font-size:13px;cursor:pointer}
+button{border:1px solid #dfe7e2;border-radius:9px;padding:9px 16px;background:#fff;color:#52655b;font-size:13px;cursor:pointer;transition:background .15s,border-color .15s}
 button:hover:not(:disabled){background:#f1f6f3}
 button:disabled{opacity:.45;cursor:not-allowed}
-.primary{background:#243e30;border-color:#243e30;color:#fff}
-.primary:hover:not(:disabled){background:#31543f}
+.primary{background:#246344;border-color:#246344;color:#fff}
+.primary:hover:not(:disabled){background:#194d33}
 .quiet{border-color:transparent;color:var(--muted)}
 .shell{max-width:880px;padding:36px 36px 64px;margin:auto}
 .page-header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:24px;margin-bottom:30px;border-bottom:1px solid var(--line)}

@@ -81,7 +81,7 @@ async function connectApp(explicit = false) {
   await storageReady;
   if (explicit) await chrome.storage.local.set({ connectionEnabled: true });
   const { connectionEnabled } = await chrome.storage.local.get('connectionEnabled');
-  if (connectionEnabled !== true) throw new Error('尚未连接 App，请在点点改设置中粘贴配置并连接，或点击“开启预览”。');
+  if (connectionEnabled !== true) throw new Error('尚未连接 App，请在插件设置中粘贴配置并连接，或点击“开启预览”。');
   if (connecting) return connecting;
   connecting = (async () => {
     await storageReady;
@@ -191,7 +191,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       }
       if (message.type === 'preview.authorize') {
         const config = await configOf();
-        if (!await chrome.permissions.contains({ origins: [pagePattern(config)] })) throw new Error('请允许点点改访问本次项目站点。');
+        if (!await chrome.permissions.contains({ origins: [pagePattern(config)] })) throw new Error('请允许插件访问本次项目站点。');
         await registerPage(config);
         return { authorized: true };
       }
@@ -252,7 +252,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       }
     }
     const config = await configOf();
-    if (!sender.tab || !allowedPage(sender.url, config) || sender.frameId !== 0) throw new Error('只允许在授权预览页面使用点点改。');
+    if (!sender.tab || !allowedPage(sender.url, config) || sender.frameId !== 0) throw new Error('只允许在授权预览页面使用插件。');
     const meta = await request('/v1/meta');
     verifyProjectMeta(config, meta);
     const page = new URL(sender.url);

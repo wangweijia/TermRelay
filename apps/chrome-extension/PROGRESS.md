@@ -77,7 +77,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 快捷连接与配置层级 | 工具栏轻量 popup，快速开启 / 关闭、项目入口与独立配置按钮；设置页突出当前项目、实际模式与连接状态，已保存配对默认收起 | `extension/popup.*`、`view-state.js`、`options.*`、`background.js` |
 | 局部截图修改建议 | 框选可见区域、取消 / 预览 / 移除、隐私确认、同编号提交与历史图片读取；图片随绑定轮次进入支持图片的 Codex / ACP 会话 | `extension/capture.js`、`content.js`、`companion/model.mjs`、`server.mjs`、Mac Preview / Agents |
 | Mac 聊天图片显示 | 携图用户消息显示等比缩略图、点击放大、关闭 / Escape、解码失败提示；文字更新保留图片 | `AgentModels.swift`、`AgentSessionPresentation.swift`、`ContentView.swift`、三个 Provider adapter |
-| 点点改与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
+| 插件与粘贴优先引导 | 配置粘贴即保存并连接，代理仍需明确确认；手填收进高级设置，单列白底界面、文字状态、预览入口与自然语言错误 | `extension/options.*`、`manifest.json` |
 | 验收专用 Profile 默认流程 | 明确在验收者电脑创建独立 Profile，不安装 ZeroOmega；确认后“打开预览”自动连接、启用代理并打开首个入口，可重复打开；ZeroOmega 移入高级设置且保留旧模式 | `extension/options.*`、`tests/browser.mjs` |
 | 独占插件连接 | 整个 App 一个插件实例，同 Profile 多页面共享；90 秒租约、后台续约、显式断开、动态代理凭据 | `companion/server.mjs`、`proxy.mjs`、`extension/background.js` |
 | 项目地址与访问方式 | App 填写完整 HTTP(S) URL，默认直连，也可选择代理；配对带项目地址与方式，旧配置保留原域名兼容 | `PreviewSharingView.swift`、`PreviewSharingController.swift`、`companion/main.mjs` |
@@ -87,7 +87,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | 代理错误归属 | 只在本扩展实际接管内置代理时记录全局代理错误，设置页显示并允许重试；不误报其他扩展的代理错误 | `extension/background.js`、`options.js` |
 | 全端口域名转发 | 指定域名所有合法端口按原端口转发，目标固定为本机 loopback；入口端口仅生成链接 | `companion/main.mjs`、`proxy.mjs` |
 | 代理访问限制 | Basic 凭据、严格目标域名和合法端口范围；不转发其他域名，但持有凭据者可访问全部本地 TCP 端口 | `companion/proxy.mjs` |
-| 点点改页面 UI | 右下角文字按钮、简洁黑白浮层、点选 / 整页、扩大范围、Esc 退出；折叠可选字段、文字进度与“效果满意 / 再调一调” | `extension/content.js` |
+| 插件页面 UI | 纯图标圆形入口、浅绿对话块与固定输入区；入口 / 面板 / 弹窗不显示产品名；选区 / 截图归属单条消息，发送后清空，回复后直接追问；安全代码块、按需图片预览、稳定轮询阅读位置；保留点选 / 整页、扩大范围、Esc 与可选验收 | `extension/content.js`、`tests/browser.mjs` |
 | 文字与上下文 | 修改描述、可选复现步骤、有限元素文字及结构线索，提交前查看上下文 | `extension/content.js`、`companion/model.mjs` |
 | 基础敏感信息过滤 | 不自动采集截图、原始 outerHTML、表单值、Cookie、存储；过滤 URL 查询与 hash；主动添加的截图可能含可见敏感信息，提交前须检查确认 | `extension/content.js`、`companion/model.mjs` |
 | 受限反馈接口 | 提交、列表、验收；反馈 Token 与管理 Token 分离，网页脚本来源被拒绝 | `companion/server.mjs` |
@@ -121,7 +121,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 2026-11-02 局部截图建议：
 
 - 用户确认采用“框选可见页面区域 + 文字”，图片需要一起交给 AI；保留原 DOM 点选和纯文字方式，不增加画笔、多图或录屏。
-- 使用 activeTab 临时授权，无所有网站截图权限；后台确认活动标签页及项目范围，裁切按实际像素与 DPR 计算，截图期间隐藏点点改 UI。
+- 使用 activeTab 临时授权，无所有网站截图权限；后台确认活动标签页及项目范围，裁切按实际像素与 DPR 计算，截图期间隐藏插件 UI。
 - 每条最多一张 PNG，最长边 1600px、最大 1 MB，必要时缩小后预览；用户明确确认后上传，编码后图片总量最多 32 MB。
 - 图片与反馈一起私有持久化、幂等比较；列表仅传摘要，读取受配对 / 租约 / 项目范围保护。未知提交结果保留原编号，不重发新反馈。
 - Mac 增加图片解码和原生轮次输入：Codex image URL 内容、Copilot / DSH 在 ACP image 能力协商成功时发送图片；未支持时拒绝，不静默丢图。
@@ -182,7 +182,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 `node apps/chrome-extension/scripts/check.mjs` 与 `node apps/chrome-extension/tests/browser.mjs` 通过。
 新增覆盖内置 / ZeroOmega 往返切换与持久化、其他扩展和管理员控制权保护、认证范围与断开不重连、
 无凭据配置方案及复制失败、窄屏布局和全局代理错误归属。浏览器测试加载第二个真实代理控制扩展，
-验证保留其 PAC，并通过真实 HTTPS CONNECT 挑战确认点点改提供当前租约的动态认证。
+验证保留其 PAC，并通过真实 HTTPS CONNECT 挑战确认插件提供当前租约的动态认证。
 测试目标有意在 TLS 前断开；不据此宣称真实业务 HTTPS 或 ZeroOmega 产品端到端验收已完成。
 
 以下记录为 2026-10-28 实际执行结果，不是待执行计划。
@@ -196,7 +196,7 @@ App 公网配对、Server 断开和地址变更均不影响本功能。
 | --- | --- | --- |
 | `npm run check` | 通过 | JavaScript 语法、Manifest V3 及扩展入口文件 |
 | `npm test` | 16 项通过 | 独占连接、同实例复用、续约与过期、断开关闭隧道、反馈鉴权 / 幂等、进度关联及版本、保存失败重试、防重放、跨端口转发、CLI 启停 |
-| `npm run test:browser` | 通过 | 实际粘贴配对、错误恢复、代理明确授权、高级暂停、桌面 / 390px 窄屏布局、点点改命名、运行 / 审批 / 完成、验收、显式断开不抢回、跨端口资源与选取隐私 |
+| `npm run test:browser` | 通过 | 实际粘贴配对、错误恢复、代理明确授权、高级暂停、桌面 / 390px 窄屏布局、插件命名、运行 / 审批 / 完成、验收、显式断开不抢回、跨端口资源与选取隐私 |
 | `pnpm mac:test --filter PreviewSharingTests` | 9 项通过 | 本地自动排队、真实轮次关联与乱序通知、其他轮次隔离、审批策略不变、等待问答、完成 / 中断和错误结果、helper 生命周期 |
 | 仓库根目录 `pnpm check` | 通过 | 协议、TypeScript、Linux 检查及 Mac 测试（真实 Provider 探针按条件跳过）；不自动包含扩展独立检查 |
 | `pnpm test:release` | 12 项通过 | 现有发布脚本回归；Mac 打包脚本另通过 `bash -n`，未实际生成 Mac Release 包 |

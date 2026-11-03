@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "点点改 · TermRelay",
+  "name": "TermRelay",
   "version": "0.1.0",
   "description": "围绕当前网页与绑定的 TermRelay AI 会话对话，支持提问、分析交互和请求修改，可附加页面元素与截图。",
   "minimum_chrome_version": "120",
@@ -16,7 +16,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "点点改 · 快捷连接",
+    "default_title": "页面对话 · 快捷连接",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

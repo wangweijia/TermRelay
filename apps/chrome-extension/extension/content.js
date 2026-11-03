@@ -12,14 +12,47 @@
   let host, root, target, element = null, selecting = false;
   let pinnedPage = pageURL(), pending = null, submitted = false, sending = false;
   let submittedID = null, replyTo = null, displayedReplyID = null;
+  let recordsKey = null;
   let synchronizing = false;
   let screenshot = null, screenshotSupported = false, screenshotSelecting = false, capturing = false, drag = null;
   let openedScreenshot = null, openedScreenshotID = null;
   const $ = selector => root.querySelector(selector);
   function node(tag, value) { const result = document.createElement(tag); result.textContent = value; return result; }
+  function messageContent(text) {
+    const content = node('div', '');
+    content.className = 'message-content';
+    const lines = text.split('\n');
+    let paragraph = [], code = null, language = '';
+    const flush = () => {
+      if (paragraph.length) content.append(node('p', paragraph.join('\n')));
+      paragraph = [];
+    };
+    const appendCode = () => {
+      const block = node('div', '');
+      block.className = 'code-block';
+      block.append(node('small', language || '代码'));
+      const pre = node('pre', '');
+      pre.append(node('code', code.join('\n')));
+      block.append(pre); content.append(block);
+      code = null;
+    };
+    for (const line of lines) {
+      const fence = line.match(/^\s*```([\w.+-]*)\s*$/);
+      if (code !== null) {
+        if (fence) appendCode();
+        else code.push(line);
+      } else if (fence) {
+        flush(); code = []; language = fence[1];
+      } else if (!line.trim()) flush();
+      else paragraph.push(line);
+    }
+    if (code !== null) appendCode();
+    flush();
+    return content;
+  }
   async function send(message) {
     const result = await chrome.runtime.sendMessage(message);
-    if (!result?.ok) throw new Error(result?.error || '点点改服务未响应，请检查 App 连接。');
+    if (!result?.ok) throw new Error(result?.error || '插件服务未响应，请检查 App 连接。');
     return result.data;
   }
   function status(message, tone = 'info') {
@@ -66,6 +99,7 @@
     $('#page').title = pinnedPage;
     $('#context').textContent = JSON.stringify({ page: pinnedPage, element }, null, 2);
     $('#outer').disabled = !target?.parentElement || submitted || !!pending;
+    $('#attachments').open = !!element || !!screenshot;
   }
   function exitSelection() {
     selecting = false;
@@ -183,6 +217,9 @@
       }
       pending = null; submitted = true;
       submittedID = record.id;
+      target = null; element = null; pinnedPage = pageURL();
+      $('#description').value = ''; $('#steps').value = ''; $('#count').textContent = '0 / 4000';
+      showScreenshot(null); highlight(null);
       status(`已发送 ${record.id.slice(0, 8)}，等待 AI 处理；工具审批遵循 Chat 原设置。`);
       await list();
     } catch (error) {
@@ -198,18 +235,50 @@
       const records = await send({ type: 'feedback.list' });
       const current = records.find(record => record.id === submittedID);
       if (current) status(`已发送 ${current.id.slice(0, 8)} · ${current.screenshot ? `App 已接收截图 ${current.screenshot.width} × ${current.screenshot.height} · ` : '本条无图片 · '}${labels[current.status] || current.status}${current.note ? `：${current.note}` : ''}`);
+      if (current && submitted && !sending && ['completed', 'awaiting_review', 'verified', 'changes_requested', 'failed'].includes(current.status)) {
+        submitted = false;
+        replyTo = current.status === 'failed' ? null : current.id;
+        $('#reply-context').textContent = replyTo ? `继续对话 · ${current.description.slice(0, 80)}` : '';
+        $('#reply-context').hidden = !replyTo;
+        freezeForm(false); summary();
+        $('#submit').disabled = false; $('#submit').textContent = '发送给 AI';
+      }
+      const key = JSON.stringify(records.slice(0, 100));
+      if (key === recordsKey && (displayedReplyID === submittedID || $('#panel').hidden || current?.status !== 'completed')) return;
+      recordsKey = key;
+      const history = $('#history'), previousTop = history.scrollTop;
+      const nearEnd = history.scrollHeight - history.clientHeight - previousTop < 48;
       $('#records').replaceChildren();
       let latestReply = null;
-      for (const record of records.slice(0, 100)) {
+      for (const record of records.slice(0, 100).reverse()) {
         const card = node('article', '');
+        card.className = 'conversation-turn'; card.dataset.id = record.id;
         const heading = node('div', ''), badge = node('span', labels[record.status] || record.status);
         heading.className = 'record-heading'; badge.className = 'record-badge'; badge.dataset.state = record.status;
         heading.append(badge, node('small', record.id.slice(0, 8)));
+        const user = node('section', '');
+        user.className = 'message message-user';
+        user.append(node('strong', '你'), messageContent(record.description));
+        if (record.steps) {
+          const extra = node('details', '');
+          extra.append(node('summary', '补充上下文'), node('p', record.steps)); user.append(extra);
+        }
+        const attachment = node('details', '');
+        attachment.className = 'message-attachment';
+        attachment.append(node('summary', record.element ? `附带选区 · ${record.element.tag} · ${record.element.text.slice(0, 60) || record.element.role || '无可见文字'}` : '附带页面'));
         const page = node('small', record.page); page.className = 'record-page'; page.title = record.page;
-        card.append(heading, node('strong', '你'), node('p', record.description), page);
-        if (record.parentId) card.append(node('small', `接续 ${record.parentId.slice(0, 8)}`));
+        attachment.append(page);
+        user.append(attachment);
+        card.append(user);
+        if (record.parentId) user.append(node('small', `接续 ${record.parentId.slice(0, 8)}`));
         if (record.screenshot) {
           const button = node('button', `查看截图 · ${record.screenshot.width} × ${record.screenshot.height}`);
+          const thumbnail = () => {
+            const image = node('img', '');
+            image.src = openedScreenshot.dataURL; image.alt = '本条消息附带的截图';
+            button.append(image);
+          };
+          if (openedScreenshotID === record.id) thumbnail();
           button.onclick = async () => {
             button.disabled = true;
             try {
@@ -217,29 +286,36 @@
                 openedScreenshot = await send({ type: 'feedback.screenshot', id: record.id });
                 openedScreenshotID = record.id;
               }
+              if (!button.querySelector('img')) thumbnail();
               viewScreenshot(openedScreenshot);
             } catch (error) { status(error.message, 'error'); }
             finally { button.disabled = false; }
           };
-          card.append(button);
+          button.className = 'image-attachment';
+          user.append(button);
         }
-        if (record.note) { const note = node('p', record.note); note.className = 'record-note'; card.append(note); }
+        const assistant = node('section', '');
+        assistant.className = 'message message-assistant';
+        assistant.append(node('strong', 'AI'), heading);
+        card.append(assistant);
+        if (record.note) { const note = node('p', record.note); note.className = 'record-note'; assistant.append(note); }
         if (record.response) {
-          const response = node('p', record.response); response.className = 'record-response';
-          card.append(node('strong', 'AI'), response);
+          const response = messageContent(record.response); response.classList.add('record-response');
+          assistant.append(response);
           if (record.id === submittedID && record.status === 'completed') latestReply = response;
         }
+        const actions = node('div', ''); actions.className = 'record-actions'; assistant.append(actions);
         if (['completed', 'awaiting_review', 'verified', 'changes_requested'].includes(record.status)) {
           const followup = node('button', '继续对话');
           followup.onclick = () => {
             if (sending || pending || capturing || screenshotSelecting) { status('请先处理当前未确认的消息或截图。'); return; }
             if (!submitted && ($('#description').value.trim() || screenshot) && !confirm('丢弃当前草稿，继续这条对话？')) return;
-            reset(); replyTo = record.id; pinnedPage = record.page; element = record.element;
+            reset(); replyTo = record.id;
             $('#reply-context').textContent = `接续对话：${record.description.slice(0, 120)}`;
             $('#reply-context').hidden = false;
             summary(); $('#description').focus(); $('#description').scrollIntoView({ block: 'nearest' });
           };
-          card.append(followup);
+          actions.append(followup);
         }
         if (record.status === 'completed') {
           const verify = node('button', '确认结果');
@@ -248,7 +324,7 @@
             try { await send({ type: 'feedback.verify', id: record.id, status: 'verified', note: '' }); await list(); }
             catch (error) { status(error.message, 'error'); verify.disabled = false; }
           };
-          card.append(verify);
+          actions.append(verify);
         }
         if (record.status === 'awaiting_review') {
           for (const [label, next] of [['效果满意', 'verified'], ['再调一调', 'changes_requested']]) {
@@ -260,79 +336,103 @@
               try { await send({ type: 'feedback.verify', id: record.id, status: next, note }); await list(); }
               catch (error) { status(error.message, 'error'); button.disabled = false; }
             };
-            card.append(button);
+            actions.append(button);
           }
         }
         $('#records').append(card);
       }
       if (latestReply && displayedReplyID !== submittedID && !$('#panel').hidden) {
-        latestReply.parentElement.scrollIntoView({ block: 'end' }); displayedReplyID = submittedID;
-      }
+        latestReply.scrollIntoView({ block: 'nearest' }); displayedReplyID = submittedID;
+      } else history.scrollTop = nearEnd ? history.scrollHeight : previousTop;
       if (!records.length) {
-        const empty = node('p', '暂无对话');
+        const empty = node('div', '');
+        empty.append(node('h3', '围绕这一页，聊一聊'), node('p', '提问、讨论交互，或告诉 AI 你想怎么改。选区和截图都只是消息的附件。'));
         empty.className = 'empty'; $('#records').append(empty);
       }
     } catch (error) { status(error.message, 'error'); }
   }
   function mount(meta) {
+    const chatIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14a4 4 0 0 1-4 4H9l-5 3V7a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4Z"/><path d="M8 8h8M8 12h5"/></svg>';
     host = document.createElement('termrelay-feedback');
     host.style.cssText = 'all:initial!important;position:fixed!important;z-index:2147483647!important;inset:0!important;pointer-events:none!important;';
     root = host.attachShadow({ mode: 'closed' });
     root.innerHTML = `
       <style>
         *{box-sizing:border-box}[hidden]{display:none!important}
-        #toggle,#panel,#hint,#screenshot-overlay,#image-viewer{pointer-events:auto;font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#222;text-align:left;letter-spacing:0;color-scheme:light}
+        #toggle,#panel,#hint,#screenshot-overlay,#image-viewer{pointer-events:auto;font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:#24342e;text-align:left;letter-spacing:0;color-scheme:light}
         button,textarea{font:inherit}button,textarea,summary{outline-offset:3px}
-        :focus-visible{outline:2px solid #555}
-        button{cursor:pointer;border:1px solid #ccc;border-radius:4px;background:white;color:#333;padding:7px 10px;font-size:13px}
-        button:hover:not(:disabled){background:#f5f5f5}
+        :focus-visible{outline:2px solid #237651}
+        button{cursor:pointer;border:1px solid #dfe7e2;border-radius:9px;background:white;color:#52655b;padding:7px 11px;font-size:12px;transition:background .15s,border-color .15s}
+        button:hover:not(:disabled){background:#edf5f0;border-color:#b9cfc1;color:#214e38}
         button:disabled{opacity:.45;cursor:not-allowed}
-        #toggle{position:fixed;right:20px;bottom:20px;background:#292929;color:white;border-color:#292929;padding:9px 16px;font-size:13px}
-        #toggle:hover{background:#444}
-        #panel{position:fixed;right:16px;top:16px;bottom:76px;width:min(380px,calc(100vw - 32px));display:flex;flex-direction:column;background:#fff;border:1px solid #ccc;border-radius:6px;overflow:hidden}
-        .panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e5e5e5}
-        .panel-header h2{margin:0;font-size:15px;font-weight:600}
-        #close{border:0;padding:3px 6px;font-size:12px;color:#666}
-        .panel-body{overflow:auto;overscroll-behavior:contain;padding:0 16px 16px;scrollbar-width:thin}
-        .connection{padding:12px 0;border-bottom:1px solid #e5e5e5;margin-bottom:16px}
-        #environment{margin:0 0 4px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#555}
-        #connection{margin:0;font-size:12px;color:#666;overflow-wrap:anywhere}
+        #toggle{position:fixed;right:20px;bottom:20px;display:flex;align-items:center;justify-content:center;width:46px;height:46px;background:#fff;color:#24563d;border:1px solid #dbe7df;border-radius:50%;padding:11px;box-shadow:0 4px 20px #163c2014}
+        #toggle svg,.panel-brand svg{display:block;width:22px;height:22px;flex-shrink:0}
+        #toggle:hover{background:#edf5f0}
+        #panel{position:fixed;right:16px;top:16px;bottom:76px;width:min(432px,calc(100vw - 32px));display:flex;flex-direction:column;background:#f8faf9;border:1px solid #dfe7e2;border-radius:18px;box-shadow:0 12px 48px #163c2024;overflow:hidden}
+        .panel-header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:14px 18px;background:#fff;border-bottom:1px solid #e7ede9}
+        .panel-header h2{margin:0;font-size:16px;font-weight:600}
+        .panel-brand{display:flex;align-items:center}
+        .sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+        #close{border:0;padding:5px 8px;font-size:12px;color:#728278;background:#f4f7f5}
+        .panel-body{display:flex;flex:1;flex-direction:column;min-height:0}
+        .connection{flex-shrink:0;padding:9px 18px;border-bottom:1px solid #e7ede9;background:#fff}
+        #environment{margin:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#52655b}
+        #connection{margin:2px 0 0;font-size:11px;color:#6b8273;overflow-wrap:anywhere}
         #connection[data-state=error]{color:#a12727}
-        .step-heading{display:block;margin:0 0 8px;font-size:13px;font-weight:600}
-        .pick-actions{display:flex;gap:8px;flex-wrap:wrap}
-        .selection{margin:10px 0 16px;min-width:0}
+        #history{flex:1;min-height:100px;overflow:auto;overscroll-behavior:contain;padding:0 16px 16px;scrollbar-width:thin}
+        .composer{flex-shrink:0;max-height:52%;overflow:auto;overscroll-behavior:contain;padding:12px 16px;background:#fff;border-top:1px solid #e1e9e4;scrollbar-width:thin}
+        .step-heading{display:block;margin:0 0 6px;font-size:12px;font-weight:600}
+        .pick-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+        .selection{margin:8px 0;min-width:0;padding:8px 10px;background:#f1f6f3;border:1px solid #e0eae3;border-radius:9px}
         .selection-heading{display:flex;gap:8px;align-items:center;justify-content:space-between}
         #object{margin:0;font-size:12px;overflow-wrap:anywhere}
         #outer{flex-shrink:0;font-size:12px;padding:3px 0;border:0}
         #page{display:block;font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
-        textarea{display:block;width:100%;min-height:96px;resize:vertical;max-height:280px;padding:9px 10px;border:1px solid #ccc;border-radius:4px;background:#fff;color:#222;font-size:13px;line-height:1.6}
+        textarea{display:block;width:100%;min-height:76px;resize:vertical;max-height:160px;padding:10px 12px;border:1px solid #dce5df;border-radius:11px;background:#fafcfb;color:#24342e;font-size:13px;line-height:1.6}
+        textarea:focus{border-color:#78a58a;background:#fff}
         textarea::placeholder{color:#888}
-        #count{display:block;text-align:right;font-size:11px;color:#777;margin-top:4px}
-        details{font-size:12px;color:#666;margin:10px 0}
+        #count{font-size:10px;color:#89968e;margin-left:auto}
+        details{font-size:12px;color:#6b7b71;margin:6px 0}
+        #attachments>summary{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#4b6c58;list-style:none;padding:4px 0}
+        #attachments>summary::after{content:"展开";font-size:10px;color:#89968e}
+        #attachments[open]>summary::after{content:"收起"}
         summary{cursor:pointer}details textarea{margin-top:8px;min-height:78px}
         .privacy-copy{font-size:11px;color:#666;margin:8px 0}
         pre{max-height:170px;overflow:auto;background:#f7f7f7;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
-        .submit-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-        #submit{background:#292929;border-color:#292929;color:white}
-        #submit:hover:not(:disabled){background:#444}
-        #status{font-size:12px;border-left:2px solid #ccc;padding:4px 10px;color:#555;white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0 0}
+        .submit-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
+        #submit{background:#246344;border-color:#246344;color:white;padding:8px 14px}
+        #submit:hover:not(:disabled){background:#194d33}
+        #new{border:0;background:transparent;padding:5px 0}
+        #status{flex-shrink:0;max-height:64px;overflow:auto;font-size:11px;border-left:2px solid #b9cfbf;padding:6px 12px;color:#6b7b71;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 16px 8px}
         #status[data-tone=error]{border-color:#a12727;color:#a12727}
-        .history-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:16px;margin-top:16px;border-top:1px solid #e5e5e5}
-        .history-heading h3{margin:0;font-size:13px;font-weight:600}.history-heading button{padding:3px 0;font-size:12px;border:0}
-        .history-help{font-size:11px;color:#777;margin:4px 0 12px}
-        article{border-top:1px solid #eee;margin:12px 0 0;padding:12px 0 0}
+        .history-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:10px}
+        .history-heading h3{margin:0;font-size:11px;font-weight:500;color:#89968e}.history-heading button{padding:3px 0;font-size:11px;border:0;background:transparent}
+        .history-help{font-size:10px;color:#89968e;margin:0 0 12px}
+        article{margin:18px 0 0;min-width:0}
+        .message{padding:12px 14px;border:1px solid #e2eae5;border-radius:13px;margin:10px 0;min-width:0}
+        .message-user{margin-left:24px;background:#edf5ef;border-color:#dfeae2;border-bottom-right-radius:4px}
+        .message-assistant{margin-right:12px;background:#fff;border-bottom-left-radius:4px}
         .record-heading{display:flex;gap:7px;align-items:flex-start;justify-content:space-between}
         .record-heading>small{font:11px/1.6 ui-monospace,monospace;color:#777}
-        .record-badge{font-size:12px;color:#555;overflow-wrap:anywhere}
+        .record-badge{font-size:10px;color:#718378;overflow-wrap:anywhere}
         .record-badge[data-state=failed],.record-badge[data-state=unknown]{color:#a12727}
-        article p{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 6px}
+        article p{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
         .record-page{display:block;font-size:11px;color:#777;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
         article .record-note{font-size:12px;color:#666;margin:8px 0}
-        article .record-response{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
-        article strong{display:block;margin-top:8px}
-        #reply-context{font-size:12px;color:#555;overflow-wrap:anywhere}
-        article button{font-size:12px;margin:8px 6px 0 0}
-        .empty{font-size:12px;color:#777;margin:12px 0 0}
+        article .record-response{overflow-wrap:anywhere;line-height:1.7}
+        article strong{display:block;font-size:11px;color:#5e7566;margin-bottom:4px}
+        article small{font-size:10px;color:#89968e}
+        .record-actions{display:flex;gap:6px;flex-wrap:wrap}
+        .record-actions button{border:0;background:#f3f7f4;padding:4px 8px;font-size:11px;margin-top:8px}
+        .message-attachment{border-top:1px solid #dce8df;padding-top:6px;margin-top:8px}
+        .image-attachment{margin-top:8px;width:100%;text-align:left;background:#f8fbf9;font-size:11px}
+        .image-attachment img{display:block;width:100%;max-height:160px;object-fit:contain;border-radius:6px;margin-top:8px}
+        .code-block{border:1px solid #dfe7e2;border-radius:8px;overflow:hidden;margin:10px 0;background:#f5f8f6}
+        .code-block>small{display:block;padding:5px 10px;border-bottom:1px solid #dfe7e2}
+        .code-block pre{margin:0;max-height:240px;padding:10px;white-space:pre;overflow:auto;font:11px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace}
+        #reply-context{font-size:11px;color:#52745f;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;margin:0 0 7px}
+        .empty{color:#819088;margin:36px 12px;text-align:center}
+        .empty h3{font-size:17px;font-weight:500;color:#3c5847;margin:0 0 8px}.empty p{font-size:12px;line-height:1.9;margin:0}
         #hint{position:fixed;top:16px;left:16px;max-width:calc(100vw - 32px);background:#fff;padding:10px 12px;border:1px solid #ccc;border-radius:4px}
         #hint button{margin-left:8px;font-size:12px}
         #highlight{position:fixed;border:2px solid #444;background:#00000008;pointer-events:none}
@@ -350,31 +450,37 @@
         #image-viewer::backdrop{background:#0007}
         #viewer-image{display:block;max-width:100%;max-height:calc(100vh - 110px);object-fit:contain;margin-top:8px}
         @media(max-width:440px){#panel{right:10px;top:10px;bottom:70px;width:calc(100vw - 20px)}#toggle{right:14px;bottom:14px}}
+        @media(prefers-reduced-motion:reduce){*{transition:none!important}}
       </style>
       <div id="highlight" hidden></div>
       <div id="hint" hidden>移动鼠标定位，点击选中；Esc 退出 <button id="cancel-pick">取消选择</button></div>
       <div id="screenshot-overlay" hidden><div id="screenshot-region" hidden></div><div id="screenshot-toolbar"><span>框选截图区域</span><button id="cancel-screenshot">取消</button></div></div>
       <dialog id="image-viewer" aria-label="对话截图"><button id="close-viewer">关闭</button><img id="viewer-image" alt="对话截图"></dialog>
-      <button id="toggle" aria-controls="panel" aria-expanded="false">点点改</button>
+      <button id="toggle" aria-controls="panel" aria-expanded="false" aria-label="打开或收起页面对话" title="页面对话">${chatIcon}</button>
       <section id="panel" aria-labelledby="panel-title" hidden>
-        <header class="panel-header"><h2 id="panel-title">点点改</h2><button id="close" aria-label="收起点点改">收起</button></header>
+        <header class="panel-header"><div class="panel-brand">${chatIcon}<h2 id="panel-title" class="sr-only">页面对话</h2></div><button id="close" aria-label="收起页面对话">收起</button></header>
         <div class="panel-body">
           <div class="connection"><p id="environment"></p><p id="connection" role="status"></p></div>
-          <h3 class="step-heading">页面上下文</h3>
+          <div id="history" role="region" aria-label="对话记录" tabindex="0">
+            <div class="history-heading"><h3>对话记录</h3><button id="list">刷新</button></div>
+            <p class="history-help">本共享连接内的对话与答复共享可见</p>
+            <div id="records"></div>
+          </div>
+          <p id="status" role="status" aria-live="polite" hidden></p>
+          <div class="composer">
+          <p id="reply-context" hidden></p>
+          <label for="description" class="step-heading">消息</label>
+          <textarea id="description" maxlength="4000" required placeholder="聊聊这一页，或说说你想怎么改…"></textarea>
+          <details id="attachments"><summary>附带页面、选区或图片</summary>
           <div class="pick-actions"><button id="pick">选择元素</button><button id="whole">当前页面</button><button id="screenshot" disabled>框选截图</button></div>
           <div class="selection"><div class="selection-heading"><p id="object"></p><button id="outer">扩大范围</button></div><small id="page"></small></div>
           <div id="screenshot-preview" hidden><button id="screenshot-expand" title="查看截图"><img id="screenshot-image" alt="待提交截图"></button><div class="screenshot-actions"><span id="screenshot-size"></span><button id="remove-screenshot">移除截图</button></div><label class="screenshot-consent"><input id="screenshot-consent" type="checkbox"><span>我确认图片可发送给绑定 AI，已检查其中的表单、账号及其他敏感内容。</span></label></div>
-          <p id="reply-context" hidden></p>
-          <label for="description" class="step-heading">消息</label>
-          <textarea id="description" maxlength="4000" required placeholder="输入问题或请求…"></textarea><small id="count">0 / 4000</small>
+          <p class="privacy-copy">选区和截图仅随本条消息发送，不自动附到下一条。</p>
+          </details>
           <details><summary>补充上下文（选填）</summary><textarea id="steps" maxlength="2000" aria-label="补充上下文" placeholder="操作步骤、预期行为或其他背景"></textarea></details>
           <details><summary>页面信息</summary><p class="privacy-copy">发送当前页面地址、可选的元素文字与结构，以及明确添加的截图。截图可能含敏感信息，发送前请确认。AI 答复会在本共享连接中可见。</p><pre id="context"></pre></details>
-          <p class="privacy-copy">提交即自动进入绑定 Chat；AI 工具审批沿用 Chat 原设置。</p>
-          <div class="submit-actions"><button id="submit">发送给 AI</button><button id="new">新话题</button></div>
-          <p id="status" role="status" aria-live="polite" hidden></p>
-          <div class="history-heading"><h3>对话记录</h3><button id="list">刷新</button></div>
-          <p class="history-help">本共享连接内的对话与答复共享可见</p>
-          <div id="records"></div>
+          <div class="submit-actions"><button id="new">新话题</button><small id="count">0 / 4000</small><button id="submit">发送给 AI</button></div>
+          </div>
         </div>
       </section>`;
     document.documentElement.append(host);
@@ -502,7 +608,7 @@
         respond({ ok: selected, error: selected ? undefined : '当前有未确认的反馈或会话不支持图片，请先处理。' });
       } else { togglePanel(); respond({ ok: true }); }
     },
-      error => { alert(`点点改：${error.message}`); respond({ ok: false }); });
+      error => { alert(`插件：${error.message}`); respond({ ok: false }); });
     return true;
   });
   synchronize();
