@@ -169,3 +169,87 @@ class FakeSocket {
     return this as unknown as WebSocket;
   }
 }
+
+test('late ACK is queryable after timeout and relay restart; the command is never forwarded twice', async context => {
+  const { TurnCommandRepository } = await import('./turn-command.repository');
+  const { TurnCommandController } = await import('./turn-command.controller');
+  const records = new TurnCommandRepository();
+  const mac = new FakeSocket();
+  const browser = new FakeSocket();
+  const registry = new FakeRegistry(mac) as unknown as DeviceConnectionRegistry;
+  const sessions = new FakeSessions('acp') as unknown as SessionsService;
+  const service = new CommandRelayService(registry, sessions, undefined, records);
+  const command = envelope('tool.turn.start', randomUUID(), { text: 'hello', attachments: [randomUUID()] });
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  assert.deepEqual(await service.route(browser.asWebSocket(), command), { ok: true });
+  context.mock.timers.tick(15_001);
+  assert.equal(browser.messages[0]?.data.payload.errorCode, 'ack_timeout');
+  assert.equal((await records.find(command.commandId!))?.ack, null);
+  service.onModuleDestroy();
+  const restarted = new CommandRelayService(registry, sessions, undefined, records);
+  try {
+    const ack = { ...command, type: 'command.ack', payload: { commandId: command.commandId!, status: 'completed' as const } };
+    assert.equal(await restarted.acknowledge(mac.asWebSocket(), ack), 'acknowledged');
+    const controller = new TurnCommandController(sessions, records);
+    const result = await controller.find('session-a', command.commandId!);
+    assert.equal(result.ack?.status, 'completed');
+    assert.equal((await restarted.route(browser.asWebSocket(), command)).ok, false);
+    assert.equal((await restarted.route(browser.asWebSocket(), { ...command, payload: { text: 'different' } })).ok, false);
+    assert.equal(mac.messages.length, 1);
+    await assert.rejects(controller.find('another-session', command.commandId!), { status: 404 });
+    // Out-of-order ACKs cannot downgrade the stored terminal result.
+    await restarted.acknowledge(mac.asWebSocket(), { ...ack, payload: { commandId: command.commandId!, status: 'accepted' } });
+    assert.equal((await controller.find('session-a', command.commandId!)).ack?.status, 'completed');
+  } finally { restarted.onModuleDestroy(); }
+});
+
+test('unregistered clients and wrong scopes cannot persist a late confirmation', async () => {
+  const { TurnCommandRepository } = await import('./turn-command.repository');
+  const records = new TurnCommandRepository();
+  const mac = new FakeSocket();
+  const service = new CommandRelayService(new FakeRegistry(mac) as unknown as DeviceConnectionRegistry,
+    new FakeSessions('acp') as unknown as SessionsService, undefined, records);
+  const command = envelope('tool.turn.start', randomUUID(), { text: 'hello' });
+  await service.route(new FakeSocket().asWebSocket(), command);
+  service.onModuleDestroy();
+  const ack = { ...command, type: 'command.ack', payload: { commandId: command.commandId!, status: 'completed' as const } };
+  assert.equal(await service.acknowledge(new FakeSocket().asWebSocket(), ack), 'connection_mismatch');
+  assert.equal(await service.acknowledge(mac.asWebSocket(), { ...ack, sessionId: 'other' }), 'connection_mismatch');
+  assert.equal(await service.acknowledge(mac.asWebSocket(), { ...ack, payload: { ...ack.payload, commandId: randomUUID() } }), 'connection_mismatch');
+  assert.equal((await records.find(command.commandId!))?.ack, null);
+});
+
+test('a persistence failure stops forwarding and is not presented as a completed send', async () => {
+  const { TurnCommandRepository } = await import('./turn-command.repository');
+  const records = new TurnCommandRepository();
+  records.reserve = async () => { throw new Error('database unavailable'); };
+  const mac = new FakeSocket();
+  const service = new CommandRelayService(new FakeRegistry(mac) as unknown as DeviceConnectionRegistry,
+    new FakeSessions('acp') as unknown as SessionsService, undefined, records);
+  assert.equal((await service.route(new FakeSocket().asWebSocket(), envelope('tool.turn.start', randomUUID(), { text: 'hello' }))).ok, false);
+  assert.equal(mac.messages.length, 0);
+  service.onModuleDestroy();
+});
+
+test('confirmation is not sent to the browser until persistence succeeds', async () => {
+  const { TurnCommandRepository } = await import('./turn-command.repository');
+  const records = new TurnCommandRepository();
+  const mac = new FakeSocket();
+  const browser = new FakeSocket();
+  const service = new CommandRelayService(new FakeRegistry(mac) as unknown as DeviceConnectionRegistry,
+    new FakeSessions('acp') as unknown as SessionsService, undefined, records);
+  const command = envelope('tool.turn.start', randomUUID(), { text: 'hello' });
+  await service.route(browser.asWebSocket(), command);
+  const persist = records.acknowledge.bind(records);
+  records.acknowledge = async () => { throw new Error('write unavailable'); };
+  const ack = { ...command, type: 'command.ack', payload: { commandId: command.commandId!, status: 'completed' as const } };
+  try {
+    await assert.rejects(service.acknowledge(mac.asWebSocket(), ack), /write unavailable/);
+    assert.equal(browser.messages.length, 0);
+    assert.equal((await records.find(command.commandId!))?.ack, null);
+    records.acknowledge = persist;
+    await service.acknowledge(mac.asWebSocket(), ack);
+    assert.equal((await records.find(command.commandId!))?.ack?.status, 'completed');
+    assert.equal(browser.messages[0]?.data.payload.status, 'completed');
+  } finally { service.onModuleDestroy(); }
+});

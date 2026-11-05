@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TurnReceipt } from '../turn-confirmation';
 import { useVirtualizer } from '@tanstack/vue-virtual';
 import { computed, nextTick, onDeactivated, onMounted, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import type { SessionEventRecord, ToolEventPayload } from '../types';
@@ -30,7 +31,9 @@ const props = withDefaults(defineProps<{
   sessionId: string;
   events: SessionEventRecord[];
   interactive: boolean;
-  sendTurn: (text: string, attachments?: string[]) => Promise<boolean>;
+  sendTurn: (text: string, attachments?: string[]) => TurnReceipt | undefined;
+  turnReceipts?: TurnReceipt[];
+  checkTurnStatus?: () => Promise<void>;
   external?: boolean;
   shortcutEnabled?: boolean;
   scrollRevision?: number;
@@ -39,6 +42,7 @@ const props = withDefaults(defineProps<{
   autoApproveEnabled?: boolean;
   autoApproveUpdating?: boolean;
 }>(), {
+  turnReceipts: () => [],
   shortcutEnabled: true,
   scrollRevision: 0,
   hasOlder: false,
@@ -65,7 +69,25 @@ watch(() => [props.sessionId, props.interactive] as const, async ([sessionId]) =
     if (response.ok) attachmentsSupported.value = (await response.json() as { supported?: boolean }).supported === true;
   } catch { /* Text chat remains available when capability lookup fails. */ }
 }, { immediate: true });
-const sending = ref(false);
+let draftRevision = 0;
+const submittedAttachmentIds = new Set<string>();
+const submission = shallowRef<{ commandId: string; revision: number }>();
+watch([prompt, () => draftAttachments.value.map(item => item.metadata.id).join(',')], () => { draftRevision += 1; }, { flush: 'sync' });
+const sending = computed(() => props.turnReceipts.some(item => item.sessionId === props.sessionId && item.state === 'waiting'));
+watch(() => props.turnReceipts.map(item => `${item.commandId}:${item.state}`).join(','), () => {
+  const sent = submission.value;
+  if (!sent || !props.turnReceipts.some(item => item.commandId === sent.commandId && item.state === 'confirmed')) return;
+  submission.value = undefined;
+  if (draftRevision !== sent.revision) return;
+  prompt.value = '';
+  for (const item of draftAttachments.value) if (item.preview) URL.revokeObjectURL(item.preview);
+  draftAttachments.value = [];
+  attachmentError.value = '';
+});
+function receiptLabel(record: TurnReceipt): string {
+  return ({ waiting: '正在等待设备确认…', unknown: '发送结果待核实，草稿已保留；请先核实，避免重复执行。',
+    confirmed: '已交给设备处理', not_sent: '消息未发送，草稿已保留。' })[record.state];
+}
 const fileInput = ref<HTMLInputElement>();
 const uploadController = new AbortController();
 const uploading = computed(() => draftAttachments.value.some(item => item.state === 'uploading'));
@@ -104,7 +126,8 @@ function removeAttachment(id: string): void {
   if (!item || item.state === 'uploading' || sending.value) return;
   if (item.preview) URL.revokeObjectURL(item.preview);
   draftAttachments.value = draftAttachments.value.filter(entry => entry.metadata.id !== id);
-  void transferAttachment(props.sessionId, { operation: 'delete', attachmentId: id, offset: 0 }).catch(() => {});
+  // A timed-out command may still be reading these attachments on the device.
+  if (!submittedAttachmentIds.has(id)) void transferAttachment(props.sessionId, { operation: 'delete', attachmentId: id, offset: 0 }).catch(() => {});
 }
 function chooseFiles(event: Event): void {
   const input = event.target as HTMLInputElement;
@@ -335,19 +358,19 @@ function itemLabel(kind: string): string {
   return kind;
 }
 function decisionLabel(value: Decision): string { return ({ allowOnce: '允许一次', allowSession: '本会话允许', allowPolicy: '允许并应用规则', deny: '拒绝', cancel: '取消' })[value]; }
-async function submitTurn(): Promise<void> {
+function submitTurn(): void {
   const value = prompt.value.trim();
   if (!props.interactive || turnActive.value || sending.value || uploading.value
     || draftAttachments.value.some(item => item.state !== 'ready') || (!value && !draftAttachments.value.length)) return;
-  sending.value = true; attachmentError.value = '';
-  const sent = draftAttachments.value.map(item => item.metadata.id);
-  try {
-    if (await props.sendTurn(value, sent)) {
-      if (prompt.value.trim() === value) prompt.value = '';
-      for (const item of draftAttachments.value) if (item.preview) URL.revokeObjectURL(item.preview);
-      draftAttachments.value = [];
-    } else { attachmentError.value = '消息未确认发送成功；已保留文字和附件，请查看状态提示。'; }
-  } finally { sending.value = false; }
+  if (props.turnReceipts.some(item => item.state === 'unknown') &&
+    !window.confirm('此会话有发送结果尚未确认的消息，设备可能已开始执行。仍要发送一条新消息吗？')) return;
+  attachmentError.value = '';
+  const receipt = props.sendTurn(value, draftAttachments.value.map(item => item.metadata.id));
+  if (receipt) {
+    submission.value = { commandId: receipt.commandId, revision: draftRevision };
+    for (const item of draftAttachments.value) submittedAttachmentIds.add(item.metadata.id);
+  }
+  else attachmentError.value = '消息未发送，已保留文字和附件。';
 }
 function setOption(option: ConfigOption, event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -541,6 +564,12 @@ function submitAnswers(item: TimelineItem): void {
           <button v-if="item.state === 'failed'" type="button" :disabled="sending" @click="runUpload(item.metadata.id)">重试</button>
           <button type="button" :disabled="item.state === 'uploading' || sending" @click="removeAttachment(item.metadata.id)">移除</button>
         </div>
+      </div>
+      <div aria-live="polite">
+        <p v-for="receipt in turnReceipts.filter((item, index) => item.state === 'unknown' || index >= turnReceipts.length - 5)" :key="receipt.commandId">
+          {{ new Date(receipt.createdAt).toLocaleTimeString() }} · {{ receiptLabel(receipt) }}
+          <button v-if="receipt.state === 'unknown'" type="button" @click="checkTurnStatus?.()">核实发送结果</button>
+        </p>
       </div>
       <p v-if="attachmentError" role="alert">{{ attachmentError }}</p>
       <div v-if="attachmentsSupported" class="attachment-picker">

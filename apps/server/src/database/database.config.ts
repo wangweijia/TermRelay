@@ -1,3 +1,4 @@
+import { TurnCommandConfirmation1793923200000 } from './migrations/1793923200000-turn-command-confirmation';
 import type { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
 import { ClientPairingEntity } from '../client-auth/client-pairing.entity';
 import { DeviceCredentialEntity } from '../client-auth/device-credential.entity';
@@ -55,6 +56,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       AIService1791590400000,
       UnifiedAIConversations1791820800000,
       RemoteSessionStart1792540800000,
+      TurnCommandConfirmation1793923200000,
     ],
     entities: [
       DeviceEntity,

@@ -180,10 +180,14 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.sendProtocolError(client, 'conflict', 'Creation acknowledgement could not be accepted.', result.message.envelope.messageId);
         return;
       }
-      const acknowledged = await this.commands?.acknowledge(
-        client,
-        result.message.envelope,
-      );
+      let acknowledged;
+      try {
+        acknowledged = await this.commands?.acknowledge(client, result.message.envelope);
+      } catch (error) {
+        this.logger.error(`Failed to persist command acknowledgement: ${String(error)}`);
+        this.sendProtocolError(client, 'internal_error', 'Command acknowledgement could not be persisted.', result.message.envelope.messageId);
+        return;
+      }
       if (acknowledged === 'connection_mismatch') {
         this.sendProtocolError(
           client,

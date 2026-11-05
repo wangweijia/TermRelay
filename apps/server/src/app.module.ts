@@ -1,3 +1,5 @@
+import { TurnCommandRepository } from './realtime/turn-command.repository';
+import { TurnCommandController } from './realtime/turn-command.controller';
 import { Module } from '@nestjs/common';
 import { ClientAuthModule } from './client-auth/client-auth.module';
 import { DatabaseModule } from './database/database.module';
@@ -24,7 +26,7 @@ import { AIModule } from './ai/ai.module';
     ShortcutsModule,
     AIModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, TurnCommandController],
   providers: [
     ClientGateway,
     PublicClientGateway,
@@ -32,6 +34,7 @@ import { AIModule } from './ai/ai.module';
     BrowserProtocolValidator,
     ProtocolValidator,
     CommandRelayService,
+    TurnCommandRepository,
   ],
 })
 export class AppModule {}
