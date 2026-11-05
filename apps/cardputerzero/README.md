@@ -6,13 +6,15 @@
 ## 当前状态
 
 已导入 LVGL 模板及其演示界面、桌面模拟器、Linux 显示/输入适配和构建预设。
-当前仍是模板演示，不包含实际公网授权、会话、对话、审批或终端功能。
-项目没有修改 Server、Mac、Linux Agent 或 Web，也不连接真实 AI Provider。
+已实现授权连接首个闭环：原生域名输入、后台配对、Web 设置页选择执行设备后批准、永久凭据保存与恢复、共享公网 WSS 连接及在线撤销。
+本轮按用户授权同步修改 Server、Contracts 和 Web；Mac / Linux Agent 实现未改，不连接真实 AI Provider。
+当前只确认控制端身份与授权范围，不包含会话浏览、对话、审批、问答或终端业务。
 
 2026-11-05 验证记录：macOS Apple Silicon Debug 构建通过，产物为 Mach-O arm64；
 安装暂存到本项目 `build/` 后，启动器、唯一命名图标、配置文件及默认不安装服务的检查通过。
 LVGL v9.5.0 已下载到忽略的 `.cache/vendor/`，本地配置使用该源码完成，无需重复下载。
 未启动模拟器，未做截图或交互验收，未验证 Linux ARM64、实机及 `.deb` 包。
+本轮新增验证：原生 Debug 构建和 1 个 CTest（HTTPS 地址、输入映射及私有存储）通过；C++ 探针与临时 Nest HTTP/WSS 服务完成配对、授权、重启恢复与在线撤销。集成测试使用内存仓库，不代表真实 MySQL 迁移或公网 TLS 已验收。
 
 ## 模板依据
 
@@ -30,7 +32,8 @@ LVGL 由 CMake FetchContent 按 v9.5.0 获取，首次配置需要网络。
 ## 目录
 
 ```text
-src/             应用、MVVM 演示、UI、响应式绑定和平台适配
+src/             授权启动页、connection 网络状态机、模板 UI 和平台适配
+tests/           无 GUI 的授权存储/输入测试和原生连接探针
 assets/          模拟器外壳、字体、图标和音效，保留模板资源
 config/          应用默认配置
 cmake/           设备工具链和构建辅助
@@ -44,11 +47,11 @@ app-builder.json 私有构建元数据，不配置 AppStore 发布
 
 优先使用仓库中已经初始化好的本目录，不必重新下载模板，也不必安装 AppBuilder CLI。
 先把包含本目录的仓库版本同步到新电脑；仅克隆远端不会带上尚未提交或推送的本地文件。
-这个原生应用不依赖 `pnpm install`，只编译模板界面时不需要启动 Server、配置数据库或提供 AI 凭据。
+这个原生应用单独编译不依赖 `pnpm install`，不需要提供 AI 凭据；真实授权需要先部署支持控制端角色的 Server / Web 并应用迁移。
 
 ### 1. 检查构建环境
 
-需要 CMake 3.31+、Ninja、C++17 编译器、SDL2、FreeType、libpng、JPEG、fmt 和 zlib。
+需要 CMake 3.31+、Ninja、C++17 编译器、SDL2、FreeType、libpng、JPEG、fmt、zlib、libcurl 8.4+（必须编译启用 ws/wss）及 nlohmann-json 3.11+。
 macOS 先检查 Apple 工具链与已有依赖：
 
 ```sh
@@ -64,8 +67,18 @@ pkg-config --modversion sdl2 freetype2 libpng libjpeg fmt zlib
 已有 Homebrew 时，从下面列表中只安装本机缺少的项目：
 
 ```sh
-brew install cmake ninja pkgconf sdl2 freetype libpng jpeg fmt zlib
+HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 \
+ALL_PROXY=http://127.0.0.1:7890 \
+brew install cmake ninja pkgconf sdl2 freetype libpng jpeg fmt zlib curl nlohmann-json
 ```
+
+代理命令仅用于本机已启动 `7890` HTTP 代理时；不会修改 shell 全局代理配置。macOS 系统 curl 的版本号不足以证明支持 WebSocket，检查 Homebrew 版本：
+
+```sh
+"$(brew --prefix curl)/bin/curl" --version
+```
+
+`Protocols` 必须包含 `ws wss`。本次使用 curl 8.23.0、nlohmann-json 3.12.0；其余电脑和目标设备需自行确认。
 
 不需要为桌面预览预装 ARM 交叉工具链、BSP、`dpkg` 或发布工具。
 Apple Silicon 使用 arm64 Homebrew 与依赖；不要混用 Rosetta 的 x86_64 库。
@@ -78,19 +91,19 @@ Apple Silicon 使用 arm64 Homebrew 与依赖；不要混用 Rosetta 的 x86_64 
 ```sh
 cd apps/cardputerzero
 cmake --list-presets
-cmake --preset darwin-arm64
+cmake --preset darwin-arm64 -DCURL_ROOT="$(brew --prefix curl)"
 cmake --build --preset darwin-arm64-dbg --parallel 4
 ```
 
 首次配置会通过 Git 获取 LVGL v9.5.0，需要网络；失败时改用下一节的源码包方式。
 Debug 程序位于 `build/darwin-arm64/Debug/termrelay-cardputerzero`。
-需要查看模板演示时，可手动运行：
+需要打开授权界面时，可手动运行：
 
 ```sh
 ./build/darwin-arm64/Debug/termrelay-cardputerzero
 ```
 
-这会打开窗口，不代表公网控制功能已实现。此前仅验证编译和暂存安装，没有启动窗口或做视觉验收。
+这会打开授权窗口，本轮未自动运行 GUI 或做视觉验收。首次授权步骤见下文；不要用模板演示截图作为新界面的验收证据。
 
 其他宿主机预设：
 
@@ -100,7 +113,8 @@ Debug 程序位于 `build/darwin-arm64/Debug/termrelay-cardputerzero`。
 | Intel Mac | `darwin-x86-64` | `darwin-x86-64-dbg` | 模板保留，未验证 |
 | Linux x86_64 | `linux-x86-64` | `linux-x86-64-dbg` | 模板保留，未验证 |
 
-Linux 桌面所需包包括编译器、CMake、Ninja、pkg-config、SDL2、FreeType、PNG、JPEG、fmt 和 zlib 的开发包。
+Linux 桌面还需要启用 WebSocket 的 libcurl 开发包及 `nlohmann-json3-dev`，不能只检查系统 `curl` 命令版本。
+其余包包括编译器、CMake、Ninja、pkg-config、SDL2、FreeType、PNG、JPEG、fmt 和 zlib 的开发包。
 Debian/Ubuntu 可对应 `build-essential`、`cmake`、`ninja-build`、`pkg-config`、`libsdl2-dev`、
 `libfreetype-dev`、`libpng-dev`、`libjpeg-dev`、`libfmt-dev`、`zlib1g-dev`，但先确认发行版 CMake 达到 3.31。
 不能假设系统默认 CMake 足够新；本文不声称 Linux 或 Windows 已完成验证。
@@ -117,6 +131,7 @@ curl --fail --location --connect-timeout 10 --max-time 180 \
 	https://codeload.github.com/lvgl/lvgl/tar.gz/refs/tags/v9.5.0
 tar -xzf .cache/vendor/lvgl-v9.5.0.tar.gz -C .cache/vendor
 cmake --preset darwin-arm64 \
+	-DCURL_ROOT="$(brew --prefix curl)" \
 	-DFETCHCONTENT_SOURCE_DIR_LVGL="$PWD/.cache/vendor/lvgl-9.5.0" \
 	-DFETCHCONTENT_FULLY_DISCONNECTED=ON
 cmake --build --preset darwin-arm64-dbg --parallel 4
@@ -195,8 +210,43 @@ DESTDIR="$PWD/build/darwin-arm64/stage" \
 - 本次 shell 没有 `rg`。搜索可以回退到编辑器搜索或系统工具，不需要为构建本项目额外安装 ripgrep。
 - `git diff --no-index` 用于比较不同文件时可能返回 1；不要把它与独立检查用 `&&` 连接后，误以为后续检查也执行了。应分别读取退出码与验证输出。
 - 不要把编辑器“无诊断”、编译通过、安装暂存通过、GUI 验收通过和实机通过混为一谈；这些是不同检查。
-- 本次没有引入单元测试框架或运行 CTest 测试；验证证据是实际配置、编译与暂存安装，不虚构测试数量。
+- 模板初始化阶段没有单测；授权阶段已新增 CTest，不依赖外部 C++ 测试框架。不要将两阶段验证混淆。
 - AppBuilder 是配套构建/发布工具，不是需要嵌入 App 的运行时；初次本地开发不要求登录 GitHub 或公开发布仓库。
+
+## 授权连接
+
+1. Server 按 [环境约定](../../docs/ENVIRONMENTS.md) 选择正确数据库，构建后应用 `1793836800000-controller-auth` 显式迁移，再部署 Server / Web。本轮没有实际执行迁移，也没有使用生产数据库。
+2. 沿用 Mac 的同一公网域名和三个精确 Bypass 路径：`/api/client-pairings`、`/api/client-pairings/token`、`/ws/client-public`。不要 Bypass Web 管理接口。
+3. 原生界面填写服务域名（自动补 `https://`），选择 `Connect`。不显示短码、二维码或倒计时。
+4. 自行登录现有 Web 的“配置”，在“掌机授权”的待授权列表核对安装 ID、版本和申请时间，选择允许访问的执行设备后批准。
+5. 掌机显示 `Online` 与授权设备数量。普通断网自动重连；退出后保留凭据，重启无需再次批准。
+6. Web 的“删除授权”先持久化撤销，再通知并关闭在线掌机（4003）。掌机清除本机密钥并停止重连；重新连接需要再次批准。
+
+`Cancel` 在待授权时尝试取消申请，在线时仅断开本次连接；长按 Esc 退出。关闭进程或网络中断时未确认取消的申请会自动过期，不会生成永久凭据。
+`Clear local key` 需要再次确认，只移除本机副本，不撤销 Web 上的授权；旧授权需在 Web 手动删除。已有凭据时服务地址锁定，清除后才能更换地址，绝不向新地址发送旧凭据。
+
+凭据和随机 installation ID 保存在 `$XDG_STATE_HOME/termrelay-cardputerzero/authorization.json`，未设置时为 `$HOME/.local/state/termrelay-cardputerzero/authorization.json`。目录 0700、文件 0600、原子替换；拒绝不安全权限或符号链接。该文件含长期密钥，不要复制到日志、截图、Git 或排障材料中。服务端仅保存摘要。
+
+键盘目前按 Linux 标准 US evdev 字母、数字、标点、Shift、编辑和 Tab / Shift+Tab 焦点导航映射；尚未在实机核对 Fn 层、布局或输入设备权限。中文 UI、中文输入和全部业务界面不属于此次授权连接验收。
+
+授权接口依赖现有 Access / Tunnel 保护管理面，未新增应用级 Access JWT 校验；不得把源站管理接口直接暴露到公网。当前只支持单 Server 实例的即时撤销。待授权最多返回最近 100 条，凭据列表最多 500 条；游标分页、权限缩减和多副本撤销仍待后续完善。
+
+### 无 GUI 验证
+
+在仓库根目录，完成原生 Debug 构建后：
+
+```sh
+ctest --test-dir apps/cardputerzero/build/darwin-arm64 -C Debug --output-on-failure
+pnpm --filter @termrelay/server build
+TERMRELAY_NATIVE_PROBE="$PWD/apps/cardputerzero/build/darwin-arm64/Debug/authorization_probe" \
+	node --test apps/server/dist/client-auth/controller-auth.service.spec.js
+pnpm --filter @termrelay/web build
+pnpm check
+```
+
+探针仅在测试构建中生成，显式允许数字回环地址的 HTTP / WS；正式 App 默认只接受 HTTPS / WSS。测试启动临时回环服务，不访问真实数据库、Cloudflare 或 AI Provider。不设置 `TERMRELAY_NATIVE_PROBE` 时，Server 普通测试会跳过 C++ 集成检查。
+
+发布前仍需真实 MySQL 迁移、公网 TLS / Access、320×170 视觉与键盘交互、实机 ABI、Linux 交叉编译和设备依赖打包验收。模板 Debian 依赖清单尚未适配并验证设备上的 WebSocket libcurl，不可直接发布 `.deb`。
 
 ## CardputerZero 构建与打包
 

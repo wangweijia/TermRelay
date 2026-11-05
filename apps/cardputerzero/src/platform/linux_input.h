@@ -28,5 +28,6 @@ void clear_key_release_listener(KeyReleaseListener listener, void* user_data);
 void set_global_key_listener(GlobalKeyListener listener, void* user_data);
 void clear_global_key_listener(GlobalKeyListener listener, void* user_data);
 const char* describe_key(uint32_t key);
+uint32_t map_keyboard_key(uint16_t code, bool shifted);
 
 } // namespace platform

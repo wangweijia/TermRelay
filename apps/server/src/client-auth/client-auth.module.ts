@@ -12,12 +12,19 @@ import { ClientApprovalsController } from './client-approvals.controller';
 import { DeviceCredentialsController } from './device-credentials.controller';
 import { DeviceCredentialsService } from './device-credentials.service';
 import { ClientAuthRateLimiter } from './client-auth-rate-limiter';
+import { ControllerAuthService, CONTROLLER_AUTH_STORE } from './controller-auth.service';
+import { ControllerAuthRepository } from './controller-auth.repository';
+import { ControllerConnections } from './controller-connections';
+import { ControllerManagementController } from './controller-management.controller';
+import { DevicesModule } from '../devices/devices.module';
 
 @Module({
+  imports: [DevicesModule],
   controllers: [
     ClientPairingsController,
     ClientApprovalsController,
     DeviceCredentialsController,
+    ControllerManagementController,
   ],
   providers: [
     ClientAuthRepository,
@@ -25,6 +32,10 @@ import { ClientAuthRateLimiter } from './client-auth-rate-limiter';
     DeviceCredentialsService,
     ClientAuthRateLimiter,
     ClientAuthService,
+    ControllerAuthService,
+    ControllerAuthRepository,
+    ControllerConnections,
+    { provide: CONTROLLER_AUTH_STORE, useExisting: ControllerAuthRepository },
     { provide: CLIENT_AUTH_STORE, useExisting: ClientAuthRepository },
     {
       provide: CLIENT_AUTH_OPTIONS,
@@ -34,7 +45,7 @@ import { ClientAuthRateLimiter } from './client-auth-rate-limiter';
       }),
     },
   ],
-  exports: [ClientAuthService, ClientConnectionAuthorizations],
+  exports: [ClientAuthService, ClientConnectionAuthorizations, ControllerAuthService, ControllerConnections],
 })
 export class ClientAuthModule {}
 

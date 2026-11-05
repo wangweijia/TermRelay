@@ -24,6 +24,8 @@ import { AIService1791590400000 } from './migrations/1791590400000-ai-service';
 import { UnifiedAIConversations1791820800000 } from './migrations/1791820800000-unified-ai-conversations';
 import { RemoteSessionStart1792540800000 } from './migrations/1792540800000-remote-session-start';
 import { SessionStartEntity } from '../sessions/session-start.entity';
+import { ControllerCredentialEntity, ControllerPairingEntity } from '../client-auth/controller-auth.entity';
+import { ControllerAuth1793836800000 } from './migrations/1793836800000-controller-auth';
 
 export function databaseOptions(): MysqlConnectionOptions {
   return {
@@ -55,6 +57,7 @@ export function databaseOptions(): MysqlConnectionOptions {
       AIService1791590400000,
       UnifiedAIConversations1791820800000,
       RemoteSessionStart1792540800000,
+      ControllerAuth1793836800000,
     ],
     entities: [
       DeviceEntity,
@@ -68,6 +71,8 @@ export function databaseOptions(): MysqlConnectionOptions {
       AIProjectKeyEntity,
       AIResourceEntity,
       SessionStartEntity,
+      ControllerPairingEntity,
+      ControllerCredentialEntity,
     ],
   };
 }

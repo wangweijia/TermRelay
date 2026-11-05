@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-connected.schema.json",
+  "title": "controller.connected payload",
+  "type": "object",
+  "required": ["role", "installationId", "deviceIds", "permissions", "expiresAt"],
+  "properties": {
+    "role": { "const": "controller" },
+    "installationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "deviceIds": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+    "permissions": { "type": "array", "items": { "enum": ["sessions.read", "turns.write", "approvals.resolve", "user-input.resolve"] } },
+    "expiresAt": { "type": "null" }
+  },
+  "additionalProperties": false
+}

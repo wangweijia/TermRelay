@@ -1,31 +1,57 @@
 import { BadRequestException, Body, Controller, Header, HttpException, Post, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { ClientAuthRateLimiter, clientAddress } from './client-auth-rate-limiter';
-import { ClientAuthService, type PairingExchangeResult } from './client-auth.service';
+import { ClientAuthService } from './client-auth.service';
+import { ControllerAuthService } from './controller-auth.service';
 
 @Controller('api/client-pairings')
 export class ClientPairingsController {
   constructor(
     private readonly auth: ClientAuthService,
     private readonly rateLimiter: ClientAuthRateLimiter,
+    private readonly controllers: ControllerAuthService,
   ) {}
 
   @Post()
   @Header('Cache-Control', 'no-store')
   create(@Body() input: unknown, @Req() request: FastifyRequest) {
+    const body = object(input);
+    if (body.role !== undefined && body.role !== 'device' && body.role !== 'controller') throw new BadRequestException('invalid role');
+    if (body.role === 'controller') {
+      this.controllerLimit(request, 'create', 10);
+      return this.controllers.create({
+        installationId: text(body.installationId, 'installationId', 128),
+        deviceName: text(body.deviceName, 'deviceName', 128), appVersion: text(body.appVersion, 'appVersion', 64),
+      });
+    }
     this.limit(request, 'create', 10);
     return this.auth.createPairing(parseCreatePairing(input));
   }
 
   @Post('token')
   @Header('Cache-Control', 'no-store')
-  exchange(
+  async exchange(
     @Body() input: unknown,
     @Req() request: FastifyRequest,
-  ): Promise<PairingExchangeResult> {
-    this.limit(request, 'exchange', 120);
+  ) {
+    const record = object(input);
+    if (record.role !== undefined && record.role !== 'device' && record.role !== 'controller') throw new BadRequestException('invalid role');
+    if (record.action !== undefined && record.action !== 'cancel') throw new BadRequestException('invalid action');
     const body = parseExchangePairing(input);
+    if (record.role === 'controller') this.controllerLimit(request, 'exchange', 120);
+    else this.limit(request, 'exchange', 120);
+    const controllerPairing = await this.controllers.ownsPairing(body.pairingId);
+    if (controllerPairing && record.role === 'device') throw new BadRequestException('pairing role mismatch');
+    if (controllerPairing || record.role === 'controller') {
+      return this.controllers.exchange(body.pairingId, body.deviceCode, record.action === 'cancel');
+    }
+    if (record.action !== undefined) throw new BadRequestException('invalid action');
     return this.auth.exchangePairing(body.pairingId, body.deviceCode);
+  }
+
+  private controllerLimit(request: FastifyRequest, action: string, maximum: number) {
+    const address = clientAddress(request.headers, request.ip);
+    if (!this.rateLimiter.consume(`controller:${action}:${address}`, maximum, 60_000)) throw new HttpException('too many controller authentication requests', 429);
   }
 
   private limit(request: FastifyRequest, action: string, maximum: number): void {

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/controller-me-get.schema.json",
+  "title": "controller.me.get payload",
+  "type": "object",
+  "additionalProperties": false
+}

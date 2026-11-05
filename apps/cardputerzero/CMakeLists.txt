@@ -593,6 +593,7 @@ target_compile_definitions(${PROJECT_NAME}_core
 
 target_link_libraries(${PROJECT_NAME}_core
     PUBLIC
+        termrelay_connection
         lvgl
         logger
         ${PROJECT_NAME}_view
@@ -630,4 +631,18 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 # Package deb
+find_package(CURL 8.4 REQUIRED)
+find_package(nlohmann_json 3.11 REQUIRED)
+find_package(Threads REQUIRED)
+add_library(termrelay_connection STATIC src/connection/authorization.cpp)
+target_include_directories(termrelay_connection PUBLIC src/connection)
+target_link_libraries(termrelay_connection PUBLIC CURL::libcurl nlohmann_json::nlohmann_json Threads::Threads)
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(authorization_test tests/authorization_test.cpp)
+    target_link_libraries(authorization_test PRIVATE termrelay_connection ${PROJECT_NAME}_platform)
+    add_test(NAME authorization-storage COMMAND authorization_test)
+    add_executable(authorization_probe tests/authorization_probe.cpp)
+    target_link_libraries(authorization_probe PRIVATE termrelay_connection)
+endif()
 include(packaging/package.cmake)

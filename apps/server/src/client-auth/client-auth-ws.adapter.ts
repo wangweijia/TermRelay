@@ -5,10 +5,13 @@ import type WebSocket from 'ws';
 import { ClientAuthService, type CredentialValidationResult } from './client-auth.service';
 import { ClientConnectionAuthorizations } from './client-connection-authorizations';
 import { ClientAuthRateLimiter, clientAddress } from './client-auth-rate-limiter';
+import { ControllerAuthService, type ControllerAuthorization } from './controller-auth.service';
+import { ControllerConnections } from './controller-connections';
 
 const PUBLIC_CLIENT_PATH = '/ws/client-public';
 const MAX_AUTHORIZATION_LENGTH = 256;
 const requestAuthorizations = new WeakMap<IncomingMessage, CredentialValidationResult & { ok: true }>();
+const controllerAuthorizations = new WeakMap<IncomingMessage, ControllerAuthorization>();
 
 interface VerifyClientInfo {
   req: IncomingMessage;
@@ -20,12 +23,16 @@ export class ClientAuthWsAdapter extends WsAdapter {
   private readonly auth: ClientAuthService;
   private readonly connections: ClientConnectionAuthorizations;
   private readonly rateLimiter: ClientAuthRateLimiter;
+  private readonly controllerAuth: ControllerAuthService;
+  private readonly controllers: ControllerConnections;
 
   constructor(app: INestApplicationContext) {
     super(app);
     this.auth = app.get(ClientAuthService);
     this.connections = app.get(ClientConnectionAuthorizations);
     this.rateLimiter = app.get(ClientAuthRateLimiter);
+    this.controllerAuth = app.get(ControllerAuthService);
+    this.controllers = app.get(ControllerConnections);
   }
 
   override create(
@@ -41,6 +48,9 @@ export class ClientAuthWsAdapter extends WsAdapter {
       },
     }) as WebSocket.Server;
     server.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+      const controller = controllerAuthorizations.get(request);
+      controllerAuthorizations.delete(request);
+      if (controller) this.controllers.attach(socket, controller);
       const authorization = requestAuthorizations.get(request);
       requestAuthorizations.delete(request);
       if (authorization) this.connections.attach(socket, authorization);
@@ -60,6 +70,13 @@ export class ClientAuthWsAdapter extends WsAdapter {
       return;
     }
     try {
+      if (header.startsWith('Bearer tr_controller_')) {
+        const authorization = await this.controllerAuth.validate(header);
+        if (!authorization) { done(false, 401, 'Unauthorized'); return; }
+        controllerAuthorizations.set(request, authorization);
+        done(true);
+        return;
+      }
       const authorization = await this.auth.validateCredential(header);
       if (!authorization.ok) {
         done(false, 401, 'Unauthorized');

@@ -52,6 +52,9 @@ const shortcutSchemas = [
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
 const filePreviewSchemas = [
+  ['controllerMeGetSchema', 'commands/controller-me-get'],
+  ['controllerConnectedSchema', 'events/controller-connected'],
+  ['controllerAuthorizationRevokedSchema', 'events/controller-authorization-revoked'],
   ['attachmentRequestSchema', 'commands/attachment-request'],
   ['attachmentResultSchema', 'events/attachment-result'],
   ['filePreviewRequestSchema', 'commands/file-preview-request'],

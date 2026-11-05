@@ -5,6 +5,7 @@ import type { NotificationSettings } from '../types';
 import { copyText, selectCopyText } from '../clipboard';
 import { activeCredentials, activeKeys, availableTargets } from '../settings';
 import type { AITarget, ClientCredentialSummary, ProjectKey } from '../settings';
+import ControllerAuthorizations from '../components/ControllerAuthorizations.vue';
 
 const targets = ref<AITarget[]>([]);
 const targetsLoading = ref(false);
@@ -224,6 +225,7 @@ onBeforeUnmount(() => {
       <p v-if="notificationsLoading && !notifications" class="settings-empty" role="status">正在读取通知配置…</p>
       <div v-if="notifications" class="notification-setting"><div><strong>{{ !notifications.configured ? '服务未配置' : notifications.enabled ? '已开启' : '已关闭' }}</strong><small v-if="!notifications.configured">请在 Server 环境中配置 Bark 服务。</small></div><button role="switch" :aria-checked="notifications.enabled" aria-label="审批通知" :disabled="notificationsLoading || notificationBusy || (!notifications.configured && !notifications.enabled)" @click="toggleNotifications">{{ notificationBusy ? '保存中…' : notifications.enabled ? '关闭通知' : '开启通知' }}</button></div>
     </section>
+    <ControllerAuthorizations />
     </div>
   </main>
 </template>

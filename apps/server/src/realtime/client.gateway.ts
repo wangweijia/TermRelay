@@ -21,6 +21,7 @@ import type {
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
 import { ClientConnectionAuthorizations } from '../client-auth/client-connection-authorizations';
+import { ControllerConnections } from '../client-auth/controller-connections';
 import { SessionsService } from '../sessions/sessions.service';
 import { ShortcutsService } from '../shortcuts/shortcuts.service';
 import { FilePreviewService } from '../sessions/file-preview.service';
@@ -72,9 +73,14 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @Optional() private readonly ai?: AIService,
     @Optional() private readonly starts?: SessionStartService,
     @Optional() private readonly attachments?: AttachmentsService,
+    @Optional() private readonly controllers?: ControllerConnections,
   ) {}
 
   handleConnection(client: WebSocket): void {
+    if (this.isPublicGateway && this.controllers?.get(client)) {
+      void this.controllers.connected(client).catch(() => client.close(1011, 'controller unavailable'));
+      return;
+    }
     if (this.isPublicGateway && !this.authorizations?.get(client)) {
       client.close(1008, 'unauthorized');
       return;
@@ -84,6 +90,7 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: WebSocket): void {
+    if (this.controllers?.get(client)) return;
     const deviceId = this.registry.getDeviceId(client);
     if (deviceId && this.registry.getClient(deviceId) === client) {
       void this.shortcuts?.disconnected(deviceId);
@@ -97,6 +104,14 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: WebSocket,
     @MessageBody() input: unknown,
   ): Promise<void> {
+    if (this.isPublicGateway && this.controllers?.get(client)) {
+      try { await this.controllers.message(client, input); } catch { client.close(1011, 'controller unavailable'); }
+      return;
+    }
+    if (this.isPublicGateway && !this.authorizations?.get(client)) {
+      client.close(1008, 'unauthorized');
+      return;
+    }
     const result = this.validator.validate(input);
     if (!result.ok) {
       this.sendProtocolError(

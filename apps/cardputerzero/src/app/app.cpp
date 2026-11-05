@@ -7,6 +7,7 @@
 #include "app.h"
 
 #include "application_config.h"
+#include "authorization_screen.h"
 #include "asset_manager.h"
 #include "help_popup.h"
 #include "logger.h"
@@ -320,16 +321,15 @@ int Application::run() {
     simulator_frame.bind_dark_mode(view_model.dark_mode_subject());
 #endif
 
-    ScreenManager screen_manager(view_model, assets);
-    screen_manager.start();
-    ShortcutController shortcuts(view_model, assets);
+    bool running = true;
+    connection::Authorization authorization;
+    AuthorizationScreen authorization_screen(authorization, running);
 
     DarkModePersistence dark_mode_persistence{user_config_path, view_model.is_dark_mode()};
     auto* dark_mode_observer = lv_subject_add_observer(view_model.dark_mode_subject(),
                                                         persist_dark_mode_observer,
                                                         &dark_mode_persistence);
 
-    bool running = true;
     auto* quit_observer = lv_subject_add_observer(view_model.quit_requested_subject(),
                                                   quit_requested_observer,
                                                   &running);

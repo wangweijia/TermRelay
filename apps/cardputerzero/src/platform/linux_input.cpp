@@ -41,6 +41,8 @@ constexpr uint32_t kLongPressMs = 700;
 #if !USE_DESKTOP
 struct EvdevKeypad {
     int fd{-1};
+    unsigned shift_mask{0};
+    std::array<uint32_t, KEY_MAX + 1> held_keys{};
     lv_indev_state_t state{LV_INDEV_STATE_RELEASED};
     uint32_t key{0};
     bool router_event_pending{false};
@@ -183,37 +185,6 @@ void key_event_cb(lv_event_t* event) {
 }
 
 #if !USE_DESKTOP
-uint32_t map_evdev_key(uint16_t code) {
-    switch (code) {
-        case KEY_ESC:
-            return LV_KEY_ESC;
-        case KEY_LEFT:
-            return LV_KEY_LEFT;
-        case KEY_RIGHT:
-            return LV_KEY_RIGHT;
-        case KEY_Z:
-            return 'z';
-        case KEY_C:
-            return 'c';
-        case KEY_4:
-            return '4';
-        case KEY_5:
-            return '5';
-        case KEY_6:
-            return '6';
-        case KEY_7:
-            return '7';
-        case KEY_8:
-            return '8';
-        case KEY_SYSRQ:
-            return kKeyPrintScreen;
-        case KEY_HELP:
-            return kKeyHelp;
-        default:
-            return 0;
-    }
-}
-
 bool has_nav_keys(int fd) {
     unsigned long key_bits[(KEY_MAX / (sizeof(unsigned long) * 8)) + 1] = {};
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)), key_bits) < 0) {
@@ -244,10 +215,16 @@ void evdev_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
             continue;
         }
 
-        const auto key = map_evdev_key(input.code);
-        if (!key || input.value == 2) {
+        if (input.code > KEY_MAX || input.value == 2) continue;
+        if (input.code == KEY_LEFTSHIFT || input.code == KEY_RIGHTSHIFT) {
+            const auto mask = input.code == KEY_LEFTSHIFT ? 1u : 2u;
+            if (input.value) keypad->shift_mask |= mask;
+            else keypad->shift_mask &= ~mask;
             continue;
         }
+        const auto key = input.value ? map_keyboard_key(input.code, keypad->shift_mask != 0) : keypad->held_keys[input.code];
+        keypad->held_keys[input.code] = input.value ? key : 0;
+        if (!key) continue;
 
         keypad->key = key;
         keypad->state = input.value ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
@@ -348,6 +325,43 @@ void discover_keypads(lv_display_t* display) {
 #endif
 
 } // namespace
+
+uint32_t map_keyboard_key(uint16_t code, bool shifted) {
+    if (code >= 2 && code <= 11) return static_cast<uint32_t>((shifted ? "!@#$%^&*()" : "1234567890")[code - 2]);
+    const char* letter = nullptr;
+    if (code >= 16 && code <= 25) letter = &"qwertyuiop"[code - 16];
+    if (code >= 30 && code <= 38) letter = &"asdfghjkl"[code - 30];
+    if (code >= 44 && code <= 50) letter = &"zxcvbnm"[code - 44];
+    if (letter) return static_cast<uint32_t>(shifted ? *letter - 'a' + 'A' : *letter);
+    switch (code) {
+        case 1: return LV_KEY_ESC;
+        case 12: return shifted ? '_' : '-';
+        case 13: return shifted ? '+' : '=';
+        case 14: return LV_KEY_BACKSPACE;
+        case 15: return shifted ? LV_KEY_PREV : LV_KEY_NEXT;
+        case 26: return shifted ? '{' : '[';
+        case 27: return shifted ? '}' : ']';
+        case 28: return LV_KEY_ENTER;
+        case 39: return shifted ? ':' : ';';
+        case 40: return shifted ? '"' : '\'';
+        case 41: return shifted ? '~' : '`';
+        case 43: return shifted ? '|' : '\\';
+        case 51: return shifted ? '<' : ',';
+        case 52: return shifted ? '>' : '.';
+        case 53: return shifted ? '?' : '/';
+        case 57: return ' ';
+        case 99: return kKeyPrintScreen;
+        case 102: return LV_KEY_HOME;
+        case 103: return LV_KEY_UP;
+        case 105: return LV_KEY_LEFT;
+        case 106: return LV_KEY_RIGHT;
+        case 107: return LV_KEY_END;
+        case 108: return LV_KEY_DOWN;
+        case 111: return LV_KEY_DEL;
+        case 138: return kKeyHelp;
+        default: return 0;
+    }
+}
 
 void init_key_input(lv_display_t* display) {
 #if !USE_DESKTOP

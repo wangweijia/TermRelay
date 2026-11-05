@@ -1820,6 +1820,84 @@ export interface FilePreviewResultPayload {
   content?: string;
 }
 
+export const controllerMeGetSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/controller-me-get.schema.json",
+  "title": "controller.me.get payload",
+  "type": "object",
+  "additionalProperties": false
+} as const;
+
+export const controllerConnectedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-connected.schema.json",
+  "title": "controller.connected payload",
+  "type": "object",
+  "required": [
+    "role",
+    "installationId",
+    "deviceIds",
+    "permissions",
+    "expiresAt"
+  ],
+  "properties": {
+    "role": {
+      "const": "controller"
+    },
+    "installationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "deviceIds": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "sessions.read",
+          "turns.write",
+          "approvals.resolve",
+          "user-input.resolve"
+        ]
+      }
+    },
+    "expiresAt": {
+      "type": "null"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const controllerAuthorizationRevokedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-authorization-revoked.schema.json",
+  "title": "controller.authorization-revoked payload",
+  "type": "object",
+  "required": [
+    "reason",
+    "revokedAt"
+  ],
+  "properties": {
+    "reason": {
+      "const": "revoked"
+    },
+    "revokedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+} as const;
+
 export const attachmentRequestSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termrelay.local/contracts/commands/attachment-request.schema.json",
