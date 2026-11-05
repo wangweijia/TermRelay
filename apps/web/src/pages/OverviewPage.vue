@@ -6,6 +6,7 @@ import ApprovalInbox from '../components/ApprovalInbox.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
 import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
 import SessionStartPanel from '../components/SessionStartPanel.vue';
+import FinishedSessionCleanup from '../components/FinishedSessionCleanup.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -108,6 +109,7 @@ onBeforeUnmount(() => {
         </div>
 
         <SessionSourceSwitch v-model="originFilter" :manual-count="relay.sessions.filter(s => s.origin !== 'external').length" :project-count="relay.sessions.filter(s => s.origin === 'external').length" />
+        <FinishedSessionCleanup :sessions="listedSessions" :scope="originFilter === 'external' ? '项目调用' : '手动会话'" />
         <div v-if="listedSessions.length" class="session-list">
           <div
             v-for="session in listedSessions"

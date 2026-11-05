@@ -283,7 +283,7 @@ export const useRelayStore = defineStore('relay', {
       }
     },
 
-    async deleteSession(sessionId: string, purge: boolean): Promise<boolean> {
+    async deleteSession(sessionId: string, purge: boolean, selectNext = true): Promise<boolean> {
       const session = this.sessions.find((item) => item.id === sessionId);
       if (!session || !['finished', 'failed'].includes(session.status)) {
         this.error = '只能删除已经结束的会话。';
@@ -309,13 +309,14 @@ export const useRelayStore = defineStore('relay', {
         delete this.eventsBySession[sessionId];
         delete this.hasOlderBySession[sessionId];
         delete this.lastSeqBySession[sessionId];
+        pendingRealtimeEvents.delete(sessionId);
         this.historyAccessOrder = this.historyAccessOrder.filter((id) => id !== sessionId);
         dirtyCacheSessions.delete(sessionId);
         void deleteSessionCache(sessionId).catch(() => undefined);
         this.commandStatus = undefined;
         this.error = undefined;
 
-        if (!this.selectedSessionId && this.sessions[0]) {
+        if (selectNext && !this.selectedSessionId && this.sessions[0]) {
           await this.selectSession(this.sessions[0].id);
         }
         return true;

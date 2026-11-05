@@ -6,6 +6,7 @@ import TerminalView from '../components/TerminalView.vue';
 import ShortcutPanel from '../components/ShortcutPanel.vue';
 import SessionSourceSwitch from '../components/SessionSourceSwitch.vue';
 import SessionStartPanel from '../components/SessionStartPanel.vue';
+import FinishedSessionCleanup from '../components/FinishedSessionCleanup.vue';
 import { useRelayStore } from '../stores/relay';
 import type { SessionRecord } from '../types';
 
@@ -71,6 +72,7 @@ async function removeSession(session: SessionRecord, purge: boolean): Promise<vo
     <section v-show="activeTab === 'sessions'" class="mobile-screen mobile-sessions">
       <div class="mobile-section-heading"><strong>{{ listedSessions.length }} 个会话</strong><button @click="sessionStartOpen = true">新建</button><button :disabled="relay.loadingSessions" @click="relay.refreshSessions">刷新</button></div>
       <SessionSourceSwitch v-model="originFilter" :manual-count="relay.sessions.filter(s => s.origin !== 'external').length" :project-count="relay.sessions.filter(s => s.origin === 'external').length" />
+      <FinishedSessionCleanup :sessions="listedSessions" :scope="originFilter === 'external' ? '项目调用' : '手动会话'" />
       <div class="mobile-session-list">
         <article v-for="session in listedSessions" :key="session.id" class="mobile-session-card" :class="{ selected: session.id === relay.selectedSessionId }">
           <button class="mobile-session-main" @click="openSession(session)">
