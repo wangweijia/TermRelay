@@ -191,6 +191,19 @@ export class ShortcutsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async receiveUpdate(deviceId: string, payload: ShortcutRunUpdatePayload): Promise<'accepted' | 'ignored_terminal' | 'rejected'> {
+    if (await this.update(deviceId, payload)) return 'accepted';
+    // A disconnect/startup failure or another update may have finalized the run
+    // while the Mac was still producing output. Keep that result immutable,
+    // without turning an expected late snapshot into an App-wide protocol error.
+    const id = payload.runId.toLowerCase();
+    const run = await this.store.findRun(id);
+    const pending = this.runningWrites.get(id);
+    if (run?.deviceId === deviceId && (!['queued', 'running'].includes(run.status)
+      || (pending?.deviceId === deviceId && pending.terminal))) return 'ignored_terminal';
+    return 'rejected';
+  }
+
   private scheduleRunningFlush(id: string, state: RunningWrites): void {
     if (state.timer || state.terminal) return;
     state.timer = setTimeout(() => {

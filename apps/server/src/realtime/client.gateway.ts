@@ -232,12 +232,12 @@ export class ClientGateway implements OnGatewayConnection, OnGatewayDisconnect {
       try {
         const accepted = result.message.type === 'shortcut.catalog'
           ? await this.shortcuts?.catalog(envelope.deviceId, result.message.envelope.payload)
-          : await this.shortcuts?.update(envelope.deviceId, result.message.envelope.payload);
-        if (!accepted) this.sendProtocolError(
+          : await this.shortcuts?.receiveUpdate(envelope.deviceId, result.message.envelope.payload);
+        if (!accepted || accepted === 'rejected') this.sendProtocolError(
           client, 'conflict',
           result.message.type === 'shortcut.catalog'
             ? 'Shortcut IDs must belong to this device.'
-            : 'Run is unknown, terminal, or belongs to another device.',
+            : 'Shortcut run was not found for this device. Refresh the run list and check the connected device.',
           envelope.messageId,
         );
       } catch (error) {
