@@ -1,0 +1,3 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/apps/cardputerzero/build/darwin-arm64/compile_commands.json"
+}

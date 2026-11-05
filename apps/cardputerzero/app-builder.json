@@ -1,0 +1,6 @@
+{
+  "app_name": "TermRelay",
+  "package_name": "termrelay-cardputerzero",
+  "version": "0.1.0",
+  "description": "TermRelay native remote controller for CardputerZero"
+}
