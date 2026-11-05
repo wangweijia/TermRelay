@@ -5,6 +5,8 @@
   "type": "object",
   "required": ["role", "installationId", "deviceIds", "permissions", "expiresAt"],
   "properties": {
+    "relatedMessageId": { "type": "string", "format": "uuid" },
+    "capabilities": { "type": "array", "maxItems": 2, "uniqueItems": true, "items": { "enum": ["devices.list", "sessions.list"] } },
     "role": { "const": "controller" },
     "installationId": { "type": "string", "minLength": 1, "maxLength": 128 },
     "deviceIds": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },

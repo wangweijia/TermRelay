@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-sessions-listed.schema.json",
+  "title": "controller-sessions-listed.schema payload",
+  "type": "object",
+  "required": [
+    "relatedMessageId",
+    "items",
+    "nextCursor",
+    "deviceId"
+  ],
+  "properties": {
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "deviceId",
+          "workspaceId",
+          "toolKey",
+          "displayName",
+          "runtimeMode",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "deviceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "toolKey": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "runtimeMode": {
+            "enum": [
+              "acp",
+              "pty"
+            ]
+          },
+          "status": {
+            "enum": [
+              "starting",
+              "running",
+              "stopping",
+              "finished",
+              "failed"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
+}

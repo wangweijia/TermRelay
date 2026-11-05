@@ -410,11 +410,14 @@ PTY resize 会影响同一个远端 PTY 的其他观察端。第一版 PTY 默�
 - 共用入口：三个原有公网路径均复用；token 兑换从持久化配对记录确定角色；未知角色和跨角色消息拒绝。控制端独立连接表，不进入 DeviceConnectionRegistry；撤销后关闭窗口的迟到消息也不能注册成执行设备。
 - 永久凭据：`tr_controller_...`，256 bit secret，数据库只存 SHA-256，`expires_at = NULL`，不使用 Mac 的可配置到期策略。测试时钟推进 400 天仍可验证；仅 Web 删除授权会撤销服务端记录，本机清除只是删除副本。
 - 存储与迁移：新增显式迁移 `1793836800000-controller-auth`，尚未应用到任何真实数据库。授权阶段先使用 `controller_pairings` 和 `controller_credentials` 两表，设备范围以 JSON 数组在事务内复制，权限固定为第 5.1 节四项；第 5.2 节独立 grant 表、授权版本和权限缩减仍是后续方案。批准、取消和一次性兑换使用行锁事务。
-- 最小协议：新增 Schema 并由脚本生成 `controller.me.get`、`controller.connected` 和 `controller.authorization-revoked`。连接级信封 `deviceId` 仅表示已鉴权 installation ID，不是执行设备 ID；当前只接受身份查询，其他业务消息一律拒绝，声明的权限不代表业务命令已开放。
+- 最小协议：新增 Schema 并由脚本生成 `controller.me.get`、`controller.connected` 和 `controller.authorization-revoked`。连接级信封 `deviceId` 仅表示已鉴权 installation ID，不是执行设备 ID；现已增加下述两个只读列表查询，其他业务消息仍拒绝，声明的权限不代表写命令已开放。
 - 原生实现边界：libcurl + nlohmann/json，工作线程不调用 LVGL；主线程读取有界状态快照。私有目录 0700、凭据文件 0600、原子替换与符号链接拒绝；已有凭据时禁止向新域名发送。新增标准 US evdev 输入与 Tab 导航映射，实机 Fn 和布局未确认。英文授权页已编译，中文与视觉验收未完成。
 - 验证记录（2026-11-05）：Server 全套 184 项，182 通过、2 跳过；显式启用 C++ 探针的授权测试 4/4 通过；原生 arm64 Debug 构建与 1 个 CTest 通过；Web production build、`pnpm check` 通过（Mac 150 项含 6 跳过）。探针连接临时 Nest HTTP/WSS 服务，验证首次授权、凭据重启恢复、角色隔离、同源拒绝、在线撤销及本机清理，使用内存仓库而非 MySQL。
 - 本机依赖：按用户要求通过 `127.0.0.1:7890` 代理安装实际使用的 curl 8.23.0（含 ws/wss）和 nlohmann-json 3.12.0；Homebrew 的 curl 为 keg-only，构建传入 `CURL_ROOT`，步骤见项目 README。未修改 shell 全局代理或 Cloudflare 配置。
-- 未完成：会话/聊天/审批/问答/PTY 业务、游标分页、权限缩减、多实例撤销、真实 MySQL 迁移与并发验收、公网 TLS / Access 部署验证、Linux curl 依赖及 `.deb` 打包。当前待授权列表最多 100 条、凭据列表最多 500 条，控制端公网 Upgrade 仍使用现有按 IP 限流，进一步配额隔离待补充。模板服务仍默认关闭，未发布或启动 GUI。
+- 阶段 2 列表部分（2026-11-05）：新增 `controller.devices.list` / `controller.sessions.list` 及关联请求的 `.listed` 响应，连接身份以 `capabilities` 声明支持。每页最多 20 条、按不可变 ID 稳定游标分页，查询会话时在数据库按授权设备过滤并排除软删除记录；名称与状态更新不改变分页顺序，新插入且 ID 早于当前游标的会话需刷新首页。信封中的 installation ID 不代替 payload 中的执行设备 ID。请求前及发送前检查撤销，缺少读取权限、越权设备、伪造信封、跨角色消息均拒绝。
+- 原生列表部分：320×170 设备 → 会话 → 元数据导航，Tab / Shift+Tab / Enter 与 Esc 返回；支持刷新首页、下一页及离线读取进程内最后一页。最多各缓存一页设备和会话、一个在途查询和一个合并待发请求，10 秒查询超时，响应上限 128 KiB，迟到旧响应不覆盖当前请求，撤销或本机清除凭据会清空摘要缓存。Server 每连接每 10 秒最多 30 条消息、最多两个并发查询及 256 KiB 发送缓冲；尚未接入持久化缓存、历史或实时订阅，不宣称阶段 2 整体完成。
+- 本轮验证：原生 arm64 Debug 构建、2/2 CTest、Web build、新增服务端授权/分页/撤销竞态/资源预算测试通过；原生探针读取两页共 25 个会话并验证撤销清除缓存，心跳健康空闲和超时场景通过。完整 `pnpm check` 的 Contracts / TypeScript / Linux 通过；Mac 150 项中 6 跳过，聊天滚动 `testLazyTranscriptKeepsVisibleTextAfterLargeAnswerShrinksWhileReading` 空视口断言失败，单独重跑复现。修改前检查日志也有同一失败，本轮未修改 Mac，不将仓库 gate 标为通过。当前机器的临时构建依赖与此前机器不同，详见应用 README；未启动 GUI。
+- 未完成：聊天历史/实时订阅/对话/审批/问答/PTY 业务、授权管理列表游标分页、权限缩减、多实例撤销、真实 MySQL 迁移与并发验收、公网 TLS / Access 部署验证、Linux curl 依赖及 `.deb` 打包。当前待授权列表最多 100 条、凭据列表最多 500 条，控制端公网 Upgrade 仍使用现有按 IP 限流，进一步配额隔离待补充。模板服务仍默认关闭，未发布或启动 GUI。
 - 未验证：CardputerZero 实机、系统 ABI、上游 commit、中文输入、GUI 交互、启动器生命周期、设备交叉编译、`.deb`、性能和续航；模板字体许可清单及 Debian Maintainer 占位值仍需在正式发布前核实。
 - 首版默认：公网必需、专用控制端身份、显式执行设备授权、永久凭据且仅由 Web 主动删除授权、结构化交互优先、暂不包含 PTY 和远程创建。
 - 实施前需要确认：实机与镜像信息、首版范围是否接受、中文输入是否必须首版交付；这些不影响本方案采用独立控制端授权的结论。

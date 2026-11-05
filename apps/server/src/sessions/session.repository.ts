@@ -277,6 +277,16 @@ export class SessionRepository {
     return sessions.map(toSessionRecord);
   }
 
+  async listControllerSessions(deviceId: string, cursor: string | undefined, limit: number): Promise<SessionRecord[]> {
+    if (!this.dataSource) return [];
+    const query = this.repository.createQueryBuilder('session')
+      .where('session.deviceId = :deviceId', { deviceId })
+      .andWhere('session.deletedAt IS NULL');
+    if (cursor) query.andWhere('session.id > :cursor', { cursor });
+    // IDs are immutable; status/name updates cannot move a row across pages.
+    return (await query.orderBy('session.id', 'ASC').limit(limit).getMany()).map(toSessionRecord);
+  }
+
   async findById(id: string): Promise<SessionRecord | undefined> {
     if (!this.dataSource) return undefined;
     const session = await this.repository.findOneBy({ id, deletedAt: IsNull() });

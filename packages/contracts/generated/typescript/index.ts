@@ -1796,6 +1796,17 @@ export const shortcutRunInputAckSchema = {
   "additionalProperties": false
 } as const;
 
+export interface ControllerDeviceSummary {
+  id: string; name: string; status: "connected" | "connecting" | "offline" | "degraded"; platform: "macOS" | "linux";
+}
+export interface ControllerSessionSummary {
+  id: string; deviceId: string; workspaceId: string; toolKey: string; displayName: string | null;
+  runtimeMode: "acp" | "pty"; status: "starting" | "running" | "stopping" | "finished" | "failed";
+}
+export interface ControllerDevicesListPayload { cursor?: string; limit?: number; }
+export interface ControllerSessionsListPayload extends ControllerDevicesListPayload { deviceId: string; }
+export interface ControllerDevicesListedPayload { relatedMessageId: string; items: ControllerDeviceSummary[]; nextCursor: string | null; }
+export interface ControllerSessionsListedPayload { relatedMessageId: string; deviceId: string; items: ControllerSessionSummary[]; nextCursor: string | null; }
 export interface AttachmentMetadata {
   id: string; name: string; mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown"; size: number;
 }
@@ -1820,6 +1831,214 @@ export interface FilePreviewResultPayload {
   content?: string;
 }
 
+export const controllerDevicesListSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/controller-devices-list.schema.json",
+  "title": "controller-devices-list.schema payload",
+  "type": "object",
+  "required": [],
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const controllerSessionsListSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/controller-sessions-list.schema.json",
+  "title": "controller-sessions-list.schema payload",
+  "type": "object",
+  "required": [
+    "deviceId"
+  ],
+  "properties": {
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const controllerDevicesListedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-devices-listed.schema.json",
+  "title": "controller-devices-listed.schema payload",
+  "type": "object",
+  "required": [
+    "relatedMessageId",
+    "items",
+    "nextCursor"
+  ],
+  "properties": {
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "platform"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "status": {
+            "enum": [
+              "connected",
+              "connecting",
+              "offline",
+              "degraded"
+            ]
+          },
+          "platform": {
+            "enum": [
+              "macOS",
+              "linux"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
+} as const;
+
+export const controllerSessionsListedSchema = {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-sessions-listed.schema.json",
+  "title": "controller-sessions-listed.schema payload",
+  "type": "object",
+  "required": [
+    "relatedMessageId",
+    "items",
+    "nextCursor",
+    "deviceId"
+  ],
+  "properties": {
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "deviceId",
+          "workspaceId",
+          "toolKey",
+          "displayName",
+          "runtimeMode",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "deviceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "toolKey": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "runtimeMode": {
+            "enum": [
+              "acp",
+              "pty"
+            ]
+          },
+          "status": {
+            "enum": [
+              "starting",
+              "running",
+              "stopping",
+              "finished",
+              "failed"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "deviceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
+} as const;
+
 export const controllerMeGetSchema = {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://termrelay.local/contracts/commands/controller-me-get.schema.json",
@@ -1841,6 +2060,21 @@ export const controllerConnectedSchema = {
     "expiresAt"
   ],
   "properties": {
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "devices.list",
+          "sessions.list"
+        ]
+      }
+    },
     "role": {
       "const": "controller"
     },

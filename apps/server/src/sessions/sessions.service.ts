@@ -177,6 +177,11 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return this.sessions.list();
   }
 
+  async listControllerSessions(deviceId: string, cursor: string | undefined, limit: number): Promise<SessionRecord[]> {
+    await this.waitForWrites();
+    return this.sessions.listControllerSessions(deviceId, cursor, limit);
+  }
+
   async listCopilotHistoryForDevice(
     deviceId: string,
     cursor: { updatedAt: Date; id: string } | undefined,

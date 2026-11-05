@@ -349,3 +349,23 @@ class MemoryQuery {
       .slice(0, this.limitValue);
   }
 }
+
+test('controller session pages constrain the device and exclude hidden rows before applying stable ID cursor and limit', async () => {
+  const clauses: { sql: string; params?: unknown }[] = [];
+  const query = {
+    where(sql: string, params?: unknown) { clauses.push({ sql, params }); return this; },
+    andWhere(sql: string, params?: unknown) { clauses.push({ sql, params }); return this; },
+    orderBy(sql: string, direction: string) { clauses.push({ sql, params: direction }); return this; },
+    limit(count: number) { clauses.push({ sql: 'limit', params: count }); return this; },
+    async getMany() { return []; },
+  };
+  const repository = new SessionRepository({ getRepository: () => ({ createQueryBuilder: () => query }) } as unknown as DataSource);
+  assert.deepEqual(await repository.listControllerSessions('allowed-device', 'last-id', 21), []);
+  assert.deepEqual(clauses, [
+    { sql: 'session.deviceId = :deviceId', params: { deviceId: 'allowed-device' } },
+    { sql: 'session.deletedAt IS NULL', params: undefined },
+    { sql: 'session.id > :cursor', params: { cursor: 'last-id' } },
+    { sql: 'session.id', params: 'ASC' },
+    { sql: 'limit', params: 21 },
+  ]);
+});

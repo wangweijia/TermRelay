@@ -52,6 +52,10 @@ const shortcutSchemas = [
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
 const filePreviewSchemas = [
+  ['controllerDevicesListSchema', 'commands/controller-devices-list'],
+  ['controllerSessionsListSchema', 'commands/controller-sessions-list'],
+  ['controllerDevicesListedSchema', 'events/controller-devices-listed'],
+  ['controllerSessionsListedSchema', 'events/controller-sessions-listed'],
   ['controllerMeGetSchema', 'commands/controller-me-get'],
   ['controllerConnectedSchema', 'events/controller-connected'],
   ['controllerAuthorizationRevokedSchema', 'events/controller-authorization-revoked'],
@@ -60,7 +64,18 @@ const filePreviewSchemas = [
   ['filePreviewRequestSchema', 'commands/file-preview-request'],
   ['filePreviewResultSchema', 'events/file-preview-result'],
 ];
-const filePreviewTypes = `export interface AttachmentMetadata {
+const filePreviewTypes = `export interface ControllerDeviceSummary {
+  id: string; name: string; status: "connected" | "connecting" | "offline" | "degraded"; platform: "macOS" | "linux";
+}
+export interface ControllerSessionSummary {
+  id: string; deviceId: string; workspaceId: string; toolKey: string; displayName: string | null;
+  runtimeMode: "acp" | "pty"; status: "starting" | "running" | "stopping" | "finished" | "failed";
+}
+export interface ControllerDevicesListPayload { cursor?: string; limit?: number; }
+export interface ControllerSessionsListPayload extends ControllerDevicesListPayload { deviceId: string; }
+export interface ControllerDevicesListedPayload { relatedMessageId: string; items: ControllerDeviceSummary[]; nextCursor: string | null; }
+export interface ControllerSessionsListedPayload { relatedMessageId: string; deviceId: string; items: ControllerSessionSummary[]; nextCursor: string | null; }
+export interface AttachmentMetadata {
   id: string; name: string; mimeType: "image/png" | "image/jpeg" | "image/webp" | "application/pdf" | "text/plain" | "text/markdown"; size: number;
 }
 export interface AttachmentRequestPayload {

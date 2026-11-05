@@ -118,8 +118,12 @@ async function serverFixture() {
         validateCredential: async () => ({ ok: false, reason: 'invalid' }),
       } },
       ClientAuthRateLimiter, ClientConnectionAuthorizations, DeviceConnectionRegistry, ProtocolValidator,
-      { provide: SessionsService, useValue: {} },
-      { provide: DevicesService, useValue: { list: async () => [{ id: 'mac-a', name: 'Development Mac', status: 'online' }] } },
+      { provide: SessionsService, useValue: { listControllerSessions: async (deviceId: string, cursor: string | undefined, limit: number) =>
+        Array.from({ length: 25 }, (_, index) => ({ id: `session-${String(index).padStart(2, '0')}`, deviceId,
+          workspaceId: 'workspace', toolKey: 'codex', displayName: '原生分页测试', runtimeMode: 'acp', status: 'running' }))
+          .filter(session => !cursor || session.id > cursor).slice(0, limit),
+      } },
+      { provide: DevicesService, useValue: { list: async () => [{ id: 'mac-a', name: 'Development Mac', status: 'connected', platform: 'macOS' }] } },
       PublicClientGateway,
     ],
   })
@@ -226,8 +230,12 @@ test('native probe pairs, restores a permanent credential and observes live revo
     assert.equal((await initial.completion)[0], 0, initial.stderr());
     const saved = JSON.parse(await readFile(join(directory, 'authorization.json'), 'utf8'));
     assert.match(saved.credential, /^tr_controller_/);
-    const restored = start('revoke');
+    const browsing = start('browse');
+    await browsing.line('LISTED 25');
+    assert.equal((await browsing.completion)[0], 0, browsing.stderr());
+    const restored = start('browse-revoke');
     await restored.line('CONNECTED 1');
+    await restored.line('LISTED 25');
     assert.equal((await harness.request('/api/controller-approvals')).body.length, 0);
     const credential = (await harness.request('/api/controller-credentials')).body[0];
     await harness.request(`/api/controller-credentials/${credential.id}/revoke`, {});

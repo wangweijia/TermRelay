@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
 
 namespace connection {
 enum class State { Idle, Starting, Waiting, Connecting, Connected, Retrying, Denied, Expired, Revoked, Error };
@@ -10,6 +12,16 @@ struct Snapshot {
     std::string message;
     unsigned device_count = 0;
     bool has_credential = false;
+};
+struct DeviceSummary { std::string id, name, status, platform; };
+struct SessionSummary { std::string id, device_id, workspace_id, tool_key, name, runtime_mode, status; };
+struct ListingSnapshot {
+    std::vector<DeviceSummary> devices;
+    std::vector<SessionSummary> sessions;
+    std::string device_id, next_devices, next_sessions, error;
+    bool loading = false;
+    bool supported = false;
+    std::uint64_t revision = 0;
 };
 std::string normalize_origin(const std::string& input, bool allow_test_loopback = false);
 std::string default_state_directory();
@@ -23,6 +35,9 @@ public:
     void cancel();
     void forget();
     Snapshot snapshot() const;
+    ListingSnapshot listing() const;
+    void list_devices(const std::string& cursor = "");
+    void list_sessions(const std::string& device_id, const std::string& cursor = "");
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

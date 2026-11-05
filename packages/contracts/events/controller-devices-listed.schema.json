@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/events/controller-devices-listed.schema.json",
+  "title": "controller-devices-listed.schema payload",
+  "type": "object",
+  "required": [
+    "relatedMessageId",
+    "items",
+    "nextCursor"
+  ],
+  "properties": {
+    "relatedMessageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "platform"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "status": {
+            "enum": [
+              "connected",
+              "connecting",
+              "offline",
+              "degraded"
+            ]
+          },
+          "platform": {
+            "enum": [
+              "macOS",
+              "linux"
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "nextCursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "additionalProperties": false
+}

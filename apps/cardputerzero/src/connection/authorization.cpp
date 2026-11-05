@@ -1,4 +1,5 @@
 #include "authorization.h"
+#include "listing_protocol.h"
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -26,6 +27,7 @@ using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
 using Curl = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 constexpr std::size_t max_document = 16384;
+constexpr std::size_t max_socket_document = 128 * 1024;
 constexpr auto heartbeat_interval = 25s;
 constexpr auto heartbeat_timeout = 75s;
 std::string utc_timestamp() {
@@ -162,6 +164,14 @@ public:
     }
     ~Impl() { stopped_ = true; cancelled_ = true; condition_.notify_all(); if (worker_.joinable()) worker_.join(); }
     Snapshot snapshot() const { std::lock_guard lock(mutex_); return snapshot_; }
+    ListingSnapshot listing() const { std::lock_guard lock(mutex_); return listing_; }
+    void list(const std::string& device_id, const std::string& cursor) {
+        std::lock_guard lock(mutex_);
+        if (snapshot_.state != State::Connected || !listing_.supported || device_id.size() > 512 || cursor.size() > 512) return;
+        last_query_ = {device_id, cursor, ++query_version_};
+        queued_query_ = last_query_;
+        listing_.loading = true; listing_.error.clear();
+    }
     void connect(const std::string& origin) {
         std::lock_guard lock(mutex_);
         if (active_ || command_) return;
@@ -171,8 +181,19 @@ public:
     void forget() { std::lock_guard lock(mutex_); forget_ = true; cancelled_ = true; condition_.notify_all(); }
 
 private:
+    struct Query { std::string device_id, cursor; std::uint64_t version = 0; };
+    void clear_listing() {
+        std::lock_guard lock(mutex_);
+        listing_ = {}; last_query_ = {}; queued_query_.reset(); ++query_version_;
+    }
+    void query_error(const Query& query, const std::string& message) {
+        std::lock_guard lock(mutex_);
+        if (query.version != query_version_) return;
+        listing_.loading = false; listing_.error = message; listing_.revision++;
+    }
     void publish(State state, std::string message = "", unsigned devices = 0) {
         std::lock_guard lock(mutex_);
+        if (state != State::Connected) listing_.loading = false;
         snapshot_ = { state, stored_.origin, std::move(message), devices, !stored_.credential.empty() };
     }
     bool wait(std::chrono::milliseconds delay) {
@@ -252,6 +273,7 @@ private:
     }
     void revoked() {
         stored_.credential.clear(); store_.save(stored_);
+        clear_listing();
         publish(State::Revoked, "Authorization removed in Web");
     }
     void socket_loop() {
@@ -279,9 +301,19 @@ private:
                 std::string frame;
                 std::string outgoing;
                 std::size_t outgoing_offset = 0;
+                bool outgoing_heartbeat = false;
+                std::optional<Query> pending_query;
+                std::string pending_id;
+                auto query_deadline = Clock::now();
+                bool listing_supported = false;
+                std::vector<std::string> authorized_devices;
                 while (!stopped_ && !cancelled_) {
                     const auto now = Clock::now();
                     if ((!confirmed && now >= handshake_deadline) || (confirmed && now - last_confirmed >= heartbeat_timeout)) break;
+                    if (pending_query && now >= query_deadline) {
+                        query_error(*pending_query, "List request timed out; refresh to retry");
+                        pending_query.reset(); pending_id.clear();
+                    }
                     if (confirmed && outgoing.empty() && now >= next_heartbeat) {
                         outgoing = Json{{"event", "message"}, {"data", {
                             {"type", "controller.me.get"}, {"protocolVersion", "2"},
@@ -289,6 +321,26 @@ private:
                             {"sentAt", utc_timestamp()}, {"payload", Json::object()},
                         }}}.dump();
                         outgoing_offset = 0;
+                        outgoing_heartbeat = true;
+                    }
+                    if (confirmed && listing_supported && outgoing.empty() && !pending_query) {
+                        {
+                            std::lock_guard lock(mutex_);
+                            if (queued_query_) { pending_query = *queued_query_; queued_query_.reset(); }
+                        }
+                        if (pending_query) {
+                            pending_id = random_id();
+                            Json payload{{"limit", 20}};
+                            if (!pending_query->device_id.empty()) payload["deviceId"] = pending_query->device_id;
+                            if (!pending_query->cursor.empty()) payload["cursor"] = pending_query->cursor;
+                            outgoing = Json{{"event", "message"}, {"data", {
+                                {"type", pending_query->device_id.empty() ? "controller.devices.list" : "controller.sessions.list"},
+                                {"protocolVersion", "2"}, {"messageId", pending_id}, {"deviceId", stored_.installation_id},
+                                {"sentAt", utc_timestamp()}, {"payload", payload},
+                            }}}.dump();
+                            outgoing_offset = 0; query_deadline = now + 10s;
+                            outgoing_heartbeat = false;
+                        }
                     }
                     if (!outgoing.empty()) {
                         std::size_t sent = 0;
@@ -298,7 +350,7 @@ private:
                         if (result == CURLE_OK) outgoing_offset += sent;
                         if (outgoing_offset == outgoing.size()) {
                             outgoing.clear();
-                            next_heartbeat = Clock::now() + heartbeat_interval;
+                            if (outgoing_heartbeat) next_heartbeat = Clock::now() + heartbeat_interval;
                         }
                     }
                     std::array<char, 4096> buffer{};
@@ -315,7 +367,7 @@ private:
                     }
                     if (metadata->flags & (CURLWS_PING | CURLWS_PONG)) continue;
                     if (!(metadata->flags & (CURLWS_TEXT | CURLWS_CONT))) throw std::runtime_error("Invalid controller frame");
-                    if (frame.size() + count > max_document) throw std::runtime_error("Controller frame too large");
+                    if (frame.size() + count > max_socket_document) throw std::runtime_error("Controller frame too large");
                     frame.append(buffer.data(), count);
                     if (metadata->bytesleft || (metadata->flags & CURLWS_CONT)) continue;
                     const auto message = Json::parse(frame, nullptr, false); frame.clear();
@@ -325,22 +377,62 @@ private:
                     if (type == "controller.connected") {
                         const auto& payload = message.at("payload");
                         if (payload.at("role") != "controller" || payload.at("installationId") != stored_.installation_id || !payload.at("expiresAt").is_null() || !payload.at("deviceIds").is_array() || payload.at("deviceIds").size() > 100) throw std::runtime_error("Invalid controller handshake");
+                        authorized_devices.clear();
+                        for (const auto& id : payload.at("deviceIds")) {
+                            if (!id.is_string() || id.get_ref<const std::string&>().empty() || id.get_ref<const std::string&>().size() > 512)
+                                throw std::runtime_error("Invalid authorized device");
+                            authorized_devices.push_back(id.get<std::string>());
+                        }
+                        const auto capabilities = payload.value("capabilities", Json::array());
+                        listing_supported = capabilities.is_array()
+                            && std::find(capabilities.begin(), capabilities.end(), "devices.list") != capabilities.end()
+                            && std::find(capabilities.begin(), capabilities.end(), "sessions.list") != capabilities.end();
+                        if (!confirmed) {
+                            std::lock_guard lock(mutex_);
+                            listing_.supported = listing_supported;
+                            if (listing_supported) {
+                                last_query_.version = ++query_version_;
+                                queued_query_ = last_query_; listing_.loading = true; listing_.error.clear();
+                            } else { listing_.loading = false; listing_.error = "Upgrade Server to browse sessions"; listing_.revision++; }
+                        }
                         // libcurl consumes server PINGs automatically. Only a validated
                         // application response proves that the controller is still usable.
                         last_confirmed = Clock::now();
                         if (!confirmed) next_heartbeat = last_confirmed + heartbeat_interval;
                         confirmed = true; attempt = 0;
                         publish(State::Connected, "Authorized", static_cast<unsigned>(payload.at("deviceIds").size()));
+                    } else if (confirmed && pending_query && message.at("payload").value("relatedMessageId", "") == pending_id) {
+                        const auto query = *pending_query;
+                        if (type == "protocol.error") {
+                            query_error(query, "List unavailable; refresh or check Web authorization");
+                        } else if (type == (query.device_id.empty() ? "controller.devices.listed" : "controller.sessions.listed")) {
+                            std::lock_guard lock(mutex_);
+                            if (query.version == query_version_) {
+                                auto next = listing_;
+                                apply_listing_page(next, message.at("payload"), query.device_id, query.cursor);
+                                if (query.device_id.empty()) {
+                                    for (const auto& device : next.devices)
+                                        if (std::find(authorized_devices.begin(), authorized_devices.end(), device.id) == authorized_devices.end())
+                                            throw std::runtime_error("Unexpected list device");
+                                } else if (std::find(authorized_devices.begin(), authorized_devices.end(), query.device_id) == authorized_devices.end()) {
+                                    throw std::runtime_error("Unexpected session device");
+                                }
+                                listing_ = std::move(next);
+                            }
+                        } else { throw std::runtime_error("Invalid list response type"); }
+                        pending_query.reset(); pending_id.clear();
                     }
                 }
             }
             if (stopped_ || cancelled_) break;
+            { std::lock_guard lock(mutex_); listing_.loading = false; }
             ++attempt;
             publish(State::Retrying, "Connection lost; retrying");
             const auto jitter = static_cast<unsigned char>(random_id().back()) % 500;
             wait(std::chrono::milliseconds(std::min(30000u, 1000u << std::min(attempt - 1, 5u)) + jitter));
         }
         if (!stopped_) publish(State::Idle);
+        { std::lock_guard lock(mutex_); listing_.loading = false; }
     }
     void run() {
         while (!stopped_) {
@@ -356,12 +448,14 @@ private:
             }
             try {
                 if (forgetting) {
+                    clear_listing();
                     stored_.credential.clear(); store_.save(stored_); publish(State::Idle, "Local key cleared; Web grant unchanged");
                 } else if (cancelled_) {
                     publish(State::Idle);
                 } else {
                     const auto origin = normalize_origin(requested, allow_loopback_);
                     if (!stored_.credential.empty() && origin != stored_.origin) throw std::runtime_error("Clear local key before changing server");
+                    if (stored_.origin != origin) clear_listing();
                     stored_.origin = origin; store_.save(stored_);
                     if (stored_.credential.empty()) pairing();
                     if (!stored_.credential.empty() && !cancelled_) socket_loop();
@@ -377,6 +471,10 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     Snapshot snapshot_;
+    ListingSnapshot listing_;
+    Query last_query_;
+    std::optional<Query> queued_query_;
+    std::uint64_t query_version_ = 0;
     std::optional<std::string> command_;
     bool active_ = false;
     bool forget_ = false;
@@ -391,4 +489,7 @@ void Authorization::connect(const std::string& origin) { impl_->connect(origin);
 void Authorization::cancel() { impl_->cancel(); }
 void Authorization::forget() { impl_->forget(); }
 Snapshot Authorization::snapshot() const { return impl_->snapshot(); }
+ListingSnapshot Authorization::listing() const { return impl_->listing(); }
+void Authorization::list_devices(const std::string& cursor) { impl_->list("", cursor); }
+void Authorization::list_sessions(const std::string& device_id, const std::string& cursor) { impl_->list(device_id, cursor); }
 }

@@ -17,9 +17,10 @@ import { ControllerAuthRepository } from './controller-auth.repository';
 import { ControllerConnections } from './controller-connections';
 import { ControllerManagementController } from './controller-management.controller';
 import { DevicesModule } from '../devices/devices.module';
+import { SessionsModule } from '../sessions/sessions.module';
 
 @Module({
-  imports: [DevicesModule],
+  imports: [DevicesModule, SessionsModule],
   controllers: [
     ClientPairingsController,
     ClientApprovalsController,
