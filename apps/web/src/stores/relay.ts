@@ -506,7 +506,7 @@ export const useRelayStore = defineStore('relay', {
               if (result.commandId === record.commandId && result.ack) {
                 applyTurnAck(record, result.deviceId, result.sessionId, result.ack);
                 if (record.state === 'confirmed' && record.sessionId === this.selectedSessionId) {
-                  this.commandStatus = '消息已交给设备处理';
+                  this.commandStatus = undefined;
                   this.error = undefined;
                 }
               }
@@ -589,7 +589,7 @@ export const useRelayStore = defineStore('relay', {
           const turn = applyTurnProtocolError(Object.values(this.turnReceipts), payload);
           this.persistTurnReceipts();
           this.error = payload.message ?? '实时订阅被 Server 拒绝。';
-          this.commandStatus = turn ? (turn.state === 'not_sent' ? '消息未发送' : turn.state === 'confirmed' ? '消息已交给设备处理' : '发送结果待核实') : '命令执行失败';
+          this.commandStatus = turn ? (turn.state === 'not_sent' ? '消息未发送' : turn.state === 'confirmed' ? undefined : '发送结果待核实') : '命令执行失败';
           return;
         }
         if (envelope.type === 'command.ack') {
@@ -604,9 +604,9 @@ export const useRelayStore = defineStore('relay', {
           if (turn) {
             applyTurnAck(turn, envelope.deviceId, envelope.sessionId, payload);
             this.persistTurnReceipts();
-            // A waiting/unknown receipt has its own scoped status in the composer.
+            // Keep successful submission receipts internal; only unresolved outcomes need feedback.
             if (envelope.deviceId === turn.deviceId && envelope.sessionId === turn.sessionId) {
-              this.commandStatus = turn.state === 'confirmed' ? '消息已交给设备处理' : turn.state === 'not_sent' ? '消息未发送' : '正在核实消息发送结果';
+              this.commandStatus = turn.state === 'confirmed' ? undefined : turn.state === 'not_sent' ? '消息未发送' : '正在核实消息发送结果';
               if (turn.state === 'confirmed' || payload.errorCode === 'ack_timeout') this.error = undefined;
             }
           }

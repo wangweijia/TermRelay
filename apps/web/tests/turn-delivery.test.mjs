@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { webcrypto } from 'node:crypto';
 import { createServer } from 'vite';
+import { renderToString } from 'vue/server-renderer';
 import { createPinia, setActivePinia } from 'pinia';
 import { createRenderer, h, nextTick, reactive, ssrContextKey } from 'vue';
 
@@ -61,6 +62,7 @@ test('store registers before sending and resolves a lost ACK through a status qu
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ commandId: record.commandId, deviceId: 'mac', sessionId: 'session', ack: { commandId: record.commandId, status: 'completed' } }) });
   await relay.reconcileTurnCommands(true);
   assert.equal(record.state, 'confirmed');
+  assert.equal(relay.commandStatus, undefined);
   assert.equal(sent.length, 1);
   assert.doesNotMatch(storage.get('termrelay.turnReceipts.v1'), /hello|attachment/);
 });
@@ -124,4 +126,32 @@ test('composer preserves a revised draft and newly added attachments when confir
     assert.equal(state.prompt, 'new draft');
     assert.deepEqual(state.draftAttachments.map(item => item.metadata.id), ['old-file', 'new-file']);
   } finally { app.unmount(); }
+});
+
+
+test('confirmed history never renders status lines, and multiple unknown receipts share one recovery button', async () => {
+  const base = { messageId: 'message', deviceId: 'mac', sessionId: 'session', createdAt: 1_000 };
+  const confirmed = [1, 2, 3].map(id => ({ ...base, commandId: `confirmed-${id}`, state: 'confirmed' }));
+  const render = turnReceipts => renderToString(h(component, {
+    sessionId: 'session', events: [], interactive: true, turnReceipts, sendTurn: () => undefined,
+  }));
+  const successHTML = await render(confirmed);
+  assert.doesNotMatch(successHTML, /已交给设备处理|核实发送结果|aria-live="polite"/);
+  const unknown = [1, 2, 3].map(id => ({ ...base, commandId: `unknown-${id}`, state: 'unknown' }));
+  const unknownHTML = await render([...confirmed, ...unknown]);
+  assert.doesNotMatch(unknownHTML, /已交给设备处理|aria-live="polite"/);
+  assert.equal(unknownHTML.match(/核实发送结果/g)?.length, 1);
+});
+
+test('duplicate completed ACKs keep successful confirmations out of the global status', () => {
+  const { relay } = store();
+  const first = relay.startToolTurn('first');
+  acknowledge(relay, first, 'completed');
+  assert.equal(relay.commandStatus, undefined);
+  const second = relay.startToolTurn('second');
+  acknowledge(relay, second, 'completed');
+  acknowledge(relay, first, 'completed');
+  assert.equal(relay.commandStatus, undefined);
+  assert.equal(first.state, 'confirmed');
+  assert.equal(second.state, 'confirmed');
 });

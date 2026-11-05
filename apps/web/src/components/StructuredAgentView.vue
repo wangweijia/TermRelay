@@ -84,10 +84,7 @@ watch(() => props.turnReceipts.map(item => `${item.commandId}:${item.state}`).jo
   draftAttachments.value = [];
   attachmentError.value = '';
 });
-function receiptLabel(record: TurnReceipt): string {
-  return ({ waiting: '正在等待设备确认…', unknown: '发送结果待核实，草稿已保留；请先核实，避免重复执行。',
-    confirmed: '已交给设备处理', not_sent: '消息未发送，草稿已保留。' })[record.state];
-}
+const hasUnconfirmedTurn = computed(() => props.turnReceipts.some(item => item.sessionId === props.sessionId && item.state === 'unknown'));
 const fileInput = ref<HTMLInputElement>();
 const uploadController = new AbortController();
 const uploading = computed(() => draftAttachments.value.some(item => item.state === 'uploading'));
@@ -565,12 +562,6 @@ function submitAnswers(item: TimelineItem): void {
           <button type="button" :disabled="item.state === 'uploading' || sending" @click="removeAttachment(item.metadata.id)">移除</button>
         </div>
       </div>
-      <div aria-live="polite">
-        <p v-for="receipt in turnReceipts.filter((item, index) => item.state === 'unknown' || index >= turnReceipts.length - 5)" :key="receipt.commandId">
-          {{ new Date(receipt.createdAt).toLocaleTimeString() }} · {{ receiptLabel(receipt) }}
-          <button v-if="receipt.state === 'unknown'" type="button" @click="checkTurnStatus?.()">核实发送结果</button>
-        </p>
-      </div>
       <p v-if="attachmentError" role="alert">{{ attachmentError }}</p>
       <div v-if="attachmentsSupported" class="attachment-picker">
         <input ref="fileInput" type="file" :accept="attachmentAccept" multiple hidden @change="chooseFiles">
@@ -590,6 +581,7 @@ function submitAnswers(item: TimelineItem): void {
             <input :checked="autoApproveEnabled" :disabled="autoApproveUpdating" type="checkbox" @change="updateAutoApprove">
             <span>自动审批通过</span>
           </label>
+          <button v-if="hasUnconfirmedTurn" type="button" @click="checkTurnStatus?.()">核实发送结果</button>
           <button type="button" class="interrupt-turn" title="取消本次发送后正在执行的任务；不会关闭会话，也不能从中断处继续" :disabled="!interactive || !turnActive" @click="emit('interrupt')">中断当前任务</button>
           <button type="submit" class="approve" :disabled="!interactive || turnActive || sending || uploading || draftAttachments.some(item => item.state !== 'ready') || (!prompt.trim() && !draftAttachments.length)">发送并执行</button>
         </div>
