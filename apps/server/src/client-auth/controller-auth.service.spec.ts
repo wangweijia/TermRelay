@@ -6,7 +6,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import WebSocket from 'ws';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -239,4 +239,56 @@ test('native probe pairs, restores a permanent credential and observes live revo
     for (const child of children) if (child.exitCode === null) child.kill();
     await harness.app.close(); await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('native controller heartbeats distinguish healthy idle sockets from missing application replies', {
+  skip: !process.env.TERMRELAY_NATIVE_PROBE, timeout: 150_000, concurrency: true,
+}, async context => {
+  const run = async (respond: boolean) => {
+    const harness = await serverFixture();
+    const directory = await mkdtemp(join(tmpdir(), 'termrelay-native-heartbeat-'));
+    let child: ReturnType<typeof spawn> | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const pairing = await harness.service.create(input);
+      await harness.service.decide(pairing.pairingId, 'approve', 'owner', ['mac-a']);
+      const issued = await harness.service.exchange(pairing.pairingId, pairing.deviceCode);
+      assert.ok('credential' in issued);
+      await writeFile(join(directory, 'authorization.json'), JSON.stringify({
+        version: 1, installationId: input.installationId, origin: harness.origin, credential: issued.credential,
+      }), { mode: 0o600 });
+
+      // Retain the real server's Ping/Pong heartbeat in both cases. Only the
+      // application response is suppressed to simulate an unresponsive handler.
+      const connections = harness.app.get(ControllerConnections);
+      const message = connections.message.bind(connections);
+      let queries = 0;
+      connections.message = async (socket, envelope) => {
+        if ((envelope as { type?: string })?.type === 'controller.me.get') queries++;
+        if (respond) await message(socket, envelope);
+      };
+      child = spawn(process.env.TERMRELAY_NATIVE_PROBE!, [harness.origin, directory, respond ? 'idle' : 'timeout'], {
+        env: { ...process.env, NO_PROXY: '127.0.0.1', no_proxy: '127.0.0.1' },
+      });
+      const completion = once(child, 'exit');
+      let stdout = '', stderr = '';
+      child.stdout?.on('data', data => { stdout += String(data); });
+      child.stderr?.on('data', data => { stderr += String(data); });
+      timer = setTimeout(() => child?.kill(), 140_000);
+      assert.equal((await completion)[0], 0, stderr);
+      assert.match(stdout, respond ? /IDLE_OK/ : /HEARTBEAT_TIMEOUT/);
+      assert.equal((stdout.match(/CONNECTED /g) ?? []).length, 1);
+      assert.ok(queries >= (respond ? 3 : 2), `Expected application heartbeats, received ${queries}`);
+      assert.deepEqual(harness.registry.listDevices(), []);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (child && child.exitCode === null) child.kill();
+      await harness.app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  };
+  await Promise.all([
+    context.test('stays connected for 90 seconds while idle', () => run(true)),
+    context.test('retries when application replies stop despite server Ping/Pong', () => run(false)),
+  ]);
 });

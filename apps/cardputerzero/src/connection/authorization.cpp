@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -25,6 +26,17 @@ using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
 using Curl = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 constexpr std::size_t max_document = 16384;
+constexpr auto heartbeat_interval = 25s;
+constexpr auto heartbeat_timeout = 75s;
+std::string utc_timestamp() {
+    const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm utc{};
+    std::array<char, 32> output{};
+    if (!gmtime_r(&now, &utc) || !std::strftime(output.data(), output.size(), "%Y-%m-%dT%H:%M:%SZ", &utc)) {
+        throw std::runtime_error("Cannot read system time");
+    }
+    return output.data();
+}
 void initialize_curl() {
     static const bool initialized = [] { if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) throw std::runtime_error("Network initialization failed"); return true; }();
     (void)initialized;
@@ -261,20 +273,42 @@ private:
             if (status == 403 || (status >= 300 && status < 400)) throw std::runtime_error("Check public WebSocket Access bypass");
             if (opened == CURLE_OK && status == 101) {
                 const auto handshake_deadline = Clock::now() + 10s;
-                auto last_received = Clock::now();
+                auto last_confirmed = Clock::now();
+                auto next_heartbeat = Clock::now() + heartbeat_interval;
                 bool confirmed = false;
                 std::string frame;
+                std::string outgoing;
+                std::size_t outgoing_offset = 0;
                 while (!stopped_ && !cancelled_) {
+                    const auto now = Clock::now();
+                    if ((!confirmed && now >= handshake_deadline) || (confirmed && now - last_confirmed >= heartbeat_timeout)) break;
+                    if (confirmed && outgoing.empty() && now >= next_heartbeat) {
+                        outgoing = Json{{"event", "message"}, {"data", {
+                            {"type", "controller.me.get"}, {"protocolVersion", "2"},
+                            {"messageId", random_id()}, {"deviceId", stored_.installation_id},
+                            {"sentAt", utc_timestamp()}, {"payload", Json::object()},
+                        }}}.dump();
+                        outgoing_offset = 0;
+                    }
+                    if (!outgoing.empty()) {
+                        std::size_t sent = 0;
+                        const auto result = curl_ws_send(handle.get(), outgoing.data() + outgoing_offset,
+                            outgoing.size() - outgoing_offset, &sent, 0, CURLWS_TEXT);
+                        if (result != CURLE_OK && result != CURLE_AGAIN) break;
+                        if (result == CURLE_OK) outgoing_offset += sent;
+                        if (outgoing_offset == outgoing.size()) {
+                            outgoing.clear();
+                            next_heartbeat = Clock::now() + heartbeat_interval;
+                        }
+                    }
                     std::array<char, 4096> buffer{};
                     std::size_t count = 0;
                     const curl_ws_frame* metadata = nullptr;
                     const auto received = curl_ws_recv(handle.get(), buffer.data(), buffer.size(), &count, &metadata);
                     if (received == CURLE_AGAIN) {
-                        if ((!confirmed && Clock::now() >= handshake_deadline) || Clock::now() - last_received > 75s) break;
                         wait(30ms); continue;
                     }
                     if (received != CURLE_OK || !metadata) break;
-                    last_received = Clock::now();
                     if (metadata->flags & CURLWS_CLOSE) {
                         if (count >= 2 && ((static_cast<unsigned char>(buffer[0]) << 8) | static_cast<unsigned char>(buffer[1])) == 4003) { revoked(); return; }
                         break;
@@ -291,6 +325,10 @@ private:
                     if (type == "controller.connected") {
                         const auto& payload = message.at("payload");
                         if (payload.at("role") != "controller" || payload.at("installationId") != stored_.installation_id || !payload.at("expiresAt").is_null() || !payload.at("deviceIds").is_array() || payload.at("deviceIds").size() > 100) throw std::runtime_error("Invalid controller handshake");
+                        // libcurl consumes server PINGs automatically. Only a validated
+                        // application response proves that the controller is still usable.
+                        last_confirmed = Clock::now();
+                        if (!confirmed) next_heartbeat = last_confirmed + heartbeat_interval;
                         confirmed = true; attempt = 0;
                         publish(State::Connected, "Authorized", static_cast<unsigned>(payload.at("deviceIds").size()));
                     }
