@@ -1,3 +1,4 @@
+import { applyTurnAck, applyTurnProtocolError, expireTurnWaits, restoreTurnReceipts, TURN_RECEIPTS_KEY, TURN_POLL_MS, MAX_TURN_RECEIPTS, type TurnReceipt } from '../turn-confirmation';
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import { visiblePendingApprovals } from '../approval-inbox';
@@ -36,10 +37,11 @@ const dirtyCacheSessions = new Set<string>();
 let realtimeFlushFrame: number | undefined;
 let cacheWriteTimer: number | undefined;
 
-const pendingTurnCommands = new Map<string, (succeeded: boolean) => void>();
+let reconcilingTurns = false;
 
 export const useRelayStore = defineStore('relay', {
   state: () => ({
+    turnReceipts: {} as Record<string, TurnReceipt>,
     sessions: [] as SessionRecord[],
     devices: [] as DeviceRecord[],
     pendingApprovals: [] as PendingApprovalRecord[],
@@ -67,6 +69,9 @@ export const useRelayStore = defineStore('relay', {
   }),
 
   getters: {
+    selectedTurnReceipts(state): TurnReceipt[] {
+      return Object.values(state.turnReceipts).filter(item => item.sessionId === state.selectedSessionId);
+    },
     visiblePendingApprovals(state): PendingApprovalRecord[] {
       return visiblePendingApprovals(state.pendingApprovals, state.sessions);
     },
@@ -90,6 +95,9 @@ export const useRelayStore = defineStore('relay', {
   actions: {
     async initialize(): Promise<void> {
       this.stopped = false;
+      window.addEventListener('focus', this.checkForegroundTurns);
+      document.addEventListener('visibilitychange', this.checkForegroundTurns);
+      try { this.turnReceipts = restoreTurnReceipts(localStorage.getItem(TURN_RECEIPTS_KEY)); } catch { /* Storage is optional. */ }
       try {
         const cached = await loadSelectedSessionCache();
         if (cached) {
@@ -114,6 +122,8 @@ export const useRelayStore = defineStore('relay', {
 
     stop(): void {
       this.stopped = true;
+      window.removeEventListener('focus', this.checkForegroundTurns);
+      document.removeEventListener('visibilitychange', this.checkForegroundTurns);
       this.flushRealtimeEvents();
       void this.persistDirtyCaches();
       if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer);
@@ -172,6 +182,8 @@ export const useRelayStore = defineStore('relay', {
           void deleteSessionCache(id).catch(() => undefined);
         }
         this.historyAccessOrder = this.historyAccessOrder.filter((id) => remaining.has(id));
+        this.removeSessionTurnReceipts(new Set(Object.values(this.turnReceipts)
+          .map(record => record.sessionId).filter(id => !remaining.has(id))));
         this.error = undefined;
         if (!this.selectedSessionId && this.sessions[0]) {
           await this.selectSession(this.sessions[0].id);
@@ -189,6 +201,7 @@ export const useRelayStore = defineStore('relay', {
         Object.prototype.hasOwnProperty.call(this.eventsBySession, sessionId)
       ) {
         this.subscribeSelected();
+        void this.reconcileTurnCommands(true);
         return;
       }
       const previous = this.selectedSession;
@@ -272,7 +285,7 @@ export const useRelayStore = defineStore('relay', {
       }
     },
 
-    async deleteSession(sessionId: string, purge: boolean): Promise<boolean> {
+    async deleteSession(sessionId: string, purge: boolean, selectNext = true): Promise<boolean> {
       const session = this.sessions.find((item) => item.id === sessionId);
       if (!session || !['finished', 'failed'].includes(session.status)) {
         this.error = '只能删除已经结束的会话。';
@@ -295,16 +308,18 @@ export const useRelayStore = defineStore('relay', {
           this.loadingHistory = false;
         }
         this.sessions = this.sessions.filter((item) => item.id !== sessionId);
+        this.removeSessionTurnReceipts(new Set([sessionId]));
         delete this.eventsBySession[sessionId];
         delete this.hasOlderBySession[sessionId];
         delete this.lastSeqBySession[sessionId];
+        pendingRealtimeEvents.delete(sessionId);
         this.historyAccessOrder = this.historyAccessOrder.filter((id) => id !== sessionId);
         dirtyCacheSessions.delete(sessionId);
         void deleteSessionCache(sessionId).catch(() => undefined);
         this.commandStatus = undefined;
         this.error = undefined;
 
-        if (!this.selectedSessionId && this.sessions[0]) {
+        if (selectNext && !this.selectedSessionId && this.sessions[0]) {
           await this.selectSession(this.sessions[0].id);
         }
         return true;
@@ -333,12 +348,15 @@ export const useRelayStore = defineStore('relay', {
         this.reconnectAttempt = 0;
         this.error = undefined;
         this.subscribeSelected();
+        void this.reconcileTurnCommands(true);
       });
       socket.addEventListener('message', (event) => this.handleSocketMessage(event));
       socket.addEventListener('close', () => {
         if (this.socket !== socket) return;
         this.socket = undefined;
         this.connectionState = 'disconnected';
+        for (const record of Object.values(this.turnReceipts)) if (record.state === 'waiting') record.state = 'unknown';
+        this.persistTurnReceipts();
         this.scheduleReconnect();
       });
       socket.addEventListener('error', () => {
@@ -414,7 +432,24 @@ export const useRelayStore = defineStore('relay', {
         sentAt: new Date().toISOString(),
         payload,
       };
-      this.socket.send(JSON.stringify({ event: 'message', data: envelope }));
+      if (type === 'tool.turn.start') {
+        const records = Object.values(this.turnReceipts);
+        if (records.length >= MAX_TURN_RECEIPTS) {
+          const disposable = records.find(item => item.state === 'confirmed' || item.state === 'not_sent');
+          if (!disposable) { this.error = '待核实的消息过多，请先核实发送结果。'; return undefined; }
+          delete this.turnReceipts[disposable.commandId];
+        }
+        this.turnReceipts[commandId] = { commandId, messageId: envelope.messageId, deviceId: session.deviceId,
+          sessionId, createdAt: Date.now(), state: 'waiting' };
+        this.persistTurnReceipts();
+      }
+      try { this.socket.send(JSON.stringify({ event: 'message', data: envelope })); }
+      catch {
+        const record = this.turnReceipts[commandId];
+        if (record) { record.state = 'not_sent'; this.persistTurnReceipts(); }
+        this.error = '连接已关闭，消息未发送。';
+        return undefined;
+      }
       this.commandStatus = `命令 ${shortId(commandId)} 已发送`;
       return commandId;
     },
@@ -440,20 +475,58 @@ export const useRelayStore = defineStore('relay', {
       this.sendCommand('session.stop', {});
     },
 
-    async startToolTurn(text: string, attachments: string[] = []): Promise<boolean> {
+    startToolTurn(text: string, attachments: string[] = []): TurnReceipt | undefined {
       const trimmed = text.trim();
       const session = this.selectedSession;
-      if ((!trimmed && !attachments.length) || !session) return false;
+      if ((!trimmed && !attachments.length) || !session) return undefined;
+      if (Object.values(this.turnReceipts).some(item => item.sessionId === session.id && item.state === 'waiting')) { this.error = '请等待上一条消息的发送确认。'; return undefined; }
       const id = this.sendCommandForSession(session.id, 'tool.turn.start', { text: trimmed, ...(attachments.length ? { attachments } : {}) });
-      if (!id) return false;
-      return new Promise(resolve => {
-        const timer = setTimeout(() => {
-          pendingTurnCommands.delete(id);
-          this.error = '发送结果未确认，请检查聊天记录后再决定是否重发。';
-          resolve(false);
-        }, 35_000);
-        pendingTurnCommands.set(id, succeeded => { clearTimeout(timer); resolve(succeeded); });
-      });
+      return id ? this.turnReceipts[id] : undefined;
+    },
+
+    checkForegroundTurns(): void {
+      if (document.visibilityState === 'visible') void this.reconcileTurnCommands(true);
+    },
+
+    persistTurnReceipts(): void {
+      try { localStorage.setItem(TURN_RECEIPTS_KEY, JSON.stringify(Object.values(this.turnReceipts))); } catch { /* Storage is optional. */ }
+    },
+
+    removeSessionTurnReceipts(sessionIds: Set<string>): void {
+      let changed = false;
+      for (const [id, record] of Object.entries(this.turnReceipts)) {
+        if (sessionIds.has(record.sessionId)) { delete this.turnReceipts[id]; changed = true; }
+      }
+      if (changed) this.persistTurnReceipts();
+    },
+
+    async reconcileTurnCommands(manual = false): Promise<void> {
+      if (reconcilingTurns) return;
+      reconcilingTurns = true;
+      try {
+        const now = Date.now();
+        const records = Object.values(this.turnReceipts).filter(record => record.state === 'waiting' || record.state === 'unknown');
+        expireTurnWaits(records, now);
+        // Poll briefly in the background; older unknown results remain manually queryable.
+        const queries = records.filter(record => manual || now - record.createdAt < TURN_POLL_MS);
+        for (let index = 0; index < queries.length; index += 4) {
+          await Promise.all(queries.slice(index, index + 4).map(async record => {
+            try {
+              const response = await fetch(`/api/sessions/${encodeURIComponent(record.sessionId)}/commands/${encodeURIComponent(record.commandId)}`, { signal: AbortSignal.timeout(5_000), cache: 'no-store' });
+              if (!response.ok) return; // Missing records and network errors do not prove non-delivery.
+              const result = await response.json() as { commandId: string; deviceId: string; sessionId: string; ack: CommandAckPayload | null };
+              if (result.commandId === record.commandId && result.ack) {
+                applyTurnAck(record, result.deviceId, result.sessionId, result.ack);
+                if (record.state === 'confirmed' && record.sessionId === this.selectedSessionId) {
+                  this.commandStatus = undefined;
+                  this.error = undefined;
+                }
+              }
+            } catch { /* Preserve the last known state. */ }
+          }));
+        }
+        this.persistTurnReceipts();
+      } finally { reconcilingTurns = false; }
     },
 
     setToolConfiguration(id: string, value: string): void {
@@ -524,21 +597,30 @@ export const useRelayStore = defineStore('relay', {
         const envelope = wire.data;
         if (!envelope || envelope.protocolVersion !== '2') return;
         if (envelope.type === 'protocol.error') {
-          const payload = envelope.payload as { message?: string };
+          const payload = envelope.payload as { message?: string; code?: string; relatedMessageId?: string };
+          const turn = applyTurnProtocolError(Object.values(this.turnReceipts), payload);
+          this.persistTurnReceipts();
           this.error = payload.message ?? '实时订阅被 Server 拒绝。';
-          this.commandStatus = '命令执行失败';
+          this.commandStatus = turn ? (turn.state === 'not_sent' ? '消息未发送' : turn.state === 'confirmed' ? undefined : '发送结果待核实') : '命令执行失败';
           return;
         }
         if (envelope.type === 'command.ack') {
           const payload = envelope.payload as unknown as CommandAckPayload;
+          const receipt = this.turnReceipts[payload.commandId.toLowerCase()];
+          if (receipt && (envelope.commandId?.toLowerCase() !== receipt.commandId || envelope.deviceId !== receipt.deviceId || envelope.sessionId !== receipt.sessionId)) return;
           this.commandStatus = `命令 ${shortId(payload.commandId)}：${payload.status}`;
           if (payload.status === 'failed' || payload.status === 'rejected') {
             this.error = payload.message ?? `命令执行失败 (${payload.errorCode ?? payload.status})`;
           }
-          if (payload.status !== 'accepted') {
-            const complete = pendingTurnCommands.get(payload.commandId);
-            pendingTurnCommands.delete(payload.commandId);
-            complete?.(payload.status === 'completed');
+          const turn = this.turnReceipts[payload.commandId.toLowerCase()];
+          if (turn) {
+            applyTurnAck(turn, envelope.deviceId, envelope.sessionId, payload);
+            this.persistTurnReceipts();
+            // Keep successful submission receipts internal; only unresolved outcomes need feedback.
+            if (envelope.deviceId === turn.deviceId && envelope.sessionId === turn.sessionId) {
+              this.commandStatus = turn.state === 'confirmed' ? undefined : turn.state === 'not_sent' ? '消息未发送' : '正在核实消息发送结果';
+              if (turn.state === 'confirmed' || payload.errorCode === 'ack_timeout') this.error = undefined;
+            }
           }
           const approvalId = pendingApprovalCommands.get(payload.commandId);
           if (approvalId && payload.status !== 'accepted') {
@@ -696,7 +778,7 @@ export const useRelayStore = defineStore('relay', {
       if (this.stopped || this.refreshTimer !== undefined) return;
       this.refreshTimer = window.setTimeout(async () => {
         this.refreshTimer = undefined;
-        await this.refreshSessions();
+        await Promise.allSettled([this.refreshSessions(), this.reconcileTurnCommands()]);
         this.scheduleRefresh();
       }, SESSION_REFRESH_INTERVAL_MS);
     },

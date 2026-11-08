@@ -1,3 +1,4 @@
+import { TurnCommandRepository } from './turn-command.repository';
 import { Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
 import type { CommandAckPayload, Envelope } from '@termrelay/contracts';
 import { randomUUID } from 'node:crypto';
@@ -36,6 +37,7 @@ export class CommandRelayService implements OnModuleDestroy {
     private readonly registry: DeviceConnectionRegistry,
     private readonly sessions: SessionsService,
     @Optional() private readonly starts?: SessionStartService,
+    @Optional() private readonly turns: TurnCommandRepository = new TurnCommandRepository(),
   ) {}
 
   onModuleDestroy(): void {
@@ -56,6 +58,12 @@ export class CommandRelayService implements OnModuleDestroy {
         code: 'unknown_session',
         detail: 'Session does not exist for the requested device.',
       };
+    }
+    // IDs are global on the device; never forward a tracked command a second time.
+    try {
+      if (await this.turns.find(commandId)) return { ok: false, code: 'conflict', detail: 'Command ID was already submitted; query its result instead of sending it again.' };
+    } catch {
+      return { ok: false, code: 'internal_error', detail: 'Unable to verify command identity; command was not forwarded.' };
     }
     if (commandId === sessionId.toLowerCase() && await this.starts?.isCreationID(sessionId)) {
       return { ok: false, code: 'conflict', detail: 'Creation command ID is reserved; use a new command ID for session interaction.' };
@@ -113,6 +121,14 @@ export class CommandRelayService implements OnModuleDestroy {
       }
     }
 
+    if (envelope.type === 'tool.turn.start') {
+      try {
+        if (!(await this.turns.reserve(envelope))) return { ok: false, code: 'conflict', detail: 'Command ID was already submitted.' };
+      } catch {
+        return { ok: false, code: 'internal_error', detail: 'Unable to persist command; command was not forwarded.' };
+      }
+    }
+
     const timer = setTimeout(() => this.timeout(commandId), this.timeoutMs);
     timer.unref();
     this.pending.set(commandId, {
@@ -143,9 +159,19 @@ export class CommandRelayService implements OnModuleDestroy {
   ): Promise<CommandAcknowledgementResult> {
     const commandId = normalizeCommandId(envelope.commandId!);
     const pending = this.pending.get(commandId);
-    // ACKs can legitimately arrive after a timeout or Server restart. They are
-    // idempotent completion messages, so a missing pending entry is harmless.
-    if (!pending) return 'ignored';
+    const record = await this.turns.find(commandId);
+    let confirmedEnvelope = envelope;
+    if (record) {
+      if (record.deviceId !== envelope.deviceId || record.sessionId !== envelope.sessionId ||
+        envelope.payload.commandId.toLowerCase() !== commandId ||
+        !this.registry.isRegisteredClient(client, envelope.deviceId)) return 'connection_mismatch';
+      // Commit before notifying the browser, including after timeout/restart.
+      const ack = await this.turns.acknowledge(commandId, envelope.payload);
+      if (!ack) throw new Error('Persisted command acknowledgement is unavailable.');
+      // Concurrent or delayed ACKs must report the same winning result as HTTP queries.
+      confirmedEnvelope = { ...envelope, payload: ack };
+    }
+    if (!pending) return record ? 'acknowledged' : 'ignored';
     if (
       pending.deviceId !== envelope.deviceId ||
       pending.sessionId !== envelope.sessionId ||
@@ -154,11 +180,11 @@ export class CommandRelayService implements OnModuleDestroy {
       return 'connection_mismatch';
     }
 
-    send(pending.browser, envelope);
-    if (envelope.payload.status !== 'accepted') {
+    send(pending.browser, confirmedEnvelope);
+    if (confirmedEnvelope.payload.status !== 'accepted') {
       clearTimeout(pending.timer);
       this.pending.delete(commandId);
-      if (pending.isSessionStop && envelope.payload.status === 'completed') {
+      if (pending.isSessionStop && confirmedEnvelope.payload.status === 'completed') {
         await this.sessions.finishSession(pending.sessionId);
       }
     }

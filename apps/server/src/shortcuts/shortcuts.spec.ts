@@ -124,13 +124,22 @@ test('run updates require owning registered connection, bounded snapshot and non
   }));
   assert.equal((await f.controller.getRun(runId)).status, 'succeeded');
   assert.equal((await f.controller.getRun(runId)).output, 'two');
+  const messagesAfterCompletion = f.socket.messages.length;
   await f.gateway.handleMessage(f.client, message('mac-a', 'shortcut.run.update', {
     runId, status: 'running', output: 'delayed running snapshot',
   }));
-  assert.equal(f.socket.messages.at(-1)?.data.payload.code, 'conflict');
+  assert.equal(f.socket.messages.length, messagesAfterCompletion);
   assert.equal((await f.controller.getRun(runId)).output, 'two');
   await f.gateway.handleMessage(f.client, message('mac-a', 'shortcut.run.update', { runId, status: 'failed' }));
-  assert.equal(f.socket.messages.at(-1)?.data.payload.code, 'conflict');
+  assert.equal(f.socket.messages.length, messagesAfterCompletion);
+  await f.gateway.handleMessage(f.client, message('mac-a', 'shortcut.run.update', { runId, status: 'succeeded', output: 'duplicate' }));
+  assert.equal(f.socket.messages.length, messagesAfterCompletion);
+  assert.equal((await f.controller.getRun(runId)).status, 'succeeded');
+  assert.equal((await f.controller.getRun(runId)).output, 'two');
+  const foreignMessages = foreign.messages.length;
+  await f.gateway.handleMessage(foreign.asSocket(), message('mac-b', 'shortcut.run.update', { runId, status: 'succeeded' }));
+  assert.equal(foreign.messages.length, foreignMessages + 1);
+  assert.equal(foreign.messages.at(-1)?.data.payload.code, 'conflict');
   await f.gateway.handleMessage(f.client, message('mac-a', 'shortcut.run.update', {
     runId, status: 'failed', output: 'x'.repeat(32769),
   }));
@@ -159,6 +168,70 @@ test('cancel is a request, not terminal; offline and disconnect fail active runs
   assert.equal((await f.controller.start(shortcutId, { runId })).status, 'failed');
   assert.equal(f.socket.messages.filter((m) => m.data.type === 'shortcut.run.start').length, 1);
   f.service.onModuleDestroy();
+});
+
+test('reconnected Mac late snapshots preserve the unknown result without producing an App protocol error', async () => {
+  const f = setup();
+  try {
+    await register(f);
+    await f.service.catalog('mac-a', { shortcuts: [entry] });
+    const runId = randomUUID();
+    await f.controller.start(shortcutId, { runId });
+    await f.gateway.handleMessage(f.client, message('mac-a', 'shortcut.run.update', { runId, status: 'running', output: 'started' }));
+    f.gateway.handleDisconnect(f.client);
+    await f.service.disconnected('mac-a');
+    const finished = await f.controller.getRun(runId);
+    assert.equal(finished.status, 'failed');
+    assert.equal(finished.output, UNKNOWN_EXECUTION_RESULT);
+
+    const reconnected = new FakeSocket();
+    f.gateway.handleConnection(reconnected.asSocket());
+    await f.gateway.handleMessage(reconnected.asSocket(), message('mac-a', 'device.register', {
+      name: 'Mac', appVersion: '1.0', platform: 'macOS', tools: [],
+    }));
+    const before = reconnected.messages.length;
+    for (const status of ['running', 'succeeded', 'failed', 'cancelled']) {
+      await f.gateway.handleMessage(reconnected.asSocket(), message('mac-a', 'shortcut.run.update', {
+        runId, status, output: 'late local process output',
+      }));
+    }
+    assert.equal(reconnected.messages.length, before);
+    assert.deepEqual(await f.controller.getRun(runId), finished);
+    await f.gateway.handleMessage(reconnected.asSocket(), message('mac-a', 'shortcut.run.update', {
+      runId: randomUUID(), status: 'running',
+    }));
+    assert.equal(reconnected.messages.at(-1)?.data.payload.code, 'conflict');
+    assert.match(String(reconnected.messages.at(-1)?.data.payload.message), /not found for this device/);
+  } finally { f.service.onModuleDestroy(); }
+});
+
+test('a snapshot arriving while the final write is pending is ignored without changing that final result', async () => {
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  class PausedStore extends ShortcutsRepository {
+    override async updateRun(deviceId: string, payload: Parameters<ShortcutsRepository['updateRun']>[1]) {
+      if (payload.status === 'succeeded') { entered(); await resume; }
+      return super.updateRun(deviceId, payload);
+    }
+  }
+  const store = new PausedStore();
+  const service = new ShortcutsService(store, new DeviceConnectionRegistry());
+  try {
+    await service.catalog('mac-a', { shortcuts: [entry] });
+    const runId = randomUUID();
+    await store.createRun(runId, (await store.findShortcut(shortcutId))!);
+    await service.update('mac-a', { runId, status: 'running' });
+    const final = service.receiveUpdate('mac-a', { runId, status: 'succeeded', output: 'final' });
+    await started;
+    try {
+      assert.equal(await service.receiveUpdate('mac-a', { runId, status: 'running', output: 'late' }), 'ignored_terminal');
+      assert.equal(await service.receiveUpdate('mac-b', { runId, status: 'running' }), 'rejected');
+    } finally { release(); }
+    assert.equal(await final, 'accepted');
+    assert.equal((await store.findRun(runId))?.output, 'final');
+  } finally { release(); service.onModuleDestroy(); }
 });
 
 test('Mac cancellation confirmation is terminal, frees shortcut slot, and never accepts later updates', async () => {
