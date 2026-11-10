@@ -23,6 +23,7 @@ const targets = ref<Target[]>([]);
 const targetId = ref('');
 const optionKey = ref('');
 const name = ref('');
+const subdirectory = ref('');
 const busy = ref(false);
 const error = ref<string>();
 const result = ref<Result>();
@@ -37,6 +38,7 @@ let timer: number | undefined;
 let disposed = false;
 
 watch(target, value => { optionKey.value = value?.launchOptions[0] ? `${value.launchOptions[0].toolKey}/${value.launchOptions[0].runtimeMode}` : ''; });
+watch(targetId, () => { subdirectory.value = ''; });
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -95,10 +97,16 @@ async function submit(): Promise<void> {
     if (!pending.value) {
       const selected = selectedOption.value;
       if (!target.value || !selected) throw new Error('请选择已授权的在线设备、工作区和工具');
+      const relative = subdirectory.value.trim();
+      if (relative && (relative.length > 1024 || relative.includes('\\') || relative.includes('\0')
+        || relative.split('/').some(part => !part || part === '.' || part === '..'))) {
+        throw new Error('请输入相对子目录，例如 projects/my-app；不能使用绝对路径、空路径段、. 或 ..');
+      }
       const submission: Submission = {
         requestId: createUuid(), deviceId: target.value.deviceId, workspaceId: target.value.workspaceId,
         ...selected, ...(selected.runtimeMode === 'pty' ? { rows: 24, columns: 80 } : {}),
         ...(name.value.trim() ? { displayName: name.value.trim() } : {}),
+        ...(relative ? { subdirectory: relative } : {}),
       };
       window.localStorage.setItem(storageKey, JSON.stringify(submission));
       pending.value = submission;
@@ -130,6 +138,7 @@ onMounted(async () => {
         || !/^[0-9a-f-]{36}$/iu.test(value.requestId) || !('deviceId' in value) || typeof value.deviceId !== 'string'
         || !('workspaceId' in value) || typeof value.workspaceId !== 'string'
         || !('toolKey' in value) || typeof value.toolKey !== 'string'
+        || ('subdirectory' in value && typeof value.subdirectory !== 'string')
         || !('runtimeMode' in value) || !['pty', 'acp'].includes(String(value.runtimeMode))
         || (value.runtimeMode === 'pty' && (!('rows' in value) || typeof value.rows !== 'number'
           || !('columns' in value) || typeof value.columns !== 'number'))) throw new Error('本地创建请求无法读取；请先核实会话列表并清理浏览器中的待处理请求');
@@ -155,6 +164,10 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) window.clearTi
           </option>
         </select>
       </label>
+      <label>子目录（可选）
+        <input v-model="subdirectory" maxlength="1024" placeholder="例如 projects/my-app" :disabled="busy">
+      </label>
+      <p>相对于所选授权目录，留空使用授权目录本身。子目录必须已存在，不能使用绝对路径或越出授权目录。</p>
       <label>工具 / 模式
         <select v-model="optionKey" :disabled="busy">
           <option v-for="option in target?.launchOptions ?? []" :key="`${option.toolKey}/${option.runtimeMode}`" :value="`${option.toolKey}/${option.runtimeMode}`">
@@ -170,6 +183,7 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) window.clearTi
     <template v-else>
       <strong>{{ result ? labels[result.status] : '请求已保存，等待确认' }}</strong>
       <p>{{ result?.message }}</p>
+      <p v-if="pending.subdirectory">子目录：{{ pending.subdirectory }}</p>
       <code>{{ pending.requestId }}</code>
       <p>相同请求只创建一次。超时、断线不代表进程停止，也不会自动重新执行。</p>
       <button type="button" :disabled="busy" @click="query">查询原请求</button>

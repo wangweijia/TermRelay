@@ -3,6 +3,39 @@ import XCTest
 
 final class AppModelMultiSessionTests: XCTestCase {
     @MainActor
+    func testRemoteSubdirectoryUsesExistingChildAndRejectsEscapes() async throws {
+        let suite = "AppModelRemoteSubdirectory-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).resolvingSymlinksInPath()
+            .appendingPathComponent("TermRelay-subdirectory-\(UUID().uuidString)")
+        let child = root.appendingPathComponent("projects/my-app")
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("outside"), withDestinationURL: root.deletingLastPathComponent())
+        try Data().write(to: root.appendingPathComponent("file"))
+        let model = AppModel(defaults: defaults)
+        model.setWorkspaceRemoteStart(true, for: root)
+        let workspace = try XCTUnwrap(model.remoteWorkspaceIDs.first)
+        for path in ["../outside", "/tmp", "missing", "file", "outside", "projects/../../escape", "projects//my-app"] {
+            let id = UUID()
+            let request = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: workspace,
+                toolKey: "shell", runtimeMode: "pty", displayName: nil, rows: 24, columns: 80, subdirectory: path)
+            let result = await model.startRemoteSession(request)
+            XCTAssertFalse(result.succeeded, path)
+            XCTAssertTrue(model.sessions.isEmpty)
+        }
+        let id = UUID()
+        let request = RemoteSessionStart(commandID: id, sessionID: id, workspaceID: workspace,
+            toolKey: "shell", runtimeMode: "pty", displayName: nil, rows: 24, columns: 80, subdirectory: "projects/my-app")
+        let result = await model.startRemoteSession(request)
+        XCTAssertTrue(result.succeeded, result.message ?? "")
+        XCTAssertEqual(model.terminalSession(id: id)?.directory.path, child.path)
+        XCTAssertEqual(model.remoteStartDirectories.map(\.path), [root.path])
+        await model.terminateAllSessions()
+    }
+
+    @MainActor
     func testRemoteShellRequiresLocalWorkspaceOptInAndRunsWithoutATerminalView() async throws {
         let suite = "AppModelRemoteStart-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

@@ -78,6 +78,7 @@ final class AppModel: ObservableObject {
     private let credentialStore: any CredentialStoring
     private let pairingClient: ClientPairingClient
     private var remoteClient: RemoteClient?
+    private var remoteSessionWorkspaces: [UUID: (id: String, directory: URL)] = [:]
     private var pendingAutoApproveSync: [UUID: Bool] = [:]
     private var connectionStarted = false
     private var pairingTask: Task<Void, Never>?
@@ -956,8 +957,9 @@ final class AppModel: ObservableObject {
             await remoteClient.setActiveSessionCount(activeSessionCount)
             await publishRemoteWorkspaces()
             for session in activeSessions {
-                let workspaceID = workspaceID(for: session.directory)
-                await publishWorkspace(session.directory)
+                let workspace = remoteSessionWorkspaces[session.id]
+                let workspaceID = workspace?.id ?? workspaceID(for: session.directory)
+                await publishWorkspace(workspace?.directory ?? session.directory)
                 await remoteClient.publishSession(
                     id: session.id,
                     workspaceId: workspaceID,
@@ -968,8 +970,9 @@ final class AppModel: ObservableObject {
                 )
             }
             for session in activeStructured {
-                let workspaceID = workspaceID(for: session.directory)
-                await publishWorkspace(session.directory)
+                let workspace = remoteSessionWorkspaces[session.id]
+                let workspaceID = workspace?.id ?? workspaceID(for: session.directory)
+                await publishWorkspace(workspace?.directory ?? session.directory)
                 await remoteClient.publishSession(
                     id: session.id,
                     workspaceId: workspaceID,
@@ -1107,14 +1110,29 @@ final class AppModel: ObservableObject {
               let tool = BuiltInTool(rawValue: request.toolKey) else {
             return .rejected("unauthorized_workspace", "工作区未在本机授权远程创建，或会话 ID 已存在")
         }
-        let directory = URL(fileURLWithPath: path)
+        let root = URL(fileURLWithPath: path)
         var isDirectory: ObjCBool = false
-        guard directory.resolvingSymlinksInPath().path == path,
+        guard root.resolvingSymlinksInPath().path == path,
               FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue,
-              remoteLaunchOptions(for: directory).contains(RelayLaunchOption(toolKey: request.toolKey, runtimeMode: request.runtimeMode)) else {
+              remoteLaunchOptions(for: root).contains(RelayLaunchOption(toolKey: request.toolKey, runtimeMode: request.runtimeMode)) else {
             return .rejected("unavailable", "工作区路径已变化，或工具/模式不可用")
         }
+        let directory: URL
+        if let subdirectory = request.subdirectory {
+            guard RemoteSessionStart.isValidSubdirectory(subdirectory) else {
+                return .rejected("invalid_subdirectory", "请输入授权目录下的相对子目录，不能包含 . 或 ..")
+            }
+            directory = root.appendingPathComponent(subdirectory).resolvingSymlinksInPath().standardizedFileURL
+            let prefix = path == "/" ? path : path + "/"
+            guard directory.path == path || directory.path.hasPrefix(prefix),
+                  FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                return .rejected("invalid_subdirectory", "子目录不存在、不是目录，或已越出授权目录")
+            }
+        } else {
+            directory = root
+        }
         guard activeSessionCount < 8 else { return .rejected("limit", "最多同时运行 8 个会话") }
+        remoteSessionWorkspaces[request.sessionID] = (request.workspaceID, root)
         let name = request.displayName ?? "\(tool.displayName) — \(directory.lastPathComponent)"
         if request.runtimeMode == "pty" {
             guard startLocalTerminal(id: request.sessionID, directory: directory, tool: tool, name: name, publish: false) != nil,
@@ -1124,7 +1142,7 @@ final class AppModel: ObservableObject {
             terminal.startIfNeeded()
             terminal.resize(columns: request.columns, rows: request.rows)
             guard terminal.state == .running else { return .rejected("startup_failed", "PTY 启动失败") }
-            await publishWorkspace(directory)
+            await publishWorkspace(root)
             await remoteClient?.publishSession(id: terminal.id, workspaceId: request.workspaceID,
                 toolKey: tool.rawValue, displayName: name, startedAt: terminal.startedAt)
         } else {
@@ -1137,7 +1155,7 @@ final class AppModel: ObservableObject {
                 await session.stop()
                 return .rejected("startup_failed", "ACP 启动失败；请检查 Mac 上的错误信息")
             }
-            await publishWorkspace(directory)
+            await publishWorkspace(root)
             await remoteClient?.publishSession(id: session.id, workspaceId: request.workspaceID, toolKey: tool.rawValue,
                 displayName: name, runtimeMode: .acp, startedAt: session.startedAt)
         }
@@ -1248,14 +1266,14 @@ final class AppModel: ObservableObject {
         if let active = filePreviewWorkspace(sessionID: sessionID, workspaceID: workspaceID) { return active }
         guard let original = await AttachmentStore.shared.workspace(sessionID: sessionID),
               let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String],
-              identifiers[original.path] == workspaceID else { return nil }
+              (remoteSessionWorkspaces[sessionID]?.id ?? identifiers[original.path]) == workspaceID else { return nil }
         return original
     }
 
     private func filePreviewWorkspace(sessionID: UUID, workspaceID: String) -> URL? {
         guard let session = sessions.first(where: { $0.id == sessionID }),
               let identifiers = defaults.dictionary(forKey: Keys.workspaceIDs) as? [String: String],
-              identifiers[session.directory.path] == workspaceID else { return nil }
+              (remoteSessionWorkspaces[sessionID]?.id ?? identifiers[session.directory.path]) == workspaceID else { return nil }
         return session.directory
     }
 

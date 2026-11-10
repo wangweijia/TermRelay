@@ -119,6 +119,20 @@ test('rejects untrusted paths, initial prompts, wrong ownership/mode, stale auth
   assert.equal(x.sent.length, 0);
 });
 
+test('remote subdirectory is validated, forwarded and included in request identity', async () => {
+  const x = setup();
+  for (const subdirectory of ['', '/tmp', '../outside', 'a/../b', './a', 'a//b', 'a/', 'a\\b', 'a\0b', 'a'.repeat(1025), null, 1]) {
+    await assert.rejects(x.service.create({ ...x.body, subdirectory }), /Invalid creation request/);
+  }
+  const request = { ...x.body, subdirectory: 'projects/my-app' };
+  await x.service.create(request);
+  assert.equal(x.sent[0]?.payload.subdirectory, request.subdirectory);
+  await x.service.create(request);
+  assert.equal(x.sent.length, 1);
+  await assert.rejects(x.service.create({ ...request, subdirectory: 'projects/another' }), /already bound/);
+  await assert.rejects(x.service.create(x.body), /already bound/);
+});
+
 test('timeout and Server restart retain unknown result without redispatch; late session registration reconciles', async () => {
   const x = setup();
   await x.service.create(x.body);

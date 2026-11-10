@@ -52,6 +52,12 @@ struct RemoteSessionStart: Sendable, Equatable {
     let displayName: String?
     let rows: Int
     let columns: Int
+    var subdirectory: String? = nil
+
+    static func isValidSubdirectory(_ path: String) -> Bool {
+        !path.isEmpty && path.count <= 1024 && !path.contains("\\") && !path.utf8.contains(0)
+            && path.components(separatedBy: "/").allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
 }
 
 struct RelaySessionStarted: Encodable, Sendable {

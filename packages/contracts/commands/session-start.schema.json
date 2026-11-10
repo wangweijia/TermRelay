@@ -6,6 +6,12 @@
   "required": ["workspaceId", "toolKey", "runtimeMode"],
   "properties": {
     "workspaceId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "subdirectory": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\\\\\u0000]+(?:/(?!\\.{1,2}(?:/|$))[^/\\\\\\u0000]+)*$"
+    },
     "toolKey": { "type": "string", "minLength": 1, "maxLength": 128 },
     "runtimeMode": { "enum": ["pty", "acp"] },
     "displayName": { "type": "string", "minLength": 1, "maxLength": 128 },

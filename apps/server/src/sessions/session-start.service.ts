@@ -146,5 +146,6 @@ export class SessionStartService implements OnModuleInit, OnModuleDestroy {
 
 function sameRequest(a: SessionStartPayload, b: SessionStartPayload): boolean {
   return a.workspaceId === b.workspaceId && a.toolKey === b.toolKey && a.runtimeMode === b.runtimeMode
-    && a.rows === b.rows && a.columns === b.columns && a.displayName === b.displayName;
+    && a.rows === b.rows && a.columns === b.columns && a.displayName === b.displayName
+    && a.subdirectory === b.subdirectory;
 }

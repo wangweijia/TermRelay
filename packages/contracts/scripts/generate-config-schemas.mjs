@@ -186,6 +186,7 @@ const historyDeclarations = await Promise.all(historySchemas.map(async ([name, f
 const marker = 'export interface SessionHistoryListPayload';
 const sessionStartType = `export interface SessionStartPayload {
   workspaceId: string;
+  subdirectory?: string;
   toolKey: string;
   runtimeMode: SessionRuntimeMode;
   rows?: number;
@@ -248,6 +249,7 @@ const swiftStart = `public struct SessionLaunchOption: Codable, Sendable {
 
 public struct SessionStartPayload: Codable, Sendable {
     public let workspaceId: String
+    public let subdirectory: String?
     public let toolKey: String
     public let runtimeMode: SessionRuntimeMode
     public let displayName: String?

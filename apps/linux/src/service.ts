@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolEventPayload } from '@termrelay/contracts';
 import { ConfigStore, readCredential, writePrivateJSON } from './config.js';
 import { CodexRuntime, type AgentRuntime } from './codex.js';
@@ -201,13 +202,19 @@ export class AgentService {
       const config = this.store.load();
       const workspace = config.workspaces.find(w => w.id === command.payload.workspaceId);
       if (!workspace?.remoteStartAllowed || realpathSync(workspace.path) !== workspace.path || !statSync(workspace.path).isDirectory()) throw new Error('Workspace authorization is unavailable or changed');
+      const directory = command.payload.subdirectory === undefined ? workspace.path
+        : realpathSync(resolve(workspace.path, text(command.payload.subdirectory, 1024)));
+      const within = relative(workspace.path, directory);
+      if (isAbsolute(within) || within === '..' || within.startsWith('../') || !statSync(directory).isDirectory()) {
+        throw new Error('Subdirectory must be an existing directory inside the authorized workspace');
+      }
       const id = command.sessionId;
       const displayName = command.payload.displayName === undefined ? undefined : text(command.payload.displayName, 128);
       if (command.payload.toolKey === 'shell' && command.payload.runtimeMode === 'pty') {
         const pending: PtyEvent[] = [];
         let published = false, startupBytes = 0;
         let startupError: Error | undefined;
-        const terminal = new TerminalRuntime(workspace.path, event => {
+        const terminal = new TerminalRuntime(directory, event => {
           if (published) { this.onPty(id, event); return; }
           if (event.kind === 'output') {
             startupBytes += event.data.length;
@@ -235,7 +242,7 @@ export class AgentService {
         let published = false, startupBytes = 0;
         let startupError: Error | undefined;
         const agent = (this.options.codex ?? ((path, cwd, emit) => new CodexRuntime(path, cwd, emit)))(
-          executable, workspace.path, event => {
+          executable, directory, event => {
             if (published) { this.onTool(id, event); return; }
             startupBytes += Buffer.byteLength(JSON.stringify(event));
             if (event.kind === 'error') startupError = new Error(String(event.data.message));

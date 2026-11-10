@@ -45,6 +45,18 @@ final class RemoteClientTests: XCTestCase {
         let decoded = await client.decodeSessionStart(envelope(payload))
         XCTAssertEqual(decoded?.sessionID, id)
         XCTAssertEqual(decoded?.runtimeMode, "acp")
+        var nested = payload
+        nested["subdirectory"] = .string("projects/my-app")
+        let nestedRequest = await client.decodeSessionStart(envelope(nested))
+        XCTAssertEqual(nestedRequest?.subdirectory, "projects/my-app")
+        for path in ["", "/tmp", "../outside", "a/../b", "./a", "a//b", "a/", "a\\b", "a\0b", String(repeating: "a", count: 1025)] {
+            nested["subdirectory"] = .string(path)
+            let invalid = await client.decodeSessionStart(envelope(nested))
+            XCTAssertNil(invalid, path)
+        }
+        nested["subdirectory"] = .number(1)
+        let invalidType = await client.decodeSessionStart(envelope(nested))
+        XCTAssertNil(invalidType)
         var pty = payload
         pty["toolKey"] = .string("shell")
         pty["runtimeMode"] = .string("pty")
