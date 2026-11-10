@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "conversation.h"
 
 namespace connection {
 enum class State { Idle, Starting, Waiting, Connecting, Connected, Retrying, Denied, Expired, Revoked, Error };
@@ -38,6 +39,12 @@ public:
     ListingSnapshot listing() const;
     void list_devices(const std::string& cursor = "");
     void list_sessions(const std::string& device_id, const std::string& cursor = "");
+    ConversationSnapshot conversation() const;
+    void open_conversation(const std::string& session_id);
+    void close_conversation();
+    void acknowledge_unknown_command();
+    void conversation_read(const std::string& op, const nlohmann::json& arguments = nlohmann::json::object());
+    std::string conversation_command(const std::string& type, const nlohmann::json& data, const std::string& review_token = "");
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

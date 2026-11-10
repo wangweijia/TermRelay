@@ -247,6 +247,16 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     return this.sessions.listEvents(sessionId, afterSeq, limit);
   }
 
+  async listHumanRequests(sessionId: string, beforeSeq?: number, limit = 20): Promise<SessionEventRecord[]> {
+    await this.waitForWrites();
+    return this.sessions.listHumanRequests(sessionId, beforeSeq, limit);
+  }
+
+  async findHumanRequest(sessionId: string, request: { kind: string; id: string; turnId: string }): Promise<SessionEventRecord | undefined> {
+    await this.waitForWrites();
+    return (await this.sessions.listHumanRequests(sessionId, undefined, 1, request))[0];
+  }
+
   async listEventsBefore(
     sessionId: string,
     beforeSeq: number | undefined,

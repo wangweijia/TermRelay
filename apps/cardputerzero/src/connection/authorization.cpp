@@ -16,6 +16,7 @@
 #include <regex>
 #include <stdexcept>
 #include <thread>
+#include <deque>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -27,6 +28,7 @@ using Clock = std::chrono::steady_clock;
 using namespace std::chrono_literals;
 using Curl = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
 constexpr std::size_t max_document = 16384;
+constexpr std::size_t max_local_document = 64 * 1024;
 constexpr std::size_t max_socket_document = 128 * 1024;
 constexpr auto heartbeat_interval = 25s;
 constexpr auto heartbeat_timeout = 75s;
@@ -57,6 +59,19 @@ std::string random_id() {
     }
     return result;
 }
+std::string decode_base64(const std::string& input) {
+    if (input.size() > 32768 || input.size() % 4) throw std::runtime_error("Invalid event chunk encoding");
+    const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string output; unsigned value = 0; int bits = -8; bool padding = false;
+    for (const char byte : input) {
+        if (byte == '=') { padding = true; continue; }
+        const auto digit = alphabet.find(byte);
+        if (padding || digit == std::string::npos) throw std::runtime_error("Invalid event chunk encoding");
+        value = (value << 6) | static_cast<unsigned>(digit); bits += 6;
+        if (bits >= 0) { output += static_cast<char>((value >> bits) & 255); bits -= 8; }
+    }
+    return output;
+}
 bool valid_credential(const std::string& value) {
     static const std::regex pattern("^tr_controller_[0-9a-f-]{36}\\.[A-Za-z0-9_-]{43}$");
     return std::regex_match(value, pattern);
@@ -65,6 +80,7 @@ struct Stored {
     std::string installation_id = random_id();
     std::string origin;
     std::string credential;
+    Json pending_commands = Json::array();
 };
 class Store {
 public:
@@ -82,7 +98,7 @@ public:
             throw std::runtime_error("Cannot read local authorization");
         }
         struct stat info{};
-        const bool safe = fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == geteuid() && !(info.st_mode & 0077) && info.st_size > 0 && info.st_size <= static_cast<off_t>(max_document);
+        const bool safe = fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == geteuid() && !(info.st_mode & 0077) && info.st_size > 0 && info.st_size <= static_cast<off_t>(max_local_document);
         if (!safe) { close(descriptor); throw std::runtime_error("Unsafe local authorization file"); }
         std::string content(static_cast<std::size_t>(info.st_size), '\0');
         std::size_t offset = 0;
@@ -98,12 +114,19 @@ public:
             result.installation_id = document.at("installationId").get<std::string>();
             result.origin = document.at("origin").get<std::string>();
             result.credential = document.at("credential").get<std::string>();
+            result.pending_commands = document.value("pendingCommands", Json::array());
+            if (!result.pending_commands.is_array() || result.pending_commands.size() > 32) throw std::runtime_error("invalid receipts");
+            for (const auto& receipt : result.pending_commands) {
+                if (!receipt.is_object() || receipt.size() != 3 || !receipt.at("commandId").is_string() || receipt.at("commandId").get_ref<const std::string&>().size() != 36
+                    || !receipt.at("sessionId").is_string() || receipt.at("sessionId").get_ref<const std::string&>().size() > 512
+                    || !receipt.at("type").is_string()) throw std::runtime_error("invalid receipt");
+            }
             if (document.at("version") != 1 || result.installation_id.empty() || result.installation_id.size() > 128 || (!result.credential.empty() && (!valid_credential(result.credential) || result.origin.empty()))) throw std::runtime_error("invalid document");
             return result;
         } catch (...) { throw std::runtime_error("Invalid local authorization file"); }
     }
     void save(const Stored& value) {
-        const auto content = Json{{"version", 1}, {"installationId", value.installation_id}, {"origin", value.origin}, {"credential", value.credential}}.dump();
+        const auto content = Json{{"version", 1}, {"installationId", value.installation_id}, {"origin", value.origin}, {"credential", value.credential}, {"pendingCommands", value.pending_commands}}.dump();
         std::string temporary = (directory_ / ".authorization-XXXXXX").string();
         const int descriptor = mkstemp(temporary.data());
         if (descriptor < 0) throw std::runtime_error("Cannot save local authorization");
@@ -159,6 +182,7 @@ public:
         if (!stored_.origin.empty()) stored_.origin = normalize_origin(stored_.origin, allow_loopback_);
         snapshot_.origin = stored_.origin;
         snapshot_.has_credential = !stored_.credential.empty();
+        receipts_ = stored_.pending_commands;
         if (!stored_.credential.empty()) command_ = stored_.origin;
         worker_ = std::thread([this] { run(); });
     }
@@ -172,6 +196,48 @@ public:
         queued_query_ = last_query_;
         listing_.loading = true; listing_.error.clear();
     }
+    ConversationSnapshot conversation() const { std::lock_guard lock(mutex_); return conversation_.state; }
+    void open_conversation(const std::string& id) {
+        std::lock_guard lock(mutex_);
+        if (id.empty() || id.size() > 512) return;
+        if (snapshot_.state != State::Connected || !conversation_.state.supported) {
+            if (conversation_.state.session_id != id) conversation_.state.error = "Connect to open this conversation";
+            return;
+        }
+        conversation_open_ = true; ++conversation_generation_; cancel_queued_rpcs(); conversation_.open(id); restore_receipt(id);
+        queue_rpc("sync");
+    }
+    void close_conversation() {
+        std::lock_guard lock(mutex_);
+        conversation_open_ = false; cancel_queued_rpcs();
+        if (!conversation_.state.session_id.empty() && snapshot_.state == State::Connected) queue_rpc("close");
+        ++conversation_generation_; conversation_.state.ready = false;
+    }
+    void acknowledge_unknown_command() {
+        std::lock_guard lock(mutex_);
+        if (conversation_.state.command_state == "unknown") { conversation_.state.command_state = "idle"; conversation_.state.revision++; }
+    }
+    void conversation_read(const std::string& op, const Json& arguments) {
+        std::lock_guard lock(mutex_);
+        if (snapshot_.state != State::Connected || !conversation_.state.supported || conversation_.state.session_id.empty()) return;
+        if (op == "sync") { ++conversation_generation_; cancel_queued_rpcs(); conversation_.state.loading = true; queue_rpc(op); }
+        else if (op == "history" || op == "requests" || op == "event" || op == "status") {
+            if (op != "status" && conversation_.state.sync_id.empty()) return;
+            if (op == "event") { event_bytes_.clear(); event_seq_ = arguments.at("seq").get<std::uint64_t>(); }
+            queue_rpc(op, arguments);
+        }
+    }
+    std::string conversation_command(const std::string& type, const Json& data, const std::string& review_token) {
+        std::lock_guard lock(mutex_);
+        if (snapshot_.state != State::Connected || receipts_.size() >= 32 || rpc_queries_.size() >= 4 || data.dump().size() > 48 * 1024) return "";
+        if (type != "tool.turn.start" && type != "tool.turn.interrupt" && type != "tool.approval.resolve" && type != "tool.user-input.resolve") return "";
+        const auto id = random_id();
+        try { conversation_.begin_command(id, type); }
+        catch (const std::exception& error) { conversation_.state.error = error.what(); return ""; }
+        Json args{{"commandId", id}, {"type", type}, {"data", data}};
+        if (!review_token.empty()) args["reviewToken"] = review_token;
+        queue_rpc("command", args); return id;
+    }
     void connect(const std::string& origin) {
         std::lock_guard lock(mutex_);
         if (active_ || command_) return;
@@ -181,19 +247,57 @@ public:
     void forget() { std::lock_guard lock(mutex_); forget_ = true; cancelled_ = true; condition_.notify_all(); }
 
 private:
-    struct Query { std::string device_id, cursor; std::uint64_t version = 0; };
+    struct Query {
+        std::string device_id, cursor; std::uint64_t version = 0;
+        std::string op; Json payload = Json::object(); std::uint64_t generation = 0;
+    };
+    void cancel_queued_rpcs() {
+        for (const auto& query : rpc_queries_) if (query.op == "command" && query.payload.at("commandId") == conversation_.state.command_id)
+            conversation_.state.command_state = "not_sent";
+        rpc_queries_.clear();
+    }
+    void restore_receipt(const std::string& id) {
+        for (const auto& receipt : receipts_) if (receipt.at("sessionId") == id) {
+            conversation_.state.command_id = receipt.at("commandId"); conversation_.state.command_type = receipt.at("type");
+            conversation_.state.command_state = "unknown";
+        }
+    }
+    void queue_rpc(const std::string& op, Json args = Json::object()) {
+        if (rpc_queries_.size() >= 4) { conversation_.fail(op, "Request queue is full; retry after checking status"); return; }
+        if (op == "requests" && std::any_of(rpc_queries_.begin(), rpc_queries_.end(), [](const Query& item) { return item.op == "requests"; })) return;
+        args["op"] = op; args["sessionId"] = conversation_.state.session_id;
+        if (op != "sync" && op != "status" && op != "close") args["syncId"] = conversation_.state.sync_id;
+        Query query; query.op = op; query.payload = std::move(args); query.generation = conversation_generation_;
+        rpc_queries_.push_back(std::move(query));
+    }
+    void retire_receipt(const Json& response) {
+        const auto& body = response.at("body");
+        if (!body.contains("ack") || !body.at("ack").is_object() || body.at("ack").value("status", "") != "completed") return;
+        const auto id = body.value("commandId", "");
+        if (body.at("ack").value("commandId", "") != id) return;
+        stored_.pending_commands.erase(std::remove_if(stored_.pending_commands.begin(), stored_.pending_commands.end(), [&](const Json& item) {
+            return item.at("commandId") == id && item.at("sessionId") == response.at("sessionId");
+        }), stored_.pending_commands.end());
+        store_.save(stored_);
+        std::lock_guard lock(mutex_); receipts_ = stored_.pending_commands;
+    }
     void clear_listing() {
         std::lock_guard lock(mutex_);
         listing_ = {}; last_query_ = {}; queued_query_.reset(); ++query_version_;
+        conversation_ = {}; rpc_queries_.clear(); receipts_ = Json::array(); event_bytes_.clear(); ++conversation_generation_;
     }
     void query_error(const Query& query, const std::string& message) {
         std::lock_guard lock(mutex_);
+        if (!query.op.empty()) {
+            if (query.generation == conversation_generation_) conversation_.fail(query.op, message);
+            return;
+        }
         if (query.version != query_version_) return;
         listing_.loading = false; listing_.error = message; listing_.revision++;
     }
     void publish(State state, std::string message = "", unsigned devices = 0) {
         std::lock_guard lock(mutex_);
-        if (state != State::Connected) listing_.loading = false;
+        if (state != State::Connected) { listing_.loading = false; conversation_.disconnected(); }
         snapshot_ = { state, stored_.origin, std::move(message), devices, !stored_.credential.empty() };
     }
     bool wait(std::chrono::milliseconds delay) {
@@ -272,7 +376,7 @@ private:
         if (!stopped_) publish(State::Expired, "Request expired; connect again");
     }
     void revoked() {
-        stored_.credential.clear(); store_.save(stored_);
+        stored_.credential.clear(); stored_.pending_commands = Json::array(); store_.save(stored_);
         clear_listing();
         publish(State::Revoked, "Authorization removed in Web");
     }
@@ -326,15 +430,22 @@ private:
                     if (confirmed && listing_supported && outgoing.empty() && !pending_query) {
                         {
                             std::lock_guard lock(mutex_);
-                            if (queued_query_) { pending_query = *queued_query_; queued_query_.reset(); }
+                            if (!rpc_queries_.empty()) { pending_query = rpc_queries_.front(); rpc_queries_.pop_front(); }
+                            else if (queued_query_) { pending_query = *queued_query_; queued_query_.reset(); }
                         }
                         if (pending_query) {
                             pending_id = random_id();
                             Json payload{{"limit", 20}};
                             if (!pending_query->device_id.empty()) payload["deviceId"] = pending_query->device_id;
                             if (!pending_query->cursor.empty()) payload["cursor"] = pending_query->cursor;
+                            if (!pending_query->op.empty()) payload = pending_query->payload;
+                            if (pending_query->op == "command") {
+                                const Json receipt{{"commandId", payload.at("commandId")}, {"sessionId", payload.at("sessionId")}, {"type", payload.at("type")}};
+                                stored_.pending_commands.push_back(receipt); store_.save(stored_);
+                                std::lock_guard lock(mutex_); receipts_ = stored_.pending_commands;
+                            }
                             outgoing = Json{{"event", "message"}, {"data", {
-                                {"type", pending_query->device_id.empty() ? "controller.devices.list" : "controller.sessions.list"},
+                                {"type", !pending_query->op.empty() ? "controller.conversation" : pending_query->device_id.empty() ? "controller.devices.list" : "controller.sessions.list"},
                                 {"protocolVersion", "2"}, {"messageId", pending_id}, {"deviceId", stored_.installation_id},
                                 {"sentAt", utc_timestamp()}, {"payload", payload},
                             }}}.dump();
@@ -390,6 +501,10 @@ private:
                         if (!confirmed) {
                             std::lock_guard lock(mutex_);
                             listing_.supported = listing_supported;
+                            conversation_.state.supported = std::find(capabilities.begin(), capabilities.end(), "conversation") != capabilities.end();
+                            if (conversation_open_ && conversation_.state.supported && !conversation_.state.session_id.empty()) {
+                                cancel_queued_rpcs(); ++conversation_generation_; queue_rpc("sync");
+                            }
                             if (listing_supported) {
                                 last_query_.version = ++query_version_;
                                 queued_query_ = last_query_; listing_.loading = true; listing_.error.clear();
@@ -401,10 +516,45 @@ private:
                         if (!confirmed) next_heartbeat = last_confirmed + heartbeat_interval;
                         confirmed = true; attempt = 0;
                         publish(State::Connected, "Authorized", static_cast<unsigned>(payload.at("deviceIds").size()));
+                    } else if (confirmed && type == "controller.conversation.result") {
+                        const auto& response = message.at("payload");
+                        const auto op = response.value("op", "");
+                        const bool correlated = pending_query && !pending_query->op.empty()
+                            && response.value("relatedMessageId", "") == pending_id;
+                        if (op == "ack" || op == "status") retire_receipt(response);
+                        {
+                            std::lock_guard lock(mutex_);
+                            if (correlated && pending_query->generation != conversation_generation_) {
+                                // A switched-away session must not install its old snapshot.
+                            } else if (op == "event" && correlated) {
+                                const auto& body = response.at("body");
+                                if (body.at("seq") != event_seq_ || body.at("offset") != event_bytes_.size()
+                                    || body.at("total").get<std::size_t>() > 256 * 1024) throw std::runtime_error("Large content requires Web");
+                                event_bytes_ += decode_base64(body.at("data").get<std::string>());
+                                if (event_bytes_.size() > body.at("total").get<std::size_t>()) throw std::runtime_error("Invalid event chunk");
+                                if (body.at("final").get<bool>()) {
+                                    if (event_bytes_.size() != body.at("total").get<std::size_t>()) throw std::runtime_error("Incomplete event content");
+                                    const auto loaded = Json::parse(event_bytes_);
+                                    if (loaded.at("seq") != event_seq_) throw std::runtime_error("Wrong loaded event");
+                                    conversation_.loaded(loaded, body.value("reviewToken", ""), event_bytes_.size()); event_bytes_.clear();
+                                } else queue_rpc("event", {{"seq", event_seq_}, {"offset", event_bytes_.size()}});
+                            } else if (correlated || op == "events" || op == "ack" || op == "resync") {
+                                try { conversation_.apply(response); }
+                                catch (const std::exception& error) { conversation_.fail(op, error.what()); }
+                                if (correlated && op == "sync") { queue_rpc("ready"); queue_rpc("requests"); }
+                                if (correlated && op == "ready" && conversation_.state.command_state == "unknown")
+                                    queue_rpc("status", {{"commandId", conversation_.state.command_id}});
+                                if (conversation_.state.requests_changed && conversation_.state.ready) queue_rpc("requests");
+                                if (conversation_.state.needs_sync && !conversation_.state.sync_id.empty()) {
+                                    ++conversation_generation_; cancel_queued_rpcs(); conversation_.state.sync_id.clear(); queue_rpc("sync");
+                                }
+                            }
+                        }
+                        if (correlated) { pending_query.reset(); pending_id.clear(); }
                     } else if (confirmed && pending_query && message.at("payload").value("relatedMessageId", "") == pending_id) {
                         const auto query = *pending_query;
                         if (type == "protocol.error") {
-                            query_error(query, "List unavailable; refresh or check Web authorization");
+                            query_error(query, "Request unavailable; refresh or check status / Web authorization");
                         } else if (type == (query.device_id.empty() ? "controller.devices.listed" : "controller.sessions.listed")) {
                             std::lock_guard lock(mutex_);
                             if (query.version == query_version_) {
@@ -449,7 +599,7 @@ private:
             try {
                 if (forgetting) {
                     clear_listing();
-                    stored_.credential.clear(); store_.save(stored_); publish(State::Idle, "Local key cleared; Web grant unchanged");
+                    stored_.credential.clear(); stored_.pending_commands = Json::array(); store_.save(stored_); publish(State::Idle, "Local key cleared; Web grant unchanged");
                 } else if (cancelled_) {
                     publish(State::Idle);
                 } else {
@@ -471,6 +621,12 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     Snapshot snapshot_;
+    ConversationModel conversation_;
+    bool conversation_open_ = false;
+    Json receipts_ = Json::array();
+    std::deque<Query> rpc_queries_;
+    std::uint64_t conversation_generation_ = 0, event_seq_ = 0;
+    std::string event_bytes_;
     ListingSnapshot listing_;
     Query last_query_;
     std::optional<Query> queued_query_;
@@ -490,6 +646,12 @@ void Authorization::cancel() { impl_->cancel(); }
 void Authorization::forget() { impl_->forget(); }
 Snapshot Authorization::snapshot() const { return impl_->snapshot(); }
 ListingSnapshot Authorization::listing() const { return impl_->listing(); }
+ConversationSnapshot Authorization::conversation() const { return impl_->conversation(); }
+void Authorization::open_conversation(const std::string& id) { impl_->open_conversation(id); }
+void Authorization::close_conversation() { impl_->close_conversation(); }
+void Authorization::acknowledge_unknown_command() { impl_->acknowledge_unknown_command(); }
+void Authorization::conversation_read(const std::string& op, const Json& arguments) { impl_->conversation_read(op, arguments); }
+std::string Authorization::conversation_command(const std::string& type, const Json& data, const std::string& token) { return impl_->conversation_command(type, data, token); }
 void Authorization::list_devices(const std::string& cursor) { impl_->list("", cursor); }
 void Authorization::list_sessions(const std::string& device_id, const std::string& cursor) { impl_->list(device_id, cursor); }
 }

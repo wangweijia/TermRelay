@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termrelay.local/contracts/commands/controller-conversation.schema.json",
+  "title": "Controller conversation request",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "properties": {
+        "op": {
+          "const": "sync"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId"
+      ],
+      "properties": {
+        "op": {
+          "const": "close"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId"
+      ],
+      "properties": {
+        "op": {
+          "const": "ready"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "beforeSeq"
+      ],
+      "properties": {
+        "op": {
+          "const": "history"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "beforeSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId"
+      ],
+      "properties": {
+        "op": {
+          "const": "requests"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "beforeSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "seq",
+        "offset"
+      ],
+      "properties": {
+        "op": {
+          "const": "event"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "commandId"
+      ],
+      "properties": {
+        "op": {
+          "const": "status"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "commandId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "commandId",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "op": {
+          "const": "command"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "commandId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "const": "tool.turn.start"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "properties": {
+                "text": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "required": [
+                "attachments"
+              ],
+              "properties": {
+                "attachments": {
+                  "minItems": 1,
+                  "type": "array"
+                }
+              }
+            }
+          ]
+        },
+        "reviewToken": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "commandId",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "op": {
+          "const": "command"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "commandId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "const": "tool.turn.interrupt"
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 0,
+          "additionalProperties": false
+        },
+        "reviewToken": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "commandId",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "op": {
+          "const": "command"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "commandId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "const": "tool.approval.resolve"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "approvalId",
+            "turnId",
+            "decision"
+          ],
+          "properties": {
+            "approvalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "turnId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "decision": {
+              "enum": [
+                "allowOnce",
+                "deny",
+                "cancel"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "reviewToken": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "op",
+        "sessionId",
+        "syncId",
+        "commandId",
+        "type",
+        "data"
+      ],
+      "properties": {
+        "op": {
+          "const": "command"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "syncId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "commandId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "type": {
+          "const": "tool.user-input.resolve"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "requestId",
+            "turnId",
+            "answers"
+          ],
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "turnId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "answers": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "maxItems": 32
+              },
+              "maxProperties": 32
+            }
+          },
+          "additionalProperties": false
+        },
+        "reviewToken": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

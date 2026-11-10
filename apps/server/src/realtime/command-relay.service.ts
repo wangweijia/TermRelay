@@ -48,6 +48,7 @@ export class CommandRelayService implements OnModuleDestroy {
   async route(
     browser: WebSocket,
     envelope: Envelope<unknown>,
+    policy?: { authorize: () => Promise<boolean>; persist: boolean },
   ): Promise<{ ok: true } | CommandRouteError> {
     const sessionId = envelope.sessionId!;
     const commandId = normalizeCommandId(envelope.commandId!);
@@ -121,12 +122,16 @@ export class CommandRelayService implements OnModuleDestroy {
       }
     }
 
-    if (envelope.type === 'tool.turn.start') {
+    if (envelope.type === 'tool.turn.start' || policy?.persist) {
       try {
         if (!(await this.turns.reserve(envelope))) return { ok: false, code: 'conflict', detail: 'Command ID was already submitted.' };
       } catch {
         return { ok: false, code: 'internal_error', detail: 'Unable to persist command; command was not forwarded.' };
       }
+    }
+
+    if (policy && (!await policy.authorize() || this.registry.getClient(envelope.deviceId) !== client)) {
+      return { ok: false, code: 'unknown_session', detail: 'Resource is unavailable; command was not forwarded.' };
     }
 
     const timer = setTimeout(() => this.timeout(commandId), this.timeoutMs);

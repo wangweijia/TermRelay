@@ -102,6 +102,9 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
     browser_back_ = browse_button(0, 104, "Back");
     browser_refresh_ = browse_button(108, 104, "Refresh");
     browser_next_ = browse_button(216, 104, "Next page");
+    chat_ = std::make_unique<ConversationScreen>(authorization_, [this] {
+        page_ = Page::Sessions; lv_screen_load(browser_); render_browser();
+    });
     lv_obj_add_event_cb(origin_, +[](lv_event_t* event) {
         auto* screen = static_cast<AuthorizationScreen*>(lv_event_get_user_data(event));
         screen->authorization_.connect(lv_textarea_get_text(screen->origin_));
@@ -111,6 +114,7 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
         if (key != LV_KEY_ESC) return false;
         auto* screen = static_cast<AuthorizationScreen*>(context);
         if (long_pressed) screen->running_ = false;
+        else if (screen->chat_ && screen->chat_->visible()) return screen->chat_->key(key, long_pressed);
         else if (screen->page_ != Page::Authorization) screen->back();
         else { screen->confirm_forget_ = false; screen->authorization_.cancel(); }
         return true;
@@ -158,6 +162,7 @@ void AuthorizationScreen::refresh() {
     else if (snapshot.state == State::Connected) message = "Permanent authorization\nDevices: " + std::to_string(snapshot.device_count);
     lv_label_set_text(message_, message.c_str());
     if (snapshot.state == State::Revoked || !snapshot.has_credential) {
+        if (chat_ && chat_->visible()) chat_->close(true);
         if (page_ != Page::Authorization) {
             page_ = Page::Authorization; lv_screen_load(root_);
             lv_group_remove_all_objs(group_);
@@ -166,6 +171,7 @@ void AuthorizationScreen::refresh() {
         displayed_ = {}; detail_ = {}; first_browse_ = true;
     }
     if (first_browse_ && snapshot.state == State::Connected) { first_browse_ = false; show_browser(); }
+    if (chat_ && chat_->visible()) { chat_->refresh(); return; }
     if (page_ != Page::Authorization) {
         const auto listing = authorization_.listing();
         const bool online = snapshot.state == State::Connected;
@@ -192,6 +198,9 @@ void AuthorizationScreen::back() {
 }
 
 void AuthorizationScreen::render_browser() {
+    for (auto* input = lv_indev_get_next(nullptr); input; input = lv_indev_get_next(input)) {
+        if (lv_indev_get_type(input) == LV_INDEV_TYPE_KEYPAD || lv_indev_get_type(input) == LV_INDEV_TYPE_ENCODER) lv_indev_set_group(input, group_);
+    }
     displayed_ = authorization_.listing();
     rendered_revision_ = displayed_.revision; rendered_loading_ = displayed_.loading;
     rendered_online_ = authorization_.snapshot().state == connection::State::Connected;
@@ -258,6 +267,9 @@ void AuthorizationScreen::browse_action(lv_event_t* event) {
             screen->page_ = Page::Sessions; screen->authorization_.list_sessions(device.id);
         } else if (screen->page_ == Page::Sessions && index < screen->displayed_.sessions.size()) {
             screen->detail_ = screen->displayed_.sessions[index]; screen->page_ = Page::Detail;
+            if (screen->detail_.runtime_mode == "acp" && screen->authorization_.conversation().supported) {
+                screen->chat_->open(screen->detail_.id); return;
+            }
         }
     }
     screen->render_browser();

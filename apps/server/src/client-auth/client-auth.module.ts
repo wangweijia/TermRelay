@@ -18,9 +18,11 @@ import { ControllerConnections } from './controller-connections';
 import { ControllerManagementController } from './controller-management.controller';
 import { DevicesModule } from '../devices/devices.module';
 import { SessionsModule } from '../sessions/sessions.module';
+import { CommandRelayModule } from '../realtime/command-relay.module';
+import { ControllerConversationService } from './controller-conversation.service';
 
 @Module({
-  imports: [DevicesModule, SessionsModule],
+  imports: [DevicesModule, SessionsModule, CommandRelayModule],
   controllers: [
     ClientPairingsController,
     ClientApprovalsController,
@@ -36,6 +38,7 @@ import { SessionsModule } from '../sessions/sessions.module';
     ControllerAuthService,
     ControllerAuthRepository,
     ControllerConnections,
+    ControllerConversationService,
     { provide: CONTROLLER_AUTH_STORE, useExisting: ControllerAuthRepository },
     { provide: CLIENT_AUTH_STORE, useExisting: ClientAuthRepository },
     {

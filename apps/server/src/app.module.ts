@@ -1,5 +1,4 @@
-import { TurnCommandRepository } from './realtime/turn-command.repository';
-import { TurnCommandController } from './realtime/turn-command.controller';
+import { CommandRelayModule } from './realtime/command-relay.module';
 import { Module } from '@nestjs/common';
 import { ClientAuthModule } from './client-auth/client-auth.module';
 import { DatabaseModule } from './database/database.module';
@@ -8,7 +7,6 @@ import { HealthController } from './health/health.controller';
 import { BrowserGateway } from './realtime/browser.gateway';
 import { BrowserProtocolValidator } from './realtime/browser-protocol-validator';
 import { ClientGateway } from './realtime/client.gateway';
-import { CommandRelayService } from './realtime/command-relay.service';
 import { ProtocolValidator } from './realtime/protocol-validator';
 import { PublicClientGateway } from './realtime/public-client.gateway';
 import { SessionsModule } from './sessions/sessions.module';
@@ -19,6 +17,7 @@ import { AIModule } from './ai/ai.module';
 @Module({
   imports: [
     DatabaseModule.forRoot(),
+    CommandRelayModule,
     DevicesModule,
     SessionsModule,
     NotificationsModule,
@@ -26,15 +25,13 @@ import { AIModule } from './ai/ai.module';
     ShortcutsModule,
     AIModule,
   ],
-  controllers: [HealthController, TurnCommandController],
+  controllers: [HealthController],
   providers: [
     ClientGateway,
     PublicClientGateway,
     BrowserGateway,
     BrowserProtocolValidator,
     ProtocolValidator,
-    CommandRelayService,
-    TurnCommandRepository,
   ],
 })
 export class AppModule {}

@@ -437,6 +437,32 @@ export class SessionRepository {
     return events.map(toEventRecord);
   }
 
+  async listHumanRequests(sessionId: string, beforeSeq: number | undefined, limit: number,
+    request?: { kind: string; id: string; turnId: string }): Promise<SessionEventRecord[]> {
+    if (!this.dataSource) return [];
+    const query = this.dataSource.getRepository(SessionEventEntity).createQueryBuilder('event')
+      .where('event.sessionId = :sessionId', { sessionId })
+      .andWhere("event.type = 'tool.event'")
+      .andWhere("JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.kind')) IN ('approval.requested','user-input.requested')")
+      .andWhere('(event.expiresAt IS NULL OR event.expiresAt > CURRENT_TIMESTAMP(3))')
+      .andWhere(`NOT EXISTS (SELECT 1 FROM events resolved WHERE resolved.session_id = event.session_id AND resolved.seq > event.seq
+        AND resolved.type = 'tool.event' AND (
+          (JSON_UNQUOTE(JSON_EXTRACT(resolved.payload, '$.kind')) = 'turn.completed'
+            AND JSON_EXTRACT(resolved.payload, '$.data.turnId') = JSON_EXTRACT(event.payload, '$.data.turnId'))
+          OR (JSON_UNQUOTE(JSON_EXTRACT(resolved.payload, '$.kind')) = 'approval.resolved'
+            AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.kind')) = 'approval.requested'
+            AND JSON_EXTRACT(resolved.payload, '$.data.approvalId') = JSON_EXTRACT(event.payload, '$.data.approvalId'))
+          OR (JSON_UNQUOTE(JSON_EXTRACT(resolved.payload, '$.kind')) = 'user-input.resolved'
+            AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.kind')) = 'user-input.requested'
+            AND JSON_EXTRACT(resolved.payload, '$.data.requestId') = JSON_EXTRACT(event.payload, '$.data.requestId'))))`);
+    if (beforeSeq !== undefined) query.andWhere('event.seq < :beforeSeq', { beforeSeq });
+    if (request) query.andWhere(`JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.kind')) = :kind
+      AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.data.${request.kind === 'approval.requested' ? 'approvalId' : 'requestId'}')) = :requestId
+      AND JSON_UNQUOTE(JSON_EXTRACT(event.payload, '$.data.turnId')) = :turnId`,
+    { kind: request.kind, requestId: request.id, turnId: request.turnId });
+    return (await query.orderBy('event.seq', 'DESC').limit(limit).getMany()).map(toEventRecord);
+  }
+
   async listEventsBefore(
     sessionId: string,
     beforeSeq: number | undefined,

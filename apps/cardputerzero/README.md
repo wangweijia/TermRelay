@@ -244,13 +244,29 @@ DESTDIR="$PWD/build/darwin-arm64/stage" \
 
 原生只保留一页设备和一页会话摘要，单条响应上限 128 KiB、查询超时 10 秒、最多一个在途查询和一个合并后的待发请求；迟到旧响应不会覆盖新请求的页面。列表操作不会推迟 25 秒应用层心跳。Server 每连接每 10 秒最多 30 个消息、最多两个并发查询，发送缓冲超过 256 KiB 或单响应超限会关闭连接。
 
-断网时保留进程内已读页面，显示 `Offline (cache)`；重连后重新查询最后一页。退出不持久化摘要；Web 撤销授权、清除本机凭据或更换地址时清空缓存。会话信息仅是元数据，未显示聊天内容，未开放写操作。
+断网时保留进程内已读页面，显示 `Offline (cache)`；重连后重新查询最后一页。退出不持久化摘要；Web 撤销授权、清除本机凭据或更换地址时清空缓存。ACP 会话现在可以进入聊天页；PTY 会话仍显示元数据。
 
 2026-11-05 本轮验证：macOS arm64 Debug 构建及两个 CTest 通过；原生探针读取 25 个会话的两页摘要，验证恢复凭据和撤销后缓存清空。新增服务端授权隔离、稳定游标、隐藏会话过滤、撤销竞态、慢连接和并发测试。未运行 GUI，中文显示、焦点和 320×170 截图仍待验收。
 
 当前机器缺少部分 Homebrew 依赖，macOS 27 无对应默认 bottle。本轮在临时目录使用 CMake 4.4.4、Ninja、fmt 10.1.1、nlohmann-json 3.12.0 和启用 OpenSSL / WS / WSS 的 curl 8.17.0，复用已有 SDL2 / 字体 / 图片库；与此前 Homebrew curl 8.23.0 的环境不同。临时绝对路径不属于发布配置，不复制 CMakeCache 到其他电脑。
 
 跨包 `pnpm check` 已执行：Contracts、TypeScript 和 Linux 检查通过；Mac 150 项中 6 项跳过，聊天滚动测试 `testLazyTranscriptKeepsVisibleTextAfterLargeAnswerShrinksWhileReading` 的空视口断言失败，单独重跑同样失败。本次未修改 Mac，修改前保留的检查日志也有同一失败，完整仓库 gate 未通过。
+
+### 聊天、审批与问答（2026-11-10）
+
+在设备 → 会话列表选择 ACP 会话进入聊天。`Write` 编辑消息，Enter 换行，`Send` 发送；收到完成回执后才清空草稿。`Actions` 可读取更早历史、回到最新消息、查看审批 / 问答、查询最后一条命令结果、重新同步及停止当前轮次。实体键盘沿用 Tab / Shift+Tab / Enter 和 Esc 导航；中文输入法仍待实机验证。
+
+聊天复用 `/ws/client-public` 的 `conversation` capability，通过 `controller.conversation` / `controller.conversation.result` 交互。Server 建立单会话订阅后返回同步边界和最近 20 条事件，`ready` 后按连续 seq 补齐实时事件；检测缺口或同步缓冲溢出时重新同步。审批 / 问答单独分页查询，不能仅凭最近历史推断当前待处理请求。
+
+掌机仅提供 `allowOnce`、拒绝、取消审批；允许操作要求完整加载并阅读到末尾，再次确认。大事件通过 base64 分块顺序读取，Server 仅在完整读取后发放审批 / 问答 review token；发送前再次检查权限、设备归属、请求是否仍有效及自动审批状态。超过设备预算的请求明确转到 Web 处理。问答支持单选、多选（上游请求声明时）、其他答案和私密输入；每道题必须回答。
+
+原生事件窗口最多 128 条 / 256 KiB，消息最多 64 条 / 256 KiB，单条显示最多 64 KiB，完整事件读取上限 256 KiB；超限显示提示。历史翻页保留更早窗口，返回最新会重新同步。正文、草稿和答案只在内存中保存（最多 8 份消息草稿、16 份问答草稿）；关闭进程后不恢复，不实现 SQLite 历史缓存。
+
+所有写命令复用现有 CommandRelay 和回执仓库。发送前在私有凭据文件保存最多 32 条命令 ID、会话 ID、命令类型，不保存待发送正文或答案。断线 / 超时后结果标记未知，重新同步后查询回执，绝不自动重放。未知结果会阻止再次提交，可手动查询，或明确确认后发起一条新命令。撤销授权或清除本机凭据同时清空正文缓存和回执元数据。
+
+新增纯 C++ 状态测试、原生 WSS 回环探针和无窗口 LVGL 界面探针，覆盖历史分页、实时回复、大小审批、问答、发送中防重复、回执丢失重连及撤销清理。不启动真实 AI Provider。界面探针使用软件显示器，不代表中文字体、实体按键或设备视觉验收。
+
+本轮 Server 全套 216 项中 210 通过、6 跳过；显式启用两种聊天探针后均通过，新协议 / 权限 / 共享依赖实例测试通过，Web build 与最新全包 typecheck 通过。原生通过 clang++ 重新编译全部 29 个应用翻译单元并链接可执行程序，复用已有 LVGL 静态库；当前临时 CMake 工具已清除且重新下载未完成，本轮没有重新运行 CMake 配置 / CTest，纯 C++ 测试直接编译运行。完整 `pnpm check` 仍因上文记录的既有 Mac 滚动测试失败，未标为通过。
 
 ### 无 GUI 验证
 
@@ -261,6 +277,9 @@ ctest --test-dir apps/cardputerzero/build/darwin-arm64 -C Debug --output-on-fail
 pnpm --filter @termrelay/server build
 TERMRELAY_NATIVE_PROBE="$PWD/apps/cardputerzero/build/darwin-arm64/Debug/authorization_probe" \
 	node --test apps/server/dist/client-auth/controller-auth.service.spec.js
+TERMRELAY_CONVERSATION_PROBE="$PWD/apps/cardputerzero/build/darwin-arm64/Debug/conversation_probe" \
+TERMRELAY_CONVERSATION_UI_PROBE="$PWD/apps/cardputerzero/build/darwin-arm64/Debug/conversation_ui_probe" \
+	node --test apps/server/dist/client-auth/controller-conversation.native.spec.js
 pnpm --filter @termrelay/web build
 pnpm check
 ```
@@ -284,9 +303,9 @@ Debian Maintainer 尚为上游占位值，字体许可清单含待补全文本�
 
 ## 已确定约束
 
-- 目标 320×170，实体键盘导航；已实现授权和只读列表导航，完整业务与视觉验收仍待完成。
+- 目标 320×170，实体键盘导航；已实现授权、列表、结构化聊天与审批问答，视觉与实机验收仍待完成。
 - 公网只复用 `/api/client-pairings`、`/api/client-pairings/token` 和 `/ws/client-public`。
 - 用户自行登录现有 Web 批准掌机，不使用短码、二维码或倒计时。
 - 正式凭据永久有效，仅由用户通过 Web 主动删除授权；配对申请有效期单独处理。
-- 共用公网入口但严格区分控制端和执行端；已支持授权和列表查询，聊天、审批等服务端扩展待实现。
+- 共用公网入口但严格区分控制端和执行端；已支持授权、列表及结构化聊天 / 审批 / 问答；PTY 操作尚未实现。
 - 后续按设计接入网络、协议和存储，不重复创建另一套平台或 UI 框架。

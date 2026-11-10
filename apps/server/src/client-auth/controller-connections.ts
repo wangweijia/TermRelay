@@ -1,15 +1,17 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Optional, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type WebSocket from 'ws';
 import {
   controllerMeGetSchema, controllerDevicesListSchema, controllerSessionsListSchema,
   type ControllerDevicesListPayload, type ControllerSessionsListPayload,
   type ControllerDeviceSummary, type ControllerSessionSummary,
+  controllerConversationSchema, type ControllerConversationPayload, type Envelope,
 } from '@termrelay/contracts';
 import { DevicesService } from '../devices/devices.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { ProtocolSchemaValidator } from '../realtime/protocol-schema-validator';
 import { ControllerAuthService, type ControllerAuthorization } from './controller-auth.service';
+import { ControllerConversationService } from './controller-conversation.service';
 
 @Injectable()
 export class ControllerConnections implements OnModuleDestroy {
@@ -20,6 +22,7 @@ export class ControllerConnections implements OnModuleDestroy {
     'controller.me.get': controllerMeGetSchema,
     'controller.devices.list': controllerDevicesListSchema,
     'controller.sessions.list': controllerSessionsListSchema,
+    'controller.conversation': controllerConversationSchema,
   });
   private readonly heartbeat = setInterval(() => {
     for (const socket of this.connections.keys()) {
@@ -33,11 +36,12 @@ export class ControllerConnections implements OnModuleDestroy {
     private readonly auth: ControllerAuthService,
     private readonly devices: DevicesService,
     private readonly sessions: SessionsService,
+    @Optional() private readonly conversations?: ControllerConversationService,
   ) { this.heartbeat.unref(); }
   attach(socket: WebSocket, authorization: ControllerAuthorization) {
     this.connections.set(socket, authorization);
     this.budgets.set(socket, { start: Date.now(), count: 0, pending: 0 });
-    socket.once('close', () => this.connections.delete(socket));
+    socket.once('close', () => { this.connections.delete(socket); this.conversations?.close(socket); });
     socket.on('pong', () => this.awaitingPong.delete(socket));
   }
   get(socket: WebSocket) { return this.connections.get(socket); }
@@ -48,13 +52,14 @@ export class ControllerConnections implements OnModuleDestroy {
     if (this.get(socket) === authorization) this.send(socket, 'controller.connected', authorization.installationId, {
       role: 'controller', installationId: authorization.installationId, deviceIds: authorization.deviceIds,
       permissions: authorization.permissions, expiresAt: null,
-      capabilities: ['devices.list', 'sessions.list'],
+      capabilities: ['devices.list', 'sessions.list', ...(this.conversations ? ['conversation'] : [])],
       ...(relatedMessageId ? { relatedMessageId } : {}),
     });
   }
   async message(socket: WebSocket, input: unknown) {
     const authorization = this.get(socket);
     if (!authorization) return;
+    if (Buffer.byteLength(JSON.stringify(input)) > 64 * 1024) { socket.close(1009, 'controller request budget'); return; }
     const budget = this.budgets.get(socket)!;
     if (Date.now() - budget.start >= 10_000) { budget.start = Date.now(); budget.count = 0; }
     if (++budget.count > 30 || budget.pending >= 2) { socket.close(1013, 'controller query limit'); return; }
@@ -78,6 +83,17 @@ export class ControllerConnections implements OnModuleDestroy {
     try {
       if (!await this.active(socket, authorization)) return;
       if (type === 'controller.me.get') { await this.connected(socket, envelope.messageId); return; }
+      if (type === 'controller.conversation') {
+        if (!this.conversations) { fail('invalid_message', 'Conversation service is unavailable.'); return; }
+        try {
+          await this.conversations.handle(socket, {
+            auth: authorization, active: () => this.active(socket, authorization),
+            send: (op, sessionId, body, relatedMessageId) => this.send(socket, 'controller.conversation.result', authorization.installationId,
+              { op, sessionId, body, ...(relatedMessageId ? { relatedMessageId } : {}) }),
+          }, envelope as Envelope<ControllerConversationPayload>);
+        } catch { fail('conflict', 'Conversation request is unavailable, no longer actionable, or needs resynchronization.'); }
+        return;
+      }
       if (!authorization.permissions.includes('sessions.read')) {
         fail('unknown_device', 'Resource is unavailable.'); return;
       }
@@ -111,6 +127,7 @@ export class ControllerConnections implements OnModuleDestroy {
     for (const [socket, authorization] of this.connections) {
       if (authorization.credentialId !== id) continue;
       this.connections.delete(socket);
+      this.conversations?.close(socket);
       this.send(socket, 'controller.authorization-revoked', authorization.installationId, { reason: 'revoked', revokedAt: new Date().toISOString() });
       socket.close(4003, 'authorization revoked');
     }

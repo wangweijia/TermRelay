@@ -52,6 +52,8 @@ const shortcutSchemas = [
   ['shortcutRunInputAckSchema', 'shortcut-run-input-ack'],
 ];
 const filePreviewSchemas = [
+  ['controllerConversationSchema', 'commands/controller-conversation'],
+  ['controllerConversationResultSchema', 'events/controller-conversation-result'],
   ['controllerDevicesListSchema', 'commands/controller-devices-list'],
   ['controllerSessionsListSchema', 'commands/controller-sessions-list'],
   ['controllerDevicesListedSchema', 'events/controller-devices-listed'],
@@ -64,7 +66,8 @@ const filePreviewSchemas = [
   ['filePreviewRequestSchema', 'commands/file-preview-request'],
   ['filePreviewResultSchema', 'events/file-preview-result'],
 ];
-const filePreviewTypes = `export interface ControllerDeviceSummary {
+const filePreviewTypes = `export interface ControllerConversationPayload { op: "sync" | "ready" | "history" | "requests" | "event" | "command" | "status" | "close"; sessionId: string; syncId?: string; beforeSeq?: number; seq?: number; offset?: number; commandId?: string; type?: string; data?: Record<string, unknown>; reviewToken?: string; }
+export interface ControllerDeviceSummary {
   id: string; name: string; status: "connected" | "connecting" | "offline" | "degraded"; platform: "macOS" | "linux";
 }
 export interface ControllerSessionSummary {

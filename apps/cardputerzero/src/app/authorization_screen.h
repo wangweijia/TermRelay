@@ -1,6 +1,7 @@
 #pragma once
 #include "authorization.h"
 #include "lvgl.h"
+#include "conversation_screen.h"
 
 namespace app {
 class AuthorizationScreen {
@@ -45,5 +46,6 @@ private:
     bool rendered_loading_ = false;
     bool rendered_online_ = false;
     bool first_browse_ = true;
+    std::unique_ptr<ConversationScreen> chat_;
 };
 }
