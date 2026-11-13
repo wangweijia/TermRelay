@@ -57,6 +57,8 @@ struct AttachmentTextEditor: NSViewRepresentable {
         view.registerForDraggedTypes([.fileURL])
         scroll.documentView = view
         scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.horizontalScrollElasticity = .none
         updateNSView(scroll, context: context)
         return scroll
     }
