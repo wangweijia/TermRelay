@@ -76,6 +76,20 @@ struct RelayToolEvent: Codable, Sendable {
     let occurredAt: String
     let correlation: RelayToolCorrelation
     let data: [String: JSONValue]
+
+    func normalizingApprovalTitle() -> RelayToolEvent {
+        guard kind == "approval.requested", let title = data["title"]?.string else { return self }
+        guard title.isEmpty || title.unicodeScalars.count > 256 else { return self }
+        var value = data
+        value["title"] = .string(title.isEmpty ? "工具操作审批" : String(title.unicodeScalars.prefix(253)) + "...")
+        if !title.isEmpty {
+            let detail = data["detail"]?.string ?? ""
+            let combined = detail.isEmpty ? title : detail + "\n\n" + title
+            value["detail"] = .string(combined.unicodeScalars.count > 65536
+                ? String(combined.unicodeScalars.prefix(65533)) + "..." : combined)
+        }
+        return RelayToolEvent(kind: kind, occurredAt: occurredAt, correlation: correlation, data: value)
+    }
 }
 
 struct RelayToolCorrelation: Codable, Sendable {

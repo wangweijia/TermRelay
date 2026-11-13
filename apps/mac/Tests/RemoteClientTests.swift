@@ -3,6 +3,71 @@ import XCTest
 @testable import TermRelay
 
 final class RemoteClientTests: XCTestCase {
+    func testApprovalTitlesRespectContractLimitsAndPreserveDetails() throws {
+        for title in [String(repeating: "x", count: 257), String(repeating: "e\u{301}", count: 129)] {
+            let event = approvalEvent(title: title, detail: "Original tool input")
+            let pending = RelayPendingEvent.tool(sequence: 7, event: event)
+            let payload = try XCTUnwrap(pending.toolPayload)
+            XCTAssertEqual(payload.data["title"]?.string?.unicodeScalars.count, 256)
+            XCTAssertTrue(payload.data["title"]?.string?.hasSuffix("...") == true)
+            XCTAssertEqual(payload.data["detail"]?.string, "Original tool input\n\n" + title)
+            XCTAssertEqual(payload.correlation.approvalId, "approval-1")
+            XCTAssertEqual(payload.data["availableDecisions"]?.array?.compactMap(\.string), ["allowOnce", "deny"])
+            XCTAssertEqual(pending.sequence, 7)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            XCTAssertEqual(try encoder.encode(payload.normalizingApprovalTitle()), try encoder.encode(payload))
+        }
+    }
+
+    func testApprovalTitleBoundaryAndEmptyTitle() {
+        for title in ["Approve command", String(repeating: "\u{1F600}", count: 256)] {
+            let payload = RelayToolEvent(approvalEvent(title: title, detail: nil)).normalizingApprovalTitle()
+            XCTAssertEqual(payload.data["title"]?.string, title)
+            XCTAssertNil(payload.data["detail"])
+        }
+        let payload = RelayToolEvent(approvalEvent(title: "", detail: "Tool input")).normalizingApprovalTitle()
+        XCTAssertFalse(payload.data["title"]?.string?.isEmpty ?? true)
+        XCTAssertEqual(payload.data["detail"]?.string, "Tool input")
+    }
+
+    func testLegacyQueuedApprovalIsNormalizedWithoutChangingSequence() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("termrelay-approval-outbox-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let event = approvalEvent(title: "Approval", detail: nil)
+        let valid = RelayToolEvent(event)
+        let title = String(repeating: "command ", count: 100)
+        var data = valid.data
+        data["title"] = .string(title)
+        let legacy = RelayToolEvent(kind: valid.kind, occurredAt: valid.occurredAt,
+            correlation: valid.correlation, data: data)
+        let store = RelayOutboxStore(deviceID: UUID(), directory: root)
+        try store.save(RelayPendingEvent(kind: .tool, sessionID: event.sessionID, sequence: 42,
+            occurredAt: event.occurredAt, terminalData: nil, toolPayload: legacy))
+        let recovered = try XCTUnwrap(store.load().first)
+        let payload = try XCTUnwrap(recovered.toolPayload).normalizingApprovalTitle()
+        XCTAssertEqual(recovered.sequence, 42)
+        XCTAssertEqual(payload.data["title"]?.string?.unicodeScalars.count, 256)
+        XCTAssertEqual(payload.data["detail"]?.string, title)
+    }
+
+    func testOversizedApprovalDetailIsExplicitlyBounded() {
+        let detail = String(repeating: "x", count: 65536)
+        let payload = RelayToolEvent(approvalEvent(title: String(repeating: "t", count: 257), detail: detail))
+            .normalizingApprovalTitle()
+        XCTAssertEqual(payload.data["detail"]?.string?.unicodeScalars.count, 65536)
+        XCTAssertEqual(payload.data["detail"]?.string, String(detail.prefix(65533)) + "...")
+    }
+
+    private func approvalEvent(title: String, detail: String?) -> ToolEvent {
+        ToolEvent(sessionID: UUID(), sequence: 1, occurredAt: Date(),
+            correlation: AgentCorrelation(turnID: "turn-1", itemID: "item-1", approvalID: "approval-1"),
+            payload: .approvalRequested(ApprovalRequest(approvalID: "approval-1", turnID: "turn-1",
+                itemID: "item-1", kind: "command", risk: .high, title: title, detail: detail,
+                availableDecisions: [.allowOnce, .deny], expiresAt: .distantFuture)))
+    }
+
     func testRemoteStartCachesConcurrentRequestsAndFailuresWithoutRelaunching() async {
         actor Counter {
             var count = 0

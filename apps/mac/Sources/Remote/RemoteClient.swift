@@ -990,7 +990,7 @@ actor RemoteClient {
                 type: "tool.event",
                 sessionId: event.sessionID.uuidString.lowercased(),
                 seq: event.sequence,
-                payload: payload
+                payload: payload.normalizingApprovalTitle()
             )
         }
     }

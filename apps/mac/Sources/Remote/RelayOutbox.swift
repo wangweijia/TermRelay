@@ -31,7 +31,7 @@ struct RelayPendingEvent: Codable, Sendable {
             sequence: sequence,
             occurredAt: event.occurredAt,
             terminalData: nil,
-            toolPayload: RelayToolEvent(event)
+            toolPayload: RelayToolEvent(event).normalizingApprovalTitle()
         )
     }
 }
