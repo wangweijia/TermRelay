@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -95,6 +95,10 @@ test('transport uses Authorization header instead of URL credentials', async t =
 test('zero-profile service remotely creates Codex and real PTY once, preserves interaction and isolates startup failures', async t => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'termrelay-ts-remote-')));
   t.after(() => rmSync(directory, { recursive: true }));
+  const child = join(directory, 'projects/my-app');
+  mkdirSync(child, { recursive: true });
+  symlinkSync(tmpdir(), join(directory, 'outside'));
+  writeFileSync(join(directory, 'file'), '');
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
@@ -122,11 +126,13 @@ test('zero-profile service remotely creates Codex and real PTY once, preserves i
     });
   });
   let launches = 0, closes = 0, failNext = false;
+  const workingDirectories: string[] = [];
   const logs: string[] = [];
   const service = new AgentService(store, {
     log: message => logs.push(message),
     codex: (_executable, cwd, emit) => {
       launches++;
+      workingDirectories.push(cwd);
       if (failNext) return {
         start: async () => { throw new Error(`Synthetic failure containing private path ${directory}`); },
         publishConfiguration: () => undefined, command: async () => undefined, setAutoApprove: async () => undefined,
@@ -146,9 +152,18 @@ test('zero-profile service remotely creates Codex and real PTY once, preserves i
     const catalog = record(packets.find(p => p.type === 'workspace.registered')!.payload);
     assert.equal(catalog.remoteStartAllowed, true);
     const acp = randomUUID();
-    const payload = { workspaceId, toolKey: 'codex', runtimeMode: 'acp', displayName: 'Web Codex' };
+    const payload = { workspaceId, toolKey: 'codex', runtimeMode: 'acp', displayName: 'Web Codex', subdirectory: 'projects/my-app' };
     send('session.start', payload, acp); send('session.start', payload, acp);
     await until(() => ack(acp, 'completed'));
+    assert.equal(launches, 1);
+    assert.deepEqual(workingDirectories, [child]);
+    assert.equal(service.protocol.sessions.get(acp)?.started.workspaceId, workspaceId);
+    for (const subdirectory of ['missing', 'file', 'outside']) {
+      const invalid = randomUUID();
+      send('session.start', { ...payload, subdirectory }, invalid);
+      await until(() => ack(invalid, 'failed'));
+      assert.equal(service.protocol.sessions.has(invalid), false);
+    }
     assert.equal(launches, 1);
     assert.equal(service.protocol.sessions.get(acp)?.started.displayName, 'Web Codex');
     const turnId = randomUUID();
@@ -156,11 +171,14 @@ test('zero-profile service remotely creates Codex and real PTY once, preserves i
     await until(() => packets.some(p => p.sessionId === acp && p.type === 'tool.event' && record(p.payload).kind === 'turn.completed'));
     assert.equal(ack(turnId, 'completed'), true);
     const pty = randomUUID();
-    send('session.start', { workspaceId, toolKey: 'shell', runtimeMode: 'pty', rows: 32, columns: 100 }, pty);
+    send('session.start', { workspaceId, toolKey: 'shell', runtimeMode: 'pty', rows: 32, columns: 100, subdirectory: 'projects/my-app' }, pty);
     await until(() => ack(pty, 'completed'));
     send('terminal.input', { encoding: 'base64', data: Buffer.from("printf 'REMOTE-%s-中文\\n' PTY\n").toString('base64') }, pty, randomUUID());
     await until(() => packets.some(p => p.type === 'terminal.output' && p.sessionId === pty
       && Buffer.from(String(record(p.payload).data), 'base64').toString('utf8').includes('REMOTE-PTY-中文')));
+    send('terminal.input', { encoding: 'base64', data: Buffer.from("printf 'CWD-%s\\n' \"${PWD##*/}\"\n").toString('base64') }, pty, randomUUID());
+    await until(() => packets.some(p => p.type === 'terminal.output' && p.sessionId === pty
+      && Buffer.from(String(record(p.payload).data), 'base64').toString('utf8').includes('CWD-my-app')));
     failNext = true;
     const failed = randomUUID();
     send('session.start', payload, failed);

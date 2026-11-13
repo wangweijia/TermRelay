@@ -44,6 +44,7 @@ export type SessionRuntimeMode = 'pty' | 'acp';
 
 export interface SessionStartPayload {
   workspaceId: string;
+  subdirectory?: string;
   toolKey: string;
   runtimeMode: SessionRuntimeMode;
   rows?: number;
@@ -1102,6 +1103,12 @@ export const sessionStartSchema = {
       "type": "string",
       "minLength": 1,
       "maxLength": 128
+    },
+    "subdirectory": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!\\.{1,2}(?:/|$))[^/\\\\\\u0000]+(?:/(?!\\.{1,2}(?:/|$))[^/\\\\\\u0000]+)*$"
     },
     "toolKey": {
       "type": "string",

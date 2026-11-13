@@ -47,6 +47,8 @@ final class AgentTranscriptScrollAnchor: NSView {
     private var isStopped = false
     private var viewportSize: NSSize?
     private var lastFollowLayout: FollowLayout?
+    private var requestedLayout: FollowLayout?
+    private var followAttempts = 0
     private(set) var followsEnd = true
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -71,6 +73,8 @@ final class AgentTranscriptScrollAnchor: NSView {
             self.sessionID = sessionID
             followsEnd = true
             lastFollowLayout = nil
+            requestedLayout = nil
+            followAttempts = 0
         }
         self.interaction = interaction
         self.scrollToEnd = scrollToEnd
@@ -109,6 +113,8 @@ final class AgentTranscriptScrollAnchor: NSView {
         isUserScrolling = false
         viewportSize = nil
         lastFollowLayout = nil
+        requestedLayout = nil
+        followAttempts = 0
     }
 
     func stopObserving() {
@@ -179,12 +185,24 @@ final class AgentTranscriptScrollAnchor: NSView {
         let layout = FollowLayout(documentBounds: document.bounds, end: end, viewportSize: clip.bounds.size)
         // A changed scroll origin alone is not new content; leave native rebound scrolling alone.
         guard layout != lastFollowLayout else { return }
-        lastFollowLayout = layout
         let y = document.isFlipped
             ? max(document.bounds.minY, end.maxY - clip.bounds.height)
             : max(document.bounds.minY, end.minY)
-        guard abs(clip.bounds.minY - y) > 0.5 else { return }
+        guard abs(clip.bounds.minY - y) > 0.5 else {
+            lastFollowLayout = layout
+            requestedLayout = nil
+            followAttempts = 0
+            return
+        }
+        if requestedLayout != layout {
+            requestedLayout = layout
+            followAttempts = 0
+        }
+        // Retry deferred lazy-layout scrolls without spinning on an unchanged estimate.
+        guard followAttempts < 3 else { return }
+        followAttempts += 1
         // SwiftUI must perform the scroll so LazyVStack also updates its realized rows.
         scrollToEnd?()
+        scheduleFollow()
     }
 }

@@ -52,6 +52,7 @@ public struct SessionLaunchOption: Codable, Sendable {
 
 public struct SessionStartPayload: Codable, Sendable {
     public let workspaceId: String
+    public let subdirectory: String?
     public let toolKey: String
     public let runtimeMode: SessionRuntimeMode
     public let displayName: String?

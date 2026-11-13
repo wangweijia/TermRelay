@@ -751,7 +751,7 @@ actor RemoteClient {
         guard envelope.type == "session.start", let commandID = envelope.commandId,
               let rawID = envelope.sessionId, let sessionID = UUID(uuidString: rawID), commandID == sessionID,
               let payload = envelope.payload.object,
-              Set(payload.keys).isSubset(of: ["workspaceId", "toolKey", "runtimeMode", "displayName", "rows", "columns"]),
+              Set(payload.keys).isSubset(of: ["workspaceId", "toolKey", "runtimeMode", "displayName", "rows", "columns", "subdirectory"]),
               let workspaceID = payload["workspaceId"]?.string, !workspaceID.isEmpty, workspaceID.count <= 128,
               let toolKey = payload["toolKey"]?.string, !toolKey.isEmpty, toolKey.count <= 128,
               let mode = payload["runtimeMode"]?.string, ["pty", "acp"].contains(mode) else { return nil }
@@ -764,8 +764,12 @@ actor RemoteClient {
         if let name = payload["displayName"] {
             guard let text = name.string, !text.isEmpty, text.count <= 128 else { return nil }
         }
+        if let value = payload["subdirectory"] {
+            guard let text = value.string, RemoteSessionStart.isValidSubdirectory(text) else { return nil }
+        }
         return RemoteSessionStart(commandID: commandID, sessionID: sessionID, workspaceID: workspaceID,
-            toolKey: toolKey, runtimeMode: mode, displayName: payload["displayName"]?.string, rows: rows, columns: columns)
+            toolKey: toolKey, runtimeMode: mode, displayName: payload["displayName"]?.string, rows: rows, columns: columns,
+            subdirectory: payload["subdirectory"]?.string)
     }
 
     private func acknowledge(_ command: RemoteTerminalCommand, result: RemoteCommandResult) async {

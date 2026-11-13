@@ -17,6 +17,7 @@ private struct ScrollTestTranscript: View {
     var messages: [ScrollTestMessage]
     let sessionID: UUID
     let interaction: AgentTextInteraction
+    var showsLoading = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -30,6 +31,7 @@ private struct ScrollTestTranscript: View {
                                 AgentMarkdownView(text: message.text)
                             }
                         }
+                        if showsLoading { Text("正在处理…").id("loading") }
                     }
                     AgentTranscriptBottomMarker().frame(height: 1).id("bottom")
                 }
@@ -37,7 +39,11 @@ private struct ScrollTestTranscript: View {
                 .padding(18)
                 .background {
                     AgentTranscriptScrollObserver(sessionID: sessionID, interaction: interaction) {
-                        proxy.scrollTo("bottom", anchor: .bottom)
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -48,6 +54,121 @@ private struct ScrollTestTranscript: View {
 }
 
 final class AgentChatScrollingTests: XCTestCase {
+    @MainActor
+    func testUserScrollCancelsPendingDeferredFollow() async {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        scroll.documentView = FlippedTranscriptDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 4_000))
+        let anchor = AgentTranscriptScrollAnchor(frame: .zero)
+        let interaction = AgentTextInteraction()
+        var requests = 0
+        anchor.configure(sessionID: UUID(), interaction: interaction) {
+            requests += 1
+            NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+            scroll.contentView.scroll(to: CGPoint(x: 0, y: 100))
+            NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        }
+        anchor.attach(to: scroll)
+        defer { anchor.stopObserving() }
+        await settle(scroll)
+        XCTAssertEqual(requests, 1)
+        XCTAssertFalse(anchor.followsEnd)
+        XCTAssertEqual(scroll.contentView.bounds.minY, 100, accuracy: 1)
+    }
+
+    @MainActor
+    func testDeferredScrollRetriesAreBoundedAndResumeWhenContentChanges() async {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        let document = FlippedTranscriptDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 4_000))
+        scroll.documentView = document
+        let anchor = AgentTranscriptScrollAnchor(frame: .zero)
+        let interaction = AgentTextInteraction()
+        var requests = 0
+        var acceptsScroll = false
+        anchor.configure(sessionID: UUID(), interaction: interaction) {
+            requests += 1
+            if acceptsScroll {
+                scroll.contentView.scroll(to: CGPoint(x: 0, y: document.bounds.maxY - scroll.contentSize.height))
+            }
+        }
+        anchor.attach(to: scroll)
+        defer { anchor.stopObserving() }
+        await settle(scroll)
+        XCTAssertEqual(requests, 3, "An unchanged estimated layout must not cause an unlimited retry loop.")
+        await settle(scroll)
+        XCTAssertEqual(requests, 3)
+
+        acceptsScroll = true
+        document.setFrameSize(CGSize(width: 400, height: 8_000))
+        await settle(scroll)
+        XCTAssertEqual(requests, 4)
+        XCTAssertEqual(scroll.documentVisibleRect.maxY, 8_000, accuracy: 1)
+    }
+
+    @MainActor
+    func testTranscriptRetriesDeferredScrollBeforeRecordingLayoutAsFollowed() async {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        scroll.documentView = FlippedTranscriptDocument(frame: NSRect(x: 0, y: 0, width: 400, height: 4_000))
+        let anchor = AgentTranscriptScrollAnchor(frame: .zero)
+        let interaction = AgentTextInteraction()
+        var requests = 0
+        anchor.configure(sessionID: UUID(), interaction: interaction) {
+            requests += 1
+            if requests > 1 { scroll.contentView.scroll(to: CGPoint(x: 0, y: 3_600)) }
+        }
+        anchor.attach(to: scroll)
+        await settle(scroll)
+        XCTAssertEqual(requests, 2, "A deferred scroll must be retried even if the estimated layout is unchanged.")
+        XCTAssertEqual(scroll.documentVisibleRect.maxY, 4_000, accuracy: 1)
+        anchor.scrollToEndIfNeeded()
+        XCTAssertEqual(requests, 2, "A confirmed scroll must not be repeated.")
+        anchor.stopObserving()
+    }
+
+    @MainActor
+    func testRapidUpdatesInLongTranscriptKeepRealizedTextVisibleWithoutManualScroll() async throws {
+        let sessionID = UUID()
+        let interaction = AgentTextInteraction()
+        var messages = (0..<600).map {
+            ScrollTestMessage(id: $0, text: "Message \($0)\n" + String(repeating: "- wrapped 中文😀 line\n", count: $0 % 12 + 1))
+        }
+        let host = NSHostingView(rootView: ScrollTestTranscript(
+            messages: messages, sessionID: sessionID, interaction: interaction, showsLoading: true
+        ))
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 420, height: 360),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        await settle(host)
+        let anchor = try XCTUnwrap(descendants(host).compactMap { $0 as? AgentTranscriptScrollAnchor }.first)
+        let scroll = try XCTUnwrap(anchor.enclosingScrollView)
+        for round in 0..<12 {
+            messages.append(ScrollTestMessage(id: 1_000 + round, text: "Round \(round)\n"))
+            for chunk in 0..<8 {
+                messages[messages.count - 1].text += String(repeating: "New content \(chunk) 中文😀\n", count: 10)
+                host.rootView = ScrollTestTranscript(
+                    messages: messages, sessionID: sessionID, interaction: interaction, showsLoading: true
+                )
+                host.layoutSubtreeIfNeeded()
+                await Task.yield()
+            }
+            host.rootView = ScrollTestTranscript(messages: messages, sessionID: sessionID, interaction: interaction)
+            await settle(host)
+            let answer = try XCTUnwrap(descendants(host).compactMap { $0 as? AgentSelectableTextView }.first {
+                $0.string.hasPrefix("Round \(round)\n")
+            })
+            let manager = try XCTUnwrap(answer.layoutManager)
+            let container = try XCTUnwrap(answer.textContainer)
+            manager.ensureLayout(for: container)
+            let characters = NSRange(location: (answer.string as NSString).length - 1, length: 1)
+            let glyphs = manager.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
+            let line = manager.boundingRect(forGlyphRange: glyphs, in: container)
+            XCTAssertTrue(answer.convert(line, to: scroll.documentView).intersects(scroll.documentVisibleRect),
+                          "New content must be rendered in the viewport without a user scroll, round \(round).")
+            assertAtBottom(scroll, interaction: interaction)
+        }
+    }
+
     @MainActor
     func testLargeCommandOutputHasBoundedViewportAndCopiesMultipleLines() async throws {
         let scroll = AgentCommandOutputScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 220))

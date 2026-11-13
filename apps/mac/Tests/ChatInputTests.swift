@@ -5,6 +5,39 @@ import XCTest
 
 final class ChatInputTests: XCTestCase {
     @MainActor
+    func testInputWrapsLongLinesAndOnlyScrollsVertically() async throws {
+        var draft = String(repeating: "a", count: 2_000) + "\n"
+            + String(repeating: "long-path/中文😀", count: 100)
+        let host = NSHostingView(rootView: AttachmentTextEditor(
+            text: Binding(get: { draft }, set: { draft = $0 }), disabled: false,
+            onFiles: { _ in }, onImage: { _ in }, onKey: { _ in false }
+        ))
+        let window = NSWindow(contentRect: NSRect(x: -10_000, y: -10_000, width: 360, height: 110),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host
+        defer { window.contentView = nil }
+        await settle(host)
+        let view = try XCTUnwrap(textView(in: host))
+        let scroll = try XCTUnwrap(view.enclosingScrollView)
+        XCTAssertFalse(scroll.hasHorizontalScroller)
+        XCTAssertEqual(scroll.horizontalScrollElasticity, .none)
+        XCTAssertFalse(view.isHorizontallyResizable)
+        for width in [360.0, 240.0, 600.0] {
+            window.setContentSize(NSSize(width: width, height: 110))
+            await settle(host)
+            let manager = try XCTUnwrap(view.layoutManager)
+            let container = try XCTUnwrap(view.textContainer)
+            manager.ensureLayout(for: container)
+            XCTAssertLessThanOrEqual(view.frame.width, scroll.contentSize.width + 1)
+            XCTAssertGreaterThan(manager.usedRect(for: container).height, scroll.contentSize.height)
+            view.setSelectedRange(NSRange(location: (draft as NSString).length, length: 0))
+            view.scrollRangeToVisible(view.selectedRange())
+            XCTAssertEqual(scroll.contentView.bounds.minX, 0, accuracy: 0.5)
+            XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0, "Vertical scrolling must remain available.")
+        }
+    }
+
+    @MainActor
     func testRefreshPreservesMarkedTextAndSelectionUntilCommit() async throws {
         var draft = "问题："
         func editor() -> AttachmentTextEditor {
