@@ -381,6 +381,8 @@ pnpm cardputerzero:build Debug
 
 ## CardputerZero 构建与打包
 
+启动器图标直接复用项目统一图标 `apps/mac/packaging/AppIcon/AppIcon.appiconset/icon_128x128.png`，按原样保存为 `assets/images/termrelay-cardputerzero.png`（128×128 RGBA PNG）。启动器会为选中和侧边卡片自动缩放，无需另外生成 100 / 80 像素文件；原 Hello World 占位图及旧尺寸变体已移除。CMake 安装会同时更新应用资源目录和 M5 启动器共享图标目录。
+
 保留 `cp0-cross` 和 `cp0-native` 预设，但须先核对实机系统 ABI、BSP 和工具链。
 不能把宿主机编译通过等同于设备可用。完整发布脚本和根 release 命令尚未提供。
 设备包产物目录已调整为根 `dist/termrelay-cardputerzero/`。
