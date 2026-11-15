@@ -236,10 +236,11 @@ sudo cmake --install build/cp0-native --config Debug --prefix /usr
 
 随后已在用户公网服务完成证书校验、Web 授权和 WSS 身份确认，读取到 3 台授权设备及真实 ACP 会话元数据；
 关闭并重新启动应用后，使用本机永久凭据自动恢复在线，无需再次批准。
-只读探针确认线上服务声明 `devices.list` / `sessions.list`，没有声明 `conversation`。
-已核对 Jetson 实际运行的 `termrelay/server:0.1.68`：镜像没有掌机聊天模块，因此真实聊天历史 / 发送 / 审批 / 问答仍需更新服务端后验收。
+更新前只读探针确认线上服务仅声明 `devices.list` / `sessions.list`，没有声明 `conversation`。
+当时 Jetson 运行的 `termrelay/server:0.1.68` 没有掌机聊天模块。随后通过 Release Runner 发布 `0.1.71`，
+构建、上传、部署及健康检查成功；掌机无需重新授权即自动重连，真实 ACP 会话进入聊天页，历史同步及中文显示通过实机检查。
 此次没有向真实 AI 发送消息，也没有处理真实审批或修改现有授权范围。
-更新准备检查：Server 测试 218 项中 212 通过、6 项按配置跳过，Web 生产构建通过，Release Runner 的服务端配置校验通过；尚未发布新服务端。
+发布前检查：Server 测试 218 项中 212 通过、6 项按配置跳过，Web 生产构建通过，Release Runner 的服务端配置校验通过。
 本轮仅修改掌机应用和文档，未更改 Contracts / Server / Web；未重跑全仓库 `pnpm check`。
 
 ## 本次如何从模板初始化
