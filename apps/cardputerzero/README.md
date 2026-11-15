@@ -353,6 +353,30 @@ pnpm check
 
 发布前仍需真实 MySQL 迁移、公网 TLS / Access、320×170 视觉与键盘交互、实机 ABI、Linux 交叉编译和设备依赖打包验收。模板 Debian 依赖清单尚未适配并验证设备上的 WebSocket libcurl，不可直接发布 `.deb`。
 
+## 在开发电脑编译，在掌机运行
+
+Apple Silicon Mac 可使用本机 Docker Desktop 的 Linux ARM64 容器编译设备程序，无需让掌机承担编译负载。构建容器使用 Debian 13，与当前掌机系统匹配；这是 Linux 容器内的 ARM64 原生构建，不使用旧 BSP 交叉编译预设。Intel 电脑需要 Docker 的 ARM64 模拟支持，速度未验证。
+
+在仓库根目录运行：
+
+```sh
+bash apps/cardputerzero/scripts/build-arm64-container.sh
+# 需要更完整的调试行为时：
+bash apps/cardputerzero/scripts/build-arm64-container.sh Debug
+```
+
+默认 `RelWithDebInfo` 使用 `-O2 -g1`，保留调试符号并启用优化；也支持 `Release`。默认并行 4 任务，可通过 `CARDPUTER_BUILD_JOBS=8` 调整。首次准备镜像需要联网安装编译依赖并下载 LVGL 9.5.0；之后编译和 CTest 在禁网容器内运行，镜像和 `build/cp0-container/` 缓存可复用。容器只挂载本应用目录，不需要掌机授权文件或 SSH 凭据。
+
+当前网络访问 Debian 默认 CDN 的大索引会超时，构建镜像默认使用清华 Debian 镜像，仍使用 Debian 官方签名验证索引与软件包。可设 `CARDPUTER_DEBIAN_MIRROR=http://deb.debian.org` 切回官方 CDN。
+
+产物为 `apps/cardputerzero/build/cp0-container/RelWithDebInfo/termrelay-cardputerzero`，同目录包含测试和探针可执行文件。编辑源码后重跑同一命令即可增量编译；不需要同步源码或 CMake 缓存到掌机。`build/cp0-native/` 仍保留给必要时的设备本机构建，两套缓存互不混用。
+
+调试时仅上传可执行文件；先保留设备旧程序，检查 ELF 为 Linux AArch64、`ldd` 无缺失库，再以普通用户运行并验证屏幕、键盘及连接。已有 `/usr/share/termrelay-cardputerzero/` 资源、系统 Noto CJK 字体及私有授权状态继续由掌机使用。修改资源时需另外同步相应资源。确认正常后再替换 `/usr/bin/termrelay-cardputerzero`，保留 M5 启动器退出恢复逻辑。该流程不构建或发布 `.deb`，也不改动 Server。
+
+2026-11-15 已在当前 Apple Silicon Mac 的 Docker Desktop 完成全量 ARM64 构建，GCC 14.2、glibc 2.41、curl 8.14.1、fmt 10.1.1 与设备兼容。本机容器 CTest 4/4 通过，同一批二进制上传掌机后 4/4 通过，聊天界面回环探针通过。设备无需编译即运行成功，永久授权恢复在线并显示 3 台设备，返回配置页的 Tab / Shift+Tab 与高亮正常；重启后再次恢复在线。安装文件与本机产物 SHA-256 一致（`ef34af21d78d…`），已替换掌机入口。
+
+在线配置页一次 10 秒采样：单核 CPU 约 3.4%，RSS 20,400 KiB，进程 Swap 为 0；这是优化构建的一次空闲采样，不代表聊天负载或续航。旧程序备份在设备 `/home/weijia/.local/state/termrelay-host-build-20261115/termrelay-cardputerzero.before`。本轮未修改业务协议或 Server / Web，未运行全仓库 `pnpm check`。
+
 ## CardputerZero 构建与打包
 
 保留 `cp0-cross` 和 `cp0-native` 预设，但须先核对实机系统 ABI、BSP 和工具链。

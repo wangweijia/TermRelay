@@ -41,6 +41,22 @@
             }
         },
         {
+            "name": "cp0-container",
+            "displayName": "CardputerZero ARM64 Container Build",
+            "description": "Build on the development computer in a Debian 13 ARM64 container",
+            "inherits": [
+                "cp0-native"
+            ],
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo",
+                "CMAKE_C_FLAGS_RELWITHDEBINFO": "-O2 -g1 -DNDEBUG",
+                "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g1 -DNDEBUG",
+                "CM0_ALLOW_FETCH_DEPS": "OFF",
+                "FETCHCONTENT_BASE_DIR": "${sourceDir}/.cache/cp0-container-deps"
+            }
+        },
+        {
             "name": "darwin-arm64",
             "displayName": "Apple Silicon Desktop Builds",
             "description": "Configure for Apple Silicon using Ninja Multi-Config",
