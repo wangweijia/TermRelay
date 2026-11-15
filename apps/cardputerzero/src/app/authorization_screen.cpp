@@ -1,5 +1,6 @@
 #include "authorization_screen.h"
 #include "linux_input.h"
+#include "listing_protocol.h"
 #include <algorithm>
 #include <string>
 
@@ -107,7 +108,9 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
     browser_refresh_ = browse_button(108, 104, "Refresh");
     browser_next_ = browse_button(216, 104, "Next page");
     chat_ = std::make_unique<ConversationScreen>(authorization_, [this] {
-        page_ = Page::Sessions; lv_screen_load(browser_); render_browser();
+        page_ = Page::Sessions;
+        if (authorization_.snapshot().state == connection::State::Connected) authorization_.list_sessions(device_id_, sessions_cursor_);
+        lv_screen_load(browser_); render_browser();
     });
     lv_obj_add_event_cb(origin_, +[](lv_event_t* event) {
         auto* screen = static_cast<AuthorizationScreen*>(lv_event_get_user_data(event));
@@ -205,14 +208,8 @@ void AuthorizationScreen::back() {
 
 void AuthorizationScreen::render_browser() {
     displayed_ = authorization_.listing();
-    if (page_ == Page::Devices) {
-        // Filter the displayed snapshot as well as its rows so button indexes
-        // still resolve to the correct device after an offline entry is hidden.
-        auto& devices = displayed_.devices;
-        devices.erase(std::remove_if(devices.begin(), devices.end(), [](const auto& device) {
-            return device.status == "offline";
-        }), devices.end());
-    }
+    // Filter both rows and their backing indexes while preserving page cursors.
+    connection::filter_browser_listing(displayed_);
     rendered_revision_ = displayed_.revision; rendered_loading_ = displayed_.loading;
     rendered_online_ = authorization_.snapshot().state == connection::State::Connected;
     const std::string title = page_ == Page::Devices ? "Devices" : page_ == Page::Detail ? "Session info" : device_name_;
@@ -250,7 +247,8 @@ void AuthorizationScreen::render_browser() {
             ? "No online devices." : "No online devices on this page.\nNext page to continue.");
     } else if (displayed_.device_id == device_id_) {
         for (const auto& session : displayed_.sessions) row((session.name.empty() ? session.id : session.name) + "\n" + session.runtime_mode + " | " + session.status);
-        if (displayed_.sessions.empty()) label("No sessions on this device.");
+        if (displayed_.sessions.empty()) label(displayed_.next_sessions.empty()
+            ? "No active sessions." : "No active sessions on this page.\nNext page to continue.");
     } else label(rendered_online_ ? "Refresh to load sessions." : "No cached page for this device.");
     const auto next = page_ == Page::Devices ? displayed_.next_devices : displayed_.next_sessions;
     disabled(browser_refresh_, !rendered_online_ || displayed_.loading || !displayed_.supported || page_ == Page::Detail);

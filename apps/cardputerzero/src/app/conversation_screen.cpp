@@ -74,6 +74,19 @@ bool ConversationScreen::request_current() const {
         return item.at("seq") == selected_.at("seq") && text(item, "reviewToken") == text(selected_, "reviewToken");
     });
 }
+void ConversationScreen::update_editor_controls() {
+    if (page_ != Page::Editor || !editor_) return;
+    const bool online = connection_.snapshot().state == connection::State::Connected;
+    const bool pending = snapshot_.command_state == "waiting";
+    const bool unknown = snapshot_.command_state == "unknown";
+    const std::string draft = lv_textarea_get_text(editor_);
+    disabled(right_, !online || !snapshot_.ready || !snapshot_.can_write || snapshot_.turn_active
+        || pending || unknown || draft.find_first_not_of(" \t\r\n") == std::string::npos);
+    disabled(editor_, pending);
+    lv_label_set_text(status_, !online ? "Offline (cache)" : pending ? "Sending..." : unknown ? "Result unknown"
+        : !snapshot_.ready ? "Synchronizing" : !snapshot_.can_write ? "Read only" : snapshot_.turn_active ? "AI running" : "Ready to send");
+    platform::bind_key_group(group_);
+}
 void ConversationScreen::render(bool latest) {
     if (editor_) drafts_[snapshot_.session_id] = lv_textarea_get_text(editor_);
     editor_ = nullptr; fields_.clear(); rendered_revision_ = snapshot_.revision;
@@ -103,8 +116,10 @@ void ConversationScreen::render(bool latest) {
         editor_ = lv_textarea_create(content_); lv_obj_set_size(editor_, 298, 112); lv_textarea_set_max_length(editor_, 4000);
         lv_textarea_set_placeholder_text(editor_, "Message (Enter adds a line)"); lv_textarea_set_text(editor_, drafts_[snapshot_.session_id].c_str());
         lv_group_add_obj(group_, editor_); set_footer("Back", "Status", "Send");
-        disabled(editor_, snapshot_.command_state == "waiting");
-        disabled(right_, !snapshot_.ready || !snapshot_.can_write || !rendered_online_ || snapshot_.command_state == "waiting" || snapshot_.command_state == "unknown");
+        lv_obj_add_event_cb(editor_, +[](lv_event_t* event) {
+            static_cast<ConversationScreen*>(lv_event_get_user_data(event))->update_editor_controls();
+        }, LV_EVENT_VALUE_CHANGED, this);
+        update_editor_controls();
     } else if (page_ == Page::Requests) {
         for (std::size_t i = 0; i < snapshot_.requests.size(); i++) {
             const auto& item = snapshot_.requests[i];
@@ -186,6 +201,7 @@ void ConversationScreen::refresh() {
         submitted_id_.clear(); submitted_request_.clear();
         if (page_ == Page::Editor || page_ == Page::Questions || page_ == Page::Approval) { page_ = Page::Transcript; editor_ = nullptr; render(true); return; }
     }
+    update_editor_controls();
     if (!changed) return;
     if (page_ == Page::Transcript) {
         const auto focused = lv_group_get_focused(group_);
@@ -205,7 +221,7 @@ void ConversationScreen::refresh() {
             disabled(right_, lv_obj_has_state(middle_, LV_STATE_DISABLED) || selected_.at("payload").is_null() || text(selected_, "reviewToken").empty()
                 || connection::conversation_event_text(selected_).size() > 64 * 1024);
         }
-    } else if (page_ == Page::Editor || page_ == Page::Questions) {
+    } else if (page_ == Page::Questions) {
         const bool blocked = !online || !snapshot_.ready || !snapshot_.can_write || snapshot_.command_state == "waiting" || snapshot_.command_state == "unknown";
         disabled(right_, blocked || (page_ == Page::Questions && !request_current()));
         if (editor_) disabled(editor_, snapshot_.command_state == "waiting");
@@ -302,6 +318,8 @@ void ConversationScreen::action(int id) {
     } else if (id == -3) {
         if (page_ == Page::Transcript) { page_ = Page::Editor; if (drafts_.size() >= 8 && !drafts_.count(snapshot_.session_id)) drafts_.erase(drafts_.begin()); render(); }
         else if (page_ == Page::Editor && editor_) {
+            snapshot_ = connection_.conversation(); update_editor_controls();
+            if (lv_obj_has_state(right_, LV_STATE_DISABLED)) return;
             const std::string value = lv_textarea_get_text(editor_); if (value.find_first_not_of(" \t\r\n") == std::string::npos) return;
             drafts_[snapshot_.session_id] = value; submitted_text_ = value; submit("tool.turn.start", {{"text", value}});
         } else if (page_ == Page::Requests && snapshot_.requests_before >= 0) connection_.conversation_read("requests", {{"beforeSeq", snapshot_.requests_before}});

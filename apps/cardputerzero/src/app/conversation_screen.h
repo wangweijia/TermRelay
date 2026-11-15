@@ -21,6 +21,7 @@ private:
     void render(bool latest = false);
     void add_text(const std::string& text);
     lv_obj_t* add_action(const std::string& text, int action);
+    void update_editor_controls();
     void set_footer(const char* left, const char* middle, const char* right);
     void action(int id);
     void back();

@@ -78,15 +78,31 @@ int main(int argc, char** argv) {
             wait([&] { return client.conversation().command_id == id && client.conversation().command_state == "confirmed"; });
         };
 #ifdef TERMRELAY_HEADLESS_UI
-        click("Write");lv_textarea_set_text(input(),"hello from native");click("Send");
+        click("Write");
+        if(!lv_obj_has_state(button("Send"),LV_STATE_DISABLED)) throw std::runtime_error("Empty draft enabled Send");
+        lv_textarea_set_text(input(),"hello from native");click("Send");
         if(std::string(lv_textarea_get_text(input()))!="hello from native"||!lv_obj_has_state(button("Send"),LV_STATE_DISABLED))
             throw std::runtime_error("UI cleared the draft before confirmation or allowed duplicate submission");
         wait([&]{return client.conversation().command_state=="confirmed";});pump();
-        click("Write");if(std::string(lv_textarea_get_text(input()))!="")throw std::runtime_error("Confirmed draft was not cleared");click("Back");
+        if(!client.conversation().turn_active)throw std::runtime_error("Receipt completion incorrectly unlocked sending");
+        click("Write");if(std::string(lv_textarea_get_text(input()))!="")throw std::runtime_error("Confirmed draft was not cleared");
+        lv_textarea_set_text(input(),"after completion");pump();
+        if(!lv_obj_has_state(button("Send"),LV_STATE_DISABLED))throw std::runtime_error("Running AI enabled Send");
+        const auto before_blocked_send=client.conversation().command_id;
+        lv_obj_send_event(button("Send"),LV_EVENT_CLICKED,nullptr);pump();
+        if(client.conversation().command_id!=before_blocked_send)throw std::runtime_error("Disabled Send still queued a command");
+        wait([&]{return !client.conversation().turn_active;});pump();
+        if(std::string(lv_textarea_get_text(input()))!="after completion" || lv_obj_has_state(button("Send"),LV_STATE_DISABLED))
+            throw std::runtime_error("Completion did not enable Send with the preserved draft");
+        click("Send");wait([&]{return client.conversation().command_state=="confirmed";});pump();
 #else
         send("tool.turn.start", {{"text", "hello from native"}});
+        if(!client.conversation().turn_active || !client.conversation_command("tool.turn.start",{{"text","blocked"}}).empty())
+            throw std::runtime_error("Native API permitted sending during an active AI turn");
+        wait([&]{return !client.conversation().turn_active;});
+        send("tool.turn.start", {{"text", "after completion"}});
 #endif
-        wait([&] { for (const auto& message:client.conversation().messages) if(message.text=="native answer")return true;return false; });
+        wait([&] { for (const auto& message:client.conversation().messages) if(message.text=="second answer")return true;return false; });
         const auto request = [&](const std::string& id) {
             wait([&] { for(const auto& item:client.conversation().requests) if(item.at("payload").is_object()) {
                 const auto data=item.at("payload").at("data");if(data.value("approvalId",data.value("requestId",std::string()))==id)return true;
@@ -133,6 +149,7 @@ int main(int argc, char** argv) {
 #else
         send("tool.approval.resolve", {{"approvalId","large-approval"},{"turnId","turn"},{"decision","allowOnce"}}, approval.at("reviewToken"));
 #endif
+        wait([&]{return !client.conversation().turn_active;});
         std::cout << "CHAT_INTERACTION_OK" << std::endl;
         const auto lost = client.conversation_command("tool.turn.start",{{"text","lost ack"}});
         if(lost.empty())throw std::runtime_error("Lost-ACK test was not queued");

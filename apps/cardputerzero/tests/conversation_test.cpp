@@ -8,11 +8,16 @@ Json item(unsigned seq, const std::string& content = "text") {
     return {{"seq", seq}, {"type", "tool.event"}, {"createdAt", "2026-11-10T00:00:00Z"}, {"bytes", 200},
         {"payload", {{"kind", "assistant.delta"}, {"correlation", {{"turnId", "turn"}, {"itemId", "answer"}}}, {"data", {{"text", content}}}}}};
 }
+Json event(unsigned seq, const std::string& kind) {
+    auto result = item(seq); result["payload"]["kind"] = kind;
+    result["payload"]["data"] = {{"turnId", "turn"}, {"status", "completed"}};
+    return result;
+}
 Json session() { return {{"id", "chat"}, {"deviceId", "mac"}, {"workspaceId", "opaque"}, {"toolKey", "codex"}, {"displayName", "Chat"}, {"runtimeMode", "acp"}, {"status", "running"}}; }
 Json response(const std::string& op, Json body) { return {{"op", op}, {"sessionId", "chat"}, {"body", body}}; }
 void ready(connection::ConversationModel& model) {
     model.open("chat");
-    model.apply(response("sync", {{"syncId", sync_id}, {"boundary", 2}, {"session", session()}, {"canWrite", true}, {"items", Json::array({item(1,"A"),item(2,"B")})}, {"beforeSeq",1}}));
+    model.apply(response("sync", {{"syncId", sync_id}, {"boundary", 2}, {"session", session()}, {"canWrite", true}, {"items", Json::array({item(1,"AB"),event(2,"turn.completed")})}, {"beforeSeq",1}}));
     model.apply(response("ready", {{"syncId",sync_id}}));
 }
 int main() {
@@ -30,6 +35,35 @@ int main() {
         wrong["sessionId"] = "another-session"; model.apply(wrong); require(model.state.events.size() == 2);
         wrong["sessionId"] = "chat"; wrong["body"]["syncId"] = "old-sync"; model.apply(wrong); require(model.state.events.size() == 2);
         wrong["body"]["syncId"] = sync_id; model.apply(wrong); require(model.state.messages[0].text == "0AB" && model.state.before_seq == -1);
+        const auto rejected_start = [&](connection::ConversationModel& current) {
+            bool rejected = false;
+            try { current.begin_command("blocked", "tool.turn.start"); } catch (const std::runtime_error&) { rejected = true; }
+            require(rejected);
+        };
+        ready(model); require(!model.state.turn_active);
+        model.apply(live(Json::array({event(3,"turn.started")}),3));
+        require(model.state.turn_active); rejected_start(model);
+        model.apply(response("history", {{"syncId",sync_id},{"items",Json::array({event(0,"turn.completed")})},{"beforeSeq",nullptr}}));
+        require(model.state.turn_active); rejected_start(model);
+        // Human responses remain actionable while a turn waits for approval.
+        model.begin_command("approval", "tool.approval.resolve");
+        model.apply(response("ack", {{"commandId","approval"},{"ack",{{"commandId","approval"},{"status","completed"}}}}));
+        require(model.state.turn_active); rejected_start(model);
+        model.apply(live(Json::array({event(4,"turn.completed")}),4));
+        require(!model.state.turn_active);
+        model.begin_command("new-turn", "tool.turn.start"); require(model.state.turn_active);
+        model.apply(response("ack", {{"commandId","new-turn"},{"ack",{{"commandId","new-turn"},{"status","completed"}}}}));
+        rejected_start(model); // Receipt completion must not unlock another send.
+        model.apply(live(Json::array({event(5,"turn.completed"),event(6,"turn.started")}),6));
+        require(model.state.turn_active); rejected_start(model); // Another client started the next turn.
+        model.apply(live(Json::array({event(7,"turn.completed")}),7));
+        require(!model.state.turn_active);
+        auto truncated = response("sync", {{"syncId",sync_id},{"boundary",20},{"session",session()},{"canWrite",true},
+            {"items",Json::array({event(20,"config.updated")})},{"beforeSeq",20}});
+        model.apply(truncated); model.apply(response("ready", {{"syncId",sync_id}}));
+        require(model.state.turn_active); rejected_start(model);
+        // Reconnection must derive activity from the current bounded snapshot.
+        ready(model); require(!model.state.turn_active);
         const std::string command = "20000000-0000-4000-8000-000000000001";
         model.begin_command(command,"tool.turn.start"); model.disconnected(); require(model.state.command_state == "unknown");
         model.apply(response("ack", {{"commandId",command},{"ack",{{"commandId",command},{"status","accepted"}}}}));

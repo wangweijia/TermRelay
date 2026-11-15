@@ -71,6 +71,10 @@ void ConversationModel::disconnected() {
 void ConversationModel::begin_command(const std::string& id, const std::string& type) {
     if (!state.ready || !state.can_write || state.command_state == "waiting" || state.command_state == "unknown")
         throw std::runtime_error("Check the previous command result first");
+    if (type == "tool.turn.start" && state.turn_active)
+        throw std::runtime_error("Wait for the current AI turn to finish");
+    // A command receipt only confirms delivery/execution, not the end of a turn.
+    if (type == "tool.turn.start") state.turn_active = true;
     state.command_id = id; state.command_type = type; state.command_state = "waiting"; state.error.clear(); state.revision++;
 }
 void ConversationModel::fail(const std::string& op, const std::string& message) {
@@ -91,7 +95,7 @@ void ConversationModel::merge(const Json& events, bool live, bool older) {
             state.through_seq = seq;
         }
         auto existing = std::find_if(state.events.begin(), state.events.end(), [&](const Json& item) { return item.at("seq") == seq; });
-        if (existing == state.events.end()) { state.events.push_back(event); project(event); }
+        if (existing == state.events.end()) { state.events.push_back(event); project(event); if (live) update_activity(event); }
     }
     std::sort(state.events.begin(), state.events.end(), [](const Json& a, const Json& b) { return number(a.at("seq")) < number(b.at("seq")); });
     while (state.events.size() > 128 || state.events.dump().size() > 256 * 1024) {
@@ -108,6 +112,16 @@ void ConversationModel::merge(const Json& events, bool live, bool older) {
         if (older) { size -= state.messages.back().text.size(); state.messages.pop_back(); }
         else { size -= state.messages.front().text.size(); state.messages.erase(state.messages.begin()); }
     }
+}
+void ConversationModel::update_activity(const Json& event) {
+    if (event.at("type") != "tool.event") return;
+    const auto& payload = event.at("payload");
+    // An unloaded event may contain a turn boundary. Stay blocked until an
+    // explicit completion, rather than treating a truncated snapshot as idle.
+    if (payload.is_null()) { state.turn_active = true; return; }
+    const auto kind = str(payload, "kind");
+    if (kind == "turn.completed") state.turn_active = false;
+    else if (kind != "config.updated" && kind != "warning" && kind != "error") state.turn_active = true;
 }
 void ConversationModel::project(const Json& event) {
     const auto seq = number(event.at("seq")); const auto& payload = event.at("payload");
@@ -169,7 +183,12 @@ void ConversationModel::apply_response(const Json& response) {
         page(body.at("items"));
         for (const auto& event : body.at("items")) if (number(event.at("seq")) > boundary) throw std::runtime_error("Event exceeds snapshot boundary");
         state.sync_id = sync_id; state.through_seq = boundary; state.events = Json::array(); state.messages.clear();
-        merge(body.at("items"), false); state.before_seq = before(body); state.needs_sync = false; state.loading = false;
+        state.before_seq = before(body);
+        state.turn_active = state.before_seq >= 0;
+        merge(body.at("items"), false);
+        // History reads and loading old details must never change live activity.
+        for (const auto& event : state.events) update_activity(event);
+        state.needs_sync = false; state.loading = false;
     } else if (op == "ready") { state.ready = true; state.error.clear(); }
     else if (op == "history") {
         merge(body.at("items"), false, true);

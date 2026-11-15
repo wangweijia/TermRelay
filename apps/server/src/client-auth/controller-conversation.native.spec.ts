@@ -28,7 +28,8 @@ async function runProbe(binary: string) {
   const events: SessionEventRecord[] = []; let pending: SessionEventRecord[] = [];
   const make = (seq: number, kind: string, data: Record<string, unknown>): SessionEventRecord => ({ seq, type: 'tool.event', createdAt: new Date().toISOString(),
     payload: { kind, occurredAt: new Date().toISOString(), correlation: { turnId: 'turn', itemId: String(seq) }, data: { turnId: 'turn', ...data } } });
-  for (let seq = 0; seq < 30; seq++) events.push(make(seq, 'user.message', { text: `history ${seq}` }));
+  for (let seq = 0; seq < 29; seq++) events.push(make(seq, 'user.message', { text: `history ${seq}` }));
+  events.push(make(29, 'turn.completed', { status: 'completed' }));
   const append = (kind: string, data: Record<string, unknown>) => {
     const item = make(events.length, kind, data); events.push(item); session.stateVersion = item.seq;
     eventListener({ sessionId: session.id, deviceId: session.deviceId, event: item }); return item;
@@ -57,16 +58,23 @@ async function runProbe(binary: string) {
     const command = JSON.parse(wire).data; executed.push(command);
     const ack = () => relay.acknowledge(mac, { ...command, type: 'command.ack', payload: { commandId: command.commandId, status: 'completed' } });
     if (command.type === 'tool.turn.start') {
+      append('turn.started', {});
       append('user.message', { text: command.payload.text });
-      append('assistant.completed', { text: command.payload.text === 'lost ack' ? 'executed once' : 'native answer' });
-      append('turn.completed', { status: 'completed' });
       if (command.payload.text === 'lost ack') {
+        append('assistant.completed', { text: 'executed once' }); append('turn.completed', { status: 'completed' });
         later(() => nativeSocket?.close(1012, 'synthetic restart'), 20);
         later(() => { void ack().catch(error => serverErrors.push(error)); }, 250); return;
       }
-      later(() => human('approval.requested', { approvalId: 'small-approval', title: 'Synthetic command', detail: 'Review this harmless fixture command' }), 30);
+      later(() => {
+        append('assistant.completed', { text: command.payload.text === 'hello from native' ? 'native answer' : 'second answer' });
+        append('turn.completed', { status: 'completed' });
+        if (command.payload.text === 'after completion') later(() => human('approval.requested', {
+          approvalId: 'small-approval', title: 'Synthetic command', detail: 'Review this harmless fixture command'
+        }), 100);
+      }, 500);
     } else if (command.type === 'tool.approval.resolve') {
       pending = []; append('approval.resolved', { approvalId: command.payload.approvalId, decision: command.payload.decision });
+      if (command.payload.approvalId === 'large-approval') append('turn.completed', { status: 'completed' });
       if (command.payload.approvalId === 'small-approval') later(() => human('user-input.requested', { requestId: 'question', questions: [
         { id: 'choice', header: 'Choose', question: 'Choose both options', options: [{ label: 'one', description: 'first' }, { label: 'two', description: 'second' }], allowsMultiple: true, allowsOther: false, isSecret: false },
         { id: 'free', header: 'Details', question: 'Your details', options: [], allowsOther: true, isSecret: true },
@@ -76,7 +84,7 @@ async function runProbe(binary: string) {
       pending = []; append('user-input.resolved', { requestId: 'question' });
       later(() => human('approval.requested', { approvalId: 'large-approval', title: 'Large request', detail: '大'.repeat(20_000) }), 30);
     }
-    void ack().catch(error => serverErrors.push(error));
+    later(() => { void ack().catch(error => serverErrors.push(error)); }, 80);
   } } as unknown as WebSocket;
   const registry = { getClient: (id: string) => id === 'mac' ? mac : undefined, isRegisteredClient: (socket: WebSocket) => socket === mac } as unknown as DeviceConnectionRegistry;
   relay = new CommandRelayService(registry, sessions, undefined, records);
@@ -118,7 +126,8 @@ async function runProbe(binary: string) {
     assert.equal((await completion)[0], 0, stderr + '\n' + stdout);
     assert.match(stdout, /CHAT_INTERACTION_OK/); assert.match(stdout, /CHAT_RECOVERED/); assert.match(stdout, /CHAT_REVOKED/);
     assert.equal(executed.filter(item => item.type === 'tool.turn.start' && item.payload.text === 'lost ack').length, 1);
-    assert.equal(executed.length, 5); assert.deepEqual(serverErrors, []);
+    assert.equal(executed.length, 6);
+    assert.equal(executed.filter(item => item.type === 'tool.turn.start' && item.payload.text === 'after completion').length, 1); assert.deepEqual(serverErrors, []);
     const stored = JSON.parse(await readFile(join(directory, 'authorization.json'), 'utf8'));
     assert.equal(stored.credential, ''); assert.deepEqual(stored.pendingCommands, []);
     assert.doesNotMatch(JSON.stringify(stored), /hello from native|free answer|native answer/);

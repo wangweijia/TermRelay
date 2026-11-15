@@ -22,6 +22,16 @@ std::string choice(const Json& object, const char* key, std::initializer_list<co
     return result;
 }
 }
+void filter_browser_listing(ListingSnapshot& snapshot) {
+    auto& devices = snapshot.devices;
+    devices.erase(std::remove_if(devices.begin(), devices.end(), [](const auto& device) {
+        return device.status == "offline";
+    }), devices.end());
+    auto& sessions = snapshot.sessions;
+    sessions.erase(std::remove_if(sessions.begin(), sessions.end(), [](const auto& session) {
+        return session.status == "finished" || session.status == "failed";
+    }), sessions.end());
+}
 void apply_listing_page(ListingSnapshot& snapshot, const Json& payload,
                         const std::string& device_id, const std::string& cursor) {
     if (!payload.is_object() || payload.size() != (device_id.empty() ? 3u : 4u)) throw std::runtime_error("Invalid list response");

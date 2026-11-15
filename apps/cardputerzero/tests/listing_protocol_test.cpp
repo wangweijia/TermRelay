@@ -36,6 +36,26 @@ int main() {
         }})}};
         connection::apply_listing_page(snapshot, sessions, "mac-a", "");
         require(snapshot.sessions.size() == 1 && snapshot.device_id == "mac-a" && snapshot.sessions[0].name.empty());
+        // Raw protocol pages still contain ended sessions; only the displayed
+        // copy is filtered, with IDs/indexes and pagination cursors preserved.
+        auto mixed = sessions;
+        mixed["nextCursor"] = "last-failed";
+        for (const auto& entry : {std::pair{"active", "running"}, {"starting", "starting"}, {"stopping", "stopping"}, {"last-failed", "failed"}}) {
+            auto row = mixed["items"][0]; row["id"] = entry.first; row["status"] = entry.second;
+            mixed["items"].push_back(row);
+        }
+        connection::apply_listing_page(snapshot, mixed, "mac-a", "");
+        auto visible = snapshot; connection::filter_browser_listing(visible);
+        require(snapshot.sessions.size() == 5 && visible.sessions.size() == 3);
+        require(visible.sessions[0].id == "active" && visible.sessions[1].id == "starting" && visible.sessions[2].id == "stopping");
+        require(visible.next_sessions == "last-failed");
+        auto only_ended = snapshot; only_ended.sessions = {snapshot.sessions.front(), snapshot.sessions.back()};
+        connection::filter_browser_listing(only_ended);
+        require(only_ended.sessions.empty() && only_ended.next_sessions == "last-failed");
+        auto offline = device(); offline["id"] = "offline"; offline["status"] = "offline";
+        auto device_page = page(); device_page["items"].push_back(offline); device_page["nextCursor"] = "offline";
+        connection::apply_listing_page(visible, device_page, "", ""); connection::filter_browser_listing(visible);
+        require(visible.devices.size() == 1 && visible.devices[0].id == "mac-a" && visible.next_devices == "offline");
         invalid(sessions, "other-device");
         sessions["items"][0]["deviceId"] = "forged-device"; invalid(sessions, "mac-a");
         std::string chinese;

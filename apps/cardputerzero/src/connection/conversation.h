@@ -9,6 +9,7 @@ struct ChatMessage { std::string id, role, text; std::uint64_t seq = 0; bool inc
 struct ConversationSnapshot {
     std::string session_id, sync_id, device_id, title, error;
     std::string command_id, command_state = "idle", command_type;
+    bool turn_active = false;
     bool supported = false, ready = false, loading = false, can_write = false, needs_sync = false, requests_changed = false;
     std::int64_t before_seq = -1, requests_before = -1;
     std::uint64_t through_seq = 0, revision = 0;
@@ -27,6 +28,7 @@ public:
 private:
     void apply_response(const nlohmann::json& response);
     void merge(const nlohmann::json& events, bool live, bool older = false);
+    void update_activity(const nlohmann::json& event);
     void project(const nlohmann::json& event);
 };
 std::string conversation_event_text(const nlohmann::json& event);
