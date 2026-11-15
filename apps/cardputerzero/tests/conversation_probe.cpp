@@ -5,6 +5,7 @@
 #include <stdexcept>
 #ifdef TERMRELAY_HEADLESS_UI
 #include "conversation_screen.h"
+#include "theme.h"
 #include <memory>
 #include <vector>
 #endif
@@ -19,6 +20,7 @@ int main(int argc, char** argv) {
         std::vector<std::uint32_t> pixels(320*32);
         lv_display_set_buffers(display,pixels.data(),nullptr,pixels.size()*sizeof(std::uint32_t),LV_DISPLAY_RENDER_MODE_PARTIAL);
         lv_display_set_flush_cb(display,+[](lv_display_t* d,const lv_area_t*,uint8_t*){lv_display_flush_ready(d);});
+        view::apply_lvgl_theme(display, false);
         std::unique_ptr<app::ConversationScreen> ui;
         const auto pump = [&] { lv_tick_inc(20); if(ui)ui->refresh();lv_timer_handler(); };
         const auto find = [&](auto predicate) {

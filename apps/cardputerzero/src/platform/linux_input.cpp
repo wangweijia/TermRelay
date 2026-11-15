@@ -379,6 +379,27 @@ void attach_key_router(lv_indev_t* indev) {
     lv_indev_add_event_cb(indev, key_event_cb, LV_EVENT_KEY, nullptr);
 }
 
+void bind_key_group(lv_group_t* group) {
+    if (!group) return;
+    for (auto* input = lv_indev_get_next(nullptr); input; input = lv_indev_get_next(input)) {
+        if ((lv_indev_get_type(input) == LV_INDEV_TYPE_KEYPAD ||
+             lv_indev_get_type(input) == LV_INDEV_TYPE_ENCODER) && lv_indev_get_group(input) != group) {
+            lv_indev_set_group(input, group);
+        }
+    }
+    // LVGL only auto-focuses when the first object is added. If that object is
+    // disabled (e.g. a saved server address), a rebuilt group stays unfocused
+    // and keypad processing returns before it can handle Tab.
+    auto* focused = lv_group_get_focused(group);
+    bool hidden = false;
+    for (auto* object = focused; object; object = lv_obj_get_parent(object)) {
+        hidden = hidden || lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (!focused || lv_obj_has_state(focused, LV_STATE_DISABLED) || hidden) {
+        lv_group_focus_next(group);
+    }
+}
+
 void set_nav_shortcut_mode(bool enabled) {
     nav_shortcut_mode = enabled;
 }

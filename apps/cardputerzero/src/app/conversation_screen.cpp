@@ -1,4 +1,5 @@
 #include "conversation_screen.h"
+#include "linux_input.h"
 #include <algorithm>
 #include <ctime>
 #include <sstream>
@@ -170,6 +171,7 @@ void ConversationScreen::render(bool latest) {
     if (old_focus == left_ || old_focus == middle_ || old_focus == right_) lv_group_focus_obj(old_focus);
     else if (page_ == Page::Approval) lv_group_focus_obj(middle_);
     else if (page_ == Page::Transcript) lv_group_focus_obj(middle_);
+    platform::bind_key_group(group_);
     if (latest && page_ == Page::Transcript) lv_obj_scroll_to_y(content_, LV_COORD_MAX, LV_ANIM_OFF);
 }
 void ConversationScreen::refresh() {

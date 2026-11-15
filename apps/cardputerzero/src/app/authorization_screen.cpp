@@ -50,8 +50,13 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
     lv_textarea_set_text(origin_, authorization_.snapshot().origin.c_str());
     message_ = lv_label_create(root_);
     lv_obj_set_pos(message_, 8, 82);
-    lv_obj_set_size(message_, 304, 60);
+    lv_obj_set_size(message_, 304, 38);
+    lv_obj_set_style_text_font(message_, &lv_font_montserrat_12, 0);
     lv_label_set_long_mode(message_, LV_LABEL_LONG_WRAP);
+    auto* help = lv_label_create(root_);
+    lv_label_set_text(help, "Tab: next   Enter: select");
+    lv_obj_set_pos(help, 8, 125);
+    lv_obj_set_style_text_font(help, &lv_font_montserrat_10, 0);
     const auto button = [&](int position, int width, const char* text, lv_obj_t** output_label = nullptr) {
         auto* object = lv_button_create(root_);
         lv_obj_set_pos(object, position, 146);
@@ -67,13 +72,11 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
     };
     connect_ = button(0, 78, "Connect", &connect_label_);
     cancel_ = button(80, 72, "Cancel");
-    forget_ = button(154, 108, "Clear local key", &forget_label_);
-    quit_ = button(264, 56, LV_SYMBOL_CLOSE);
+    forget_ = button(154, 108, "Reset key", &forget_label_);
+    quit_ = button(264, 56, "Exit");
     group_ = lv_group_create();
     for (auto* object : {origin_, connect_, cancel_, forget_, quit_}) lv_group_add_obj(group_, object);
-    for (auto* input = lv_indev_get_next(nullptr); input; input = lv_indev_get_next(input)) {
-        if (lv_indev_get_type(input) == LV_INDEV_TYPE_KEYPAD || lv_indev_get_type(input) == LV_INDEV_TYPE_ENCODER) lv_indev_set_group(input, group_);
-    }
+    platform::bind_key_group(group_);
     browser_ = lv_obj_create(nullptr);
     lv_obj_set_style_pad_all(browser_, 0, 0);
     lv_obj_remove_flag(browser_, LV_OBJ_FLAG_SCROLLABLE);
@@ -156,7 +159,7 @@ void AuthorizationScreen::refresh() {
     disabled(forget_, !snapshot.has_credential);
     lv_label_set_text(status_, title(snapshot.state));
     lv_obj_set_style_text_color(status_, snapshot.state == State::Connected ? lv_color_hex(0x43b581) : lv_color_hex(0xe4b955), 0);
-    lv_label_set_text(forget_label_, confirm_forget_ ? "Confirm clear" : "Clear local key");
+    lv_label_set_text(forget_label_, confirm_forget_ ? "Confirm reset" : "Reset key");
     std::string message = snapshot.message;
     if (confirm_forget_) message = "Clear this local key only?\nWeb authorization stays active.";
     else if (snapshot.state == State::Connected) message = "Permanent authorization\nDevices: " + std::to_string(snapshot.device_count);
@@ -172,6 +175,7 @@ void AuthorizationScreen::refresh() {
     }
     if (first_browse_ && snapshot.state == State::Connected) { first_browse_ = false; show_browser(); }
     if (chat_ && chat_->visible()) { chat_->refresh(); return; }
+    if (page_ == Page::Authorization) platform::bind_key_group(group_);
     if (page_ != Page::Authorization) {
         const auto listing = authorization_.listing();
         const bool online = snapshot.state == State::Connected;
@@ -192,15 +196,13 @@ void AuthorizationScreen::back() {
         page_ = Page::Authorization; lv_screen_load(root_);
         lv_group_remove_all_objs(group_);
         for (auto* object : {origin_, connect_, cancel_, forget_, quit_}) lv_group_add_obj(group_, object);
+        platform::bind_key_group(group_);
         return;
     }
     render_browser();
 }
 
 void AuthorizationScreen::render_browser() {
-    for (auto* input = lv_indev_get_next(nullptr); input; input = lv_indev_get_next(input)) {
-        if (lv_indev_get_type(input) == LV_INDEV_TYPE_KEYPAD || lv_indev_get_type(input) == LV_INDEV_TYPE_ENCODER) lv_indev_set_group(input, group_);
-    }
     displayed_ = authorization_.listing();
     rendered_revision_ = displayed_.revision; rendered_loading_ = displayed_.loading;
     rendered_online_ = authorization_.snapshot().state == connection::State::Connected;
@@ -244,6 +246,7 @@ void AuthorizationScreen::render_browser() {
     disabled(browser_refresh_, !rendered_online_ || displayed_.loading || !displayed_.supported || page_ == Page::Detail);
     disabled(browser_next_, !rendered_online_ || displayed_.loading || !displayed_.supported || !displayed_.error.empty() || next.empty() || page_ == Page::Detail);
     for (auto* object : {browser_back_, browser_refresh_, browser_next_}) lv_group_add_obj(group_, object);
+    platform::bind_key_group(group_);
     lv_obj_scroll_to_y(browser_list_, 0, LV_ANIM_OFF);
 }
 

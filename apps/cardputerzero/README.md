@@ -243,6 +243,16 @@ sudo cmake --install build/cp0-native --config Debug --prefix /usr
 发布前检查：Server 测试 218 项中 212 通过、6 项按配置跳过，Web 生产构建通过，Release Runner 的服务端配置校验通过。
 本轮仅修改掌机应用和文档，未更改 Contracts / Server / Web；未重跑全仓库 `pnpm check`。
 
+### 小屏焦点修复（2026-11-15）
+
+修复从设备列表返回 `Server domain` 时 Tab 无效的问题：已保存的域名被禁用，LVGL 在重建导航组时没有选中后续按钮；现在组装完成后恢复到第一个可用控件，并保留刷新时的有效焦点。聊天和列表页也统一恢复键盘组。
+
+按钮采用浅灰底，当前选中项为黑底白字，禁用项为淡灰色；输入框选中时使用深色边框。取消外扩光圈、阴影及切换动画，状态改变时完整重绘控件，避免小屏上高亮残缺。连接页直接显示 `Tab: next / Enter: select` 提示，退出按钮改为 `Exit`，清除本机密钥改为 `Reset key`，仍需二次确认。
+
+Tab / Shift+Tab 顺序切换，跳过锁定域名和不可用按钮，Enter 执行选中项。已有授权时选择 `Browse` 进入设备列表，Esc 返回，长按 Esc 退出。
+
+新增使用真实主题和局部绘制的键盘回归测试，检查焦点恢复、Tab 正反向循环、跳过禁用项、输入文字，以及绘制结果中完整且唯一的选中高亮。设备 CTest 4/4 通过；聊天界面探针也应用同一主题，历史、审批、问答、丢失回执及撤销回归通过。实机已确认在线恢复、返回配置页、Tab / Shift+Tab 高亮切换以及 Enter 进入列表后再次返回；通过 evdev 注入按键，不等同于逐个手按物理按键或 Fn 层验收。
+
 ## 本次如何从模板初始化
 
 这部分是初始化复盘，不是每台电脑都要重复的操作。
@@ -279,7 +289,7 @@ sudo cmake --install build/cp0-native --config Debug --prefix /usr
 在线后每 25 秒通过现有 WSS 发送 `controller.me.get`，收到有效的 `controller.connected` 响应才更新存活时间；连续 75 秒未确认则按原有退避策略重连。初次身份确认仍有 10 秒超时。应用层心跳不依赖 libcurl 自动处理的 Ping/Pong，正常空闲不会因此误触发重连。
 
 `Cancel` 在待授权时尝试取消申请，在线时仅断开本次连接；长按 Esc 退出。关闭进程或网络中断时未确认取消的申请会自动过期，不会生成永久凭据。
-`Clear local key` 需要再次确认，只移除本机副本，不撤销 Web 上的授权；旧授权需在 Web 手动删除。已有凭据时服务地址锁定，清除后才能更换地址，绝不向新地址发送旧凭据。
+`Reset key` 需要再次确认，只移除本机副本，不撤销 Web 上的授权；旧授权需在 Web 手动删除。已有凭据时服务地址锁定，清除后才能更换地址，绝不向新地址发送旧凭据。
 
 凭据和随机 installation ID 保存在 `$XDG_STATE_HOME/termrelay-cardputerzero/authorization.json`，未设置时为 `$HOME/.local/state/termrelay-cardputerzero/authorization.json`。目录 0700、文件 0600、原子替换；拒绝不安全权限或符号链接。该文件含长期密钥，不要复制到日志、截图、Git 或排障材料中。服务端仅保存摘要。
 
