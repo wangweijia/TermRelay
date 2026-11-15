@@ -108,8 +108,8 @@ int main() {
         lv_obj_add_state(reset, LV_STATE_DISABLED);
         for (auto* object : {origin, browse, cancel, reset, exit}) lv_group_add_obj(group, object);
         platform::bind_key_group(group);
-        press('r');
-        require(std::string(lv_textarea_get_text(origin)) == "r", "The initial server field must accept text");
+        for (auto letter : std::string("rfxzcFXZC")) press(letter);
+        require(std::string(lv_textarea_get_text(origin)) == "rfxzcFXZC", "The initial server field must accept text");
         press(LV_KEY_NEXT);
         require(lv_group_get_focused(group) == browse, "Tab must leave the text field");
         press(LV_KEY_NEXT);
@@ -122,10 +122,74 @@ int main() {
         platform::bind_key_group(group);
         require(lv_group_get_focused(group) == browse, "Focus must recover when an action becomes available");
 
+        // Spatial navigation follows the layout, skips unavailable actions and
+        // never activates them. Text editing remains literal, including arrows.
+        for (auto* object : {origin, browse, cancel, reset, exit}) lv_obj_remove_state(object, LV_STATE_DISABLED);
+        lv_group_remove_all_objs(group);
+        for (auto* object : {origin, browse, cancel, reset, exit}) lv_group_add_obj(group, object);
+        platform::bind_key_group(group);
+        lv_group_focus_obj(browse);
+        int clicks = 0;
+        lv_obj_add_event_cb(cancel, +[](lv_event_t* e) { ++*static_cast<int*>(lv_event_get_user_data(e)); }, LV_EVENT_CLICKED, &clicks);
+        press('c'); require(lv_group_get_focused(group) == cancel, "C must move right"); require_highlight(cancel);
+        press('Z'); require(lv_group_get_focused(group) == browse, "Z must move left");
+        press('f'); require(lv_group_get_focused(group) == origin, "F must move up into the server field");
+        press('x'); require(std::string(lv_textarea_get_text(origin)) == "rfxzcFXZCx", "X in a text field must remain text");
+        press(LV_KEY_LEFT); press('c');
+        require(std::string(lv_textarea_get_text(origin)) == "rfxzcFXZCcx", "Arrows must retain cursor editing inside text fields");
+        press(LV_KEY_NEXT);
+        lv_obj_add_state(cancel, LV_STATE_DISABLED);
+        press('C'); require(lv_group_get_focused(group) == reset, "Directions must skip disabled buttons");
+        require(clicks == 0, "Direction keys must never activate buttons");
+
+        // A scrollable list must traverse rows beyond the viewport before the
+        // footer, and checkboxes must only change when Enter is pressed.
+        lv_group_remove_all_objs(group); lv_obj_clean(root);
+        auto* list = lv_obj_create(root); lv_obj_set_pos(list, 0, 0); lv_obj_set_size(list, 320, 126);
+        lv_obj_set_style_pad_all(list, 0, 0); lv_obj_set_style_border_width(list, 0, 0);
+        auto* first = lv_checkbox_create(list); lv_obj_set_pos(first, 4, 0); lv_checkbox_set_text(first, "First");
+        auto* second = lv_button_create(list); lv_obj_set_pos(second, 4, 50); lv_obj_set_size(second, 290, 40);
+        auto* third = lv_button_create(list); lv_obj_set_pos(third, 4, 150); lv_obj_set_size(third, 290, 40);
+        auto* footer = lv_button_create(root); lv_obj_set_pos(footer, 4, 146); lv_obj_set_size(footer, 100, 24);
+        for (auto* object : {first, second, third, footer}) lv_group_add_obj(group, object);
+        platform::bind_key_group(group);
+        press('x'); require(lv_group_get_focused(group) == second, "X must move down the list");
+        require(!lv_obj_has_state(first, LV_STATE_CHECKED), "Navigation must not change a checkbox answer");
+        press(LV_KEY_DOWN); require(lv_group_get_focused(group) == third, "Down must reach an off-screen row before the footer");
+        require(lv_obj_get_scroll_y(list) > 0, "Off-screen focus must scroll into view");
+        press('x'); require(lv_group_get_focused(group) == footer, "Down from the final row must reach the footer");
+        lv_group_focus_obj(first); press(LV_KEY_ENTER);
+        require(lv_obj_has_state(first, LV_STATE_CHECKED), "Enter must still select a checkbox");
+        auto* details = lv_obj_create(root); lv_obj_set_pos(details, 0, 0); lv_obj_set_size(details, 320, 126);
+        auto* long_text = lv_label_create(details); lv_obj_set_size(long_text, 280, 500); lv_label_set_text(long_text, "Long details");
+        lv_group_remove_all_objs(group); lv_group_add_obj(group, details); lv_group_add_obj(group, footer);
+        platform::bind_key_group(group);
+        press('x'); require(lv_obj_get_scroll_y(details) > 0, "X must scroll focused long content");
+        press('f'); require(lv_obj_get_scroll_y(details) == 0, "F must scroll long content back up");
+        lv_obj_scroll_to_y(details, LV_COORD_MAX, LV_ANIM_OFF);
+        press('x'); require(lv_group_get_focused(group) == footer, "Down at the end of content must leave for the footer");
+
+        // A message taller than the viewport scrolls without losing focus.
+        lv_group_remove_all_objs(group); lv_obj_clean(root);
+        auto* transcript = lv_obj_create(root); lv_obj_set_pos(transcript, 0, 0); lv_obj_set_size(transcript, 320, 126);
+        lv_obj_set_style_pad_all(transcript, 0, 0);
+        auto* message = lv_button_create(transcript); lv_obj_set_pos(message, 0, 0); lv_obj_set_size(message, 290, 400);
+        auto* next_message = lv_button_create(transcript); lv_obj_set_pos(next_message, 0, 410); lv_obj_set_size(next_message, 290, 40);
+        lv_group_add_obj(group, message); lv_group_add_obj(group, next_message); platform::bind_key_group(group);
+        // Refreshing a group must not accumulate key handlers.
+        const auto handlers = lv_obj_get_event_count(message);
+        platform::bind_key_group(group);
+        require(lv_obj_get_event_count(message) == handlers, "Refreshing must not duplicate direction handlers");
+        lv_obj_scroll_to_y(transcript, 0, LV_ANIM_OFF);
+        press('x');
+        require(lv_group_get_focused(group) == message && lv_obj_get_scroll_y(transcript) > 0,
+                "Down must read a tall message before moving to the next one");
+        press('f'); require(lv_obj_get_scroll_y(transcript) == 0, "Up must read back toward the start of a tall message");
+
         lv_indev_delete(input);
         lv_group_delete(group); lv_group_delete(other);
         lv_display_delete(display); lv_deinit();
-        std::cout << "Keyboard focus, Tab, Shift+Tab and text entry checks passed\n";
+        std::cout << "Keyboard focus, directional navigation, scrolling, checkbox safety and text entry checks passed\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n'; return 1;

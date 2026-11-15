@@ -55,7 +55,7 @@ AuthorizationScreen::AuthorizationScreen(connection::Authorization& authorizatio
     lv_obj_set_style_text_font(message_, &lv_font_montserrat_12, 0);
     lv_label_set_long_mode(message_, LV_LABEL_LONG_WRAP);
     auto* help = lv_label_create(root_);
-    lv_label_set_text(help, "Tab: next   Enter: select");
+    lv_label_set_text(help, "F/X up/down  Z/C left/right  Enter: OK");
     lv_obj_set_pos(help, 8, 125);
     lv_obj_set_style_text_font(help, &lv_font_montserrat_10, 0);
     const auto button = [&](int position, int width, const char* text, lv_obj_t** output_label = nullptr) {

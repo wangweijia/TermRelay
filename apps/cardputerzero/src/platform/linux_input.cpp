@@ -1,5 +1,7 @@
 #include "linux_input.h"
 
+#include <algorithm>
+#include <limits>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -50,6 +52,81 @@ struct EvdevKeypad {
     bool router_pressed{false};
 };
 #endif
+
+// Handle directions before widget defaults: arrows on a checkbox must move
+// focus rather than silently changing an answer. Textareas retain native editing.
+void direction_key_cb(lv_event_t* event) {
+    auto* focused = static_cast<lv_obj_t*>(lv_event_get_current_target(event));
+    if (lv_obj_check_type(focused, &lv_textarea_class)) return;
+    auto key = lv_event_get_key(event);
+    switch (key) {
+        case 'f': case 'F': key = LV_KEY_UP; break;
+        case 'x': case 'X': key = LV_KEY_DOWN; break;
+        case 'z': case 'Z': key = LV_KEY_LEFT; break;
+        case 'c': case 'C': key = LV_KEY_RIGHT; break;
+        default: break;
+    }
+    const bool vertical = key == LV_KEY_UP || key == LV_KEY_DOWN;
+    const bool forward = key == LV_KEY_DOWN || key == LV_KEY_RIGHT;
+    if (!vertical && key != LV_KEY_LEFT && key != LV_KEY_RIGHT) return;
+    lv_event_stop_processing(event);
+    auto* group = static_cast<lv_group_t*>(lv_obj_get_group(focused));
+    if (!group) return;
+    lv_obj_update_layout(focused);
+    lv_area_t from;
+    lv_obj_get_coords(focused, &from);
+
+    // Read a focused content panel, or the clipped portion of a tall message,
+    // before moving on to the next control. Horizontal directions can leave it.
+    if (vertical) {
+        auto* scroller = focused;
+        auto* parent = lv_obj_get_parent(focused);
+        if (parent && lv_obj_get_height(focused) > lv_obj_get_content_height(parent)) scroller = parent;
+        lv_area_t viewport;
+        lv_obj_get_content_coords(scroller, &viewport);
+        const bool clipped = scroller == focused || (forward ? from.y2 > viewport.y2 : from.y1 < viewport.y1);
+        const auto remaining = forward ? lv_obj_get_scroll_bottom(scroller) : lv_obj_get_scroll_top(scroller);
+        if (clipped && lv_obj_has_flag(scroller, LV_OBJ_FLAG_SCROLLABLE) && remaining > 0) {
+            const auto step = std::max(16, lv_obj_get_content_height(scroller) / 3);
+            lv_obj_scroll_by(scroller, 0, forward ? -step : step, LV_ANIM_OFF);
+            return;
+        }
+    }
+    auto* best = static_cast<lv_obj_t*>(nullptr);
+    auto best_score = std::numeric_limits<int64_t>::max();
+    const auto center_x = (from.x1 + from.x2) / 2;
+    const auto center_y = (from.y1 + from.y2) / 2;
+    for (uint32_t i = 0; i < lv_group_get_obj_count(group); ++i) {
+        auto* candidate = lv_group_get_obj_by_index(group, i);
+        if (candidate == focused || lv_obj_has_state(candidate, LV_STATE_DISABLED)) continue;
+        bool hidden = false;
+        bool related = false;
+        for (auto* object = candidate; object; object = lv_obj_get_parent(object)) {
+            hidden |= lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN);
+            related |= object == focused;
+        }
+        for (auto* object = lv_obj_get_parent(focused); object; object = lv_obj_get_parent(object)) related |= object == candidate;
+        if (hidden || related) continue;
+        lv_area_t to;
+        lv_obj_get_coords(candidate, &to);
+        const auto dx = (to.x1 + to.x2) / 2 - center_x;
+        const auto dy = (to.y1 + to.y2) / 2 - center_y;
+        const auto primary = vertical ? dy : dx;
+        if (forward ? primary <= 0 : primary >= 0) continue;
+        // Left/right stays in the same row; up/down stays in the same column
+        // when possible. Off-screen list rows remain eligible and scroll into view.
+        const auto cross_gap = vertical ? std::max({0, to.x1 - from.x2, from.x1 - to.x2})
+                                        : std::max({0, to.y1 - from.y2, from.y1 - to.y2});
+        if (!vertical && cross_gap > 0) continue;
+        const int64_t score = (vertical && lv_obj_get_parent(candidate) != lv_obj_get_parent(focused) ? 1000000 : 0)
+                            + int64_t(cross_gap) * 10000 + std::abs(primary) * 100 + std::abs(vertical ? dx : dy);
+        if (score < best_score) { best = candidate; best_score = score; }
+    }
+    if (best) {
+        lv_group_focus_obj(best);
+        lv_obj_scroll_to_view_recursive(best, LV_ANIM_OFF);
+    }
+}
 
 size_t nav_key_to_index(uint32_t key) {
     if (nav_shortcut_mode) {
@@ -386,6 +463,15 @@ void bind_key_group(lv_group_t* group) {
              lv_indev_get_type(input) == LV_INDEV_TYPE_ENCODER) && lv_indev_get_group(input) != group) {
             lv_indev_set_group(input, group);
         }
+    }
+    for (uint32_t i = 0; i < lv_group_get_obj_count(group); ++i) {
+        auto* object = lv_group_get_obj_by_index(group, i);
+        bool attached = false;
+        for (uint32_t event = 0; event < lv_obj_get_event_count(object); ++event) {
+            attached |= lv_event_dsc_get_cb(lv_obj_get_event_dsc(object, event)) == direction_key_cb;
+        }
+        if (!attached) lv_obj_add_event_cb(object, direction_key_cb,
+            static_cast<lv_event_code_t>(LV_EVENT_KEY | LV_EVENT_PREPROCESS), nullptr);
     }
     // LVGL only auto-focuses when the first object is added. If that object is
     // disabled (e.g. a saved server address), a rebuilt group stays unfocused
