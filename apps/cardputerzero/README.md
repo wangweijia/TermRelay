@@ -301,6 +301,8 @@ Tab / Shift+Tab 顺序切换，跳过锁定域名和不可用按钮，Enter 执�
 
 授权连接后自动进入设备列表，使用 Tab / Shift+Tab 移动焦点、Enter 选择。选择设备进入会话列表，选择会话查看完整元数据；底部提供 `Back`、`Refresh`、`Next page`，Esc 逐层返回，长按 Esc 退出。返回连接页后通过 `Browse` 再次进入列表。会话信息可聚焦内容区并用方向键滚动。
 
+掌机隐藏状态为 `offline` 的设备；原始记录及授权保留，刷新列表时重新上线的设备会显示。连接页提示 `Online devices only`，不再把包含离线记录的授权总数显示成设备数量。过滤同时作用于显示列表和选中索引，避免隐藏条目后选择错设备；分页游标沿用完整服务端页，整页均离线时提示使用 `Next page` 继续查找，末页则显示 `No online devices.`。
+
 列表复用现有 WSS，新增 `controller.devices.list` / `controller.sessions.list` 查询和对应 `.listed` 响应；响应的 `relatedMessageId` 关联请求。连接身份中的 `capabilities` 明确声明列表支持，旧 Server 不声明时提示升级。信封携带掌机 installation ID；目标执行设备 ID 位于会话查询 payload，Server 校验 `sessions.read` 和设备授权。
 
 每页最多 20 条，按不可变 ID 升序，以最后一项 ID 为下一页游标；名称和状态更新不会改变分页顺序。翻页期间新出现且 ID 早于游标的会话需通过 `Refresh` 从首页查看，列表并非冻结快照。Server 在数据库中按设备过滤并排除软删除会话。当前没有上一页历史栈，`Refresh` 返回首页。

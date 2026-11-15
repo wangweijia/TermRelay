@@ -1,5 +1,6 @@
 #include "authorization_screen.h"
 #include "linux_input.h"
+#include <algorithm>
 #include <string>
 
 namespace app {
@@ -162,7 +163,7 @@ void AuthorizationScreen::refresh() {
     lv_label_set_text(forget_label_, confirm_forget_ ? "Confirm reset" : "Reset key");
     std::string message = snapshot.message;
     if (confirm_forget_) message = "Clear this local key only?\nWeb authorization stays active.";
-    else if (snapshot.state == State::Connected) message = "Permanent authorization\nDevices: " + std::to_string(snapshot.device_count);
+    else if (snapshot.state == State::Connected) message = "Permanent authorization\nOnline devices only";
     lv_label_set_text(message_, message.c_str());
     if (snapshot.state == State::Revoked || !snapshot.has_credential) {
         if (chat_ && chat_->visible()) chat_->close(true);
@@ -204,6 +205,14 @@ void AuthorizationScreen::back() {
 
 void AuthorizationScreen::render_browser() {
     displayed_ = authorization_.listing();
+    if (page_ == Page::Devices) {
+        // Filter the displayed snapshot as well as its rows so button indexes
+        // still resolve to the correct device after an offline entry is hidden.
+        auto& devices = displayed_.devices;
+        devices.erase(std::remove_if(devices.begin(), devices.end(), [](const auto& device) {
+            return device.status == "offline";
+        }), devices.end());
+    }
     rendered_revision_ = displayed_.revision; rendered_loading_ = displayed_.loading;
     rendered_online_ = authorization_.snapshot().state == connection::State::Connected;
     const std::string title = page_ == Page::Devices ? "Devices" : page_ == Page::Detail ? "Session info" : device_name_;
@@ -237,7 +246,8 @@ void AuthorizationScreen::render_browser() {
         : displayed_.device_id != device_id_ || displayed_.sessions.empty())) label(displayed_.error + "\nBack or Refresh to retry.");
     else if (page_ == Page::Devices) {
         for (const auto& device : displayed_.devices) row(device.name + "\n" + device.platform + " | " + device.status);
-        if (displayed_.devices.empty()) label("No authorized devices.");
+        if (displayed_.devices.empty()) label(displayed_.next_devices.empty()
+            ? "No online devices." : "No online devices on this page.\nNext page to continue.");
     } else if (displayed_.device_id == device_id_) {
         for (const auto& session : displayed_.sessions) row((session.name.empty() ? session.id : session.name) + "\n" + session.runtime_mode + " | " + session.status);
         if (displayed_.sessions.empty()) label("No sessions on this device.");
