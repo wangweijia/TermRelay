@@ -24,6 +24,7 @@
 - Mac process changes must preserve ownership-based cleanup, PTY fallback when structured startup fails, ordered session/event IDs, and bounded output buffering.
 - `apps/server` is NestJS with Fastify, native WebSockets, TypeORM, CommonJS output, and Node's built-in test runner. Tests are colocated as `*.spec.ts`.
 - `apps/web` is Vue 3 with Pinia and Vite. Its production output is served by the server; do not design it as an independently deployed service.
+- `apps/cardputerzero` device binaries are built on the development computer with `pnpm cardputerzero:build` (Debian 13 ARM64 Docker container; defaults to optimized `RelWithDebInfo`). Edit and compile locally, then transfer binaries to the device for runtime debugging. Keep its `cp0-container` cache separate from `cp0-native`; compiling on the handheld is a fallback, not the default workflow. See the app README for deployment checks and rollback.
 - Keep changes compatible with the strict TypeScript base configuration and existing package-local module settings.
 
 ## Verification

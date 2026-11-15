@@ -53,6 +53,7 @@ swift run --package-path apps/mac TermRelay
 
 - [服务端部署](docs/SERVER_RELEASE.md) · [公网访问配置](docs/CLOUDFLARE_ACCESS.md) · [Mac 公网配对](docs/CLOUDFLARE_MAC_CLIENT_AUTH.md)
 - [Linux 安装与使用](apps/linux/README.md)
+- [Cardputer Zero 开发与调试](apps/cardputerzero/README.md)：本机执行 `pnpm cardputerzero:build`，掌机运行验证。
 - [让其他程序调用电脑上的 AI 助手](docs/AI_SERVICE_SETUP.md)
 - [开发环境](docs/ENVIRONMENTS.md) · [项目架构](docs/ARCHITECTURE.md)
 

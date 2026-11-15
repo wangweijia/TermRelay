@@ -360,9 +360,9 @@ Apple Silicon Mac 可使用本机 Docker Desktop 的 Linux ARM64 容器编译设
 在仓库根目录运行：
 
 ```sh
-bash apps/cardputerzero/scripts/build-arm64-container.sh
+pnpm cardputerzero:build
 # 需要更完整的调试行为时：
-bash apps/cardputerzero/scripts/build-arm64-container.sh Debug
+pnpm cardputerzero:build Debug
 ```
 
 默认 `RelWithDebInfo` 使用 `-O2 -g1`，保留调试符号并启用优化；也支持 `Release`。默认并行 4 任务，可通过 `CARDPUTER_BUILD_JOBS=8` 调整。首次准备镜像需要联网安装编译依赖并下载 LVGL 9.5.0；之后编译和 CTest 在禁网容器内运行，镜像和 `build/cp0-container/` 缓存可复用。容器只挂载本应用目录，不需要掌机授权文件或 SSH 凭据。
