@@ -31,10 +31,12 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+                "CMAKE_CXX_FLAGS_DEBUG": "-O0 -g1",
                 "CMAKE_CONFIGURATION_TYPES": "Debug;Release",
                 "FETCHCONTENT_BASE_DIR": "${sourceDir}/.cache/cp0-deps",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install",
                 "USE_DESKTOP": "OFF",
+                "APP_KEY_INPUT_DEVICE": "/dev/input/by-path/platform-3f804000.i2c-event",
                 "APP_USE_DRM": "OFF"
             }
         },
@@ -133,11 +135,13 @@
         {
             "name": "cp0-native-dbg",
             "configurePreset": "cp0-native",
+            "jobs": 1,
             "configuration": "Debug"
         },
         {
             "name": "cp0-native-rel",
             "configurePreset": "cp0-native",
+            "jobs": 1,
             "configuration": "Release"
         },
         {

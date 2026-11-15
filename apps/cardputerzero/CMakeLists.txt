@@ -148,6 +148,11 @@ if(USE_DESKTOP)
 else()
     message(STATUS "Configuring CM0/aarch64 Linux build")
 
+    # Native device builds use the installed development libraries. Only cross
+    # builds need the downloaded BSP sysroot.
+    if(NOT CMAKE_CROSSCOMPILING AND NOT CM0_SDK_ROOT)
+        set(CM0_SDK_ROOT "/")
+    endif()
     if(NOT CM0_SDK_ROOT OR NOT EXISTS "${CM0_SDK_ROOT}")
         message(FATAL_ERROR
             "CM0 SDK sysroot not found or invalid.\n"

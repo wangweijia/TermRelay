@@ -19,9 +19,11 @@
 #include "toast.h"
 
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 
 #if USE_DESKTOP
 #include "desktop_simulator_frame.h"
@@ -274,6 +276,12 @@ int Application::run() {
     logger::Logger::set_tag("termrelay-cardputerzero");
 
     lv_init();
+#if !USE_DESKTOP
+    // LVGL's default delay spins. Yield the CPU between device frames.
+    lv_delay_set_cb([](uint32_t milliseconds) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+    });
+#endif
 
     AssetManager assets;
     for (const auto& root : assets.roots()) {

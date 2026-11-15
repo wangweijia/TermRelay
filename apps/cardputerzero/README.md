@@ -8,8 +8,7 @@
 已导入 LVGL 模板及其演示界面、桌面模拟器、Linux 显示/输入适配和构建预设。
 已实现授权连接首个闭环：原生域名输入、后台配对、Web 设置页选择执行设备后批准、永久凭据保存与恢复、共享公网 WSS 连接及在线撤销。
 本轮按用户授权同步修改 Server、Contracts 和 Web；Mac / Linux Agent 实现未改，不连接真实 AI Provider。
-已接入授权设备和会话摘要的只读分页浏览，可查看会话名称、状态、工具、工作区 ID 和完整会话 ID。
-尚未接入聊天历史、实时会话事件、对话发送、审批、问答或终端业务；这是阶段 2 的列表部分，不代表只读闭环整体完成。
+已接入授权设备和会话摘要的分页浏览，以及 ACP 聊天历史、实时消息、发送、审批和问答，详情见下文。PTY 会话目前仅显示元数据。
 
 2026-11-05 验证记录：macOS Apple Silicon Debug 构建通过，产物为 Mach-O arm64；
 安装暂存到本项目 `build/` 后，启动器、唯一命名图标、配置文件及默认不安装服务的检查通过。
@@ -189,6 +188,59 @@ DESTDIR="$PWD/build/darwin-arm64/stage" \
 - 路径或架构改变后，在本应用目录重新配置；需要重置缓存时使用 `cmake --fresh --preset darwin-arm64`，并按需重新传入本地 LVGL 路径及离线选项。
 - 清理缓存或更换预设不会改变源代码；不要通过重置 Git 工作区来解决 CMake 缓存问题。
 - 新电脑成功配置与链接，只说明宿主机目标可编译，不表示设备可运行或业务功能完成。
+
+## 在 Cardputer Zero 上原生编译
+
+设备使用 Debian 13 ARM64。原生构建使用系统开发库，无需交叉编译 BSP，也不需要 SDL 或桌面会话。
+将本应用目录和固定版本 LVGL 源码传到设备后，在设备的应用目录执行：
+
+```sh
+sudo apt-get install --no-install-recommends \
+	build-essential cmake ninja-build pkg-config libfreetype-dev libpng-dev \
+	libjpeg-dev libfmt-dev zlib1g-dev libcurl4-openssl-dev nlohmann-json3-dev
+cmake --preset cp0-native \
+	-DFETCHCONTENT_SOURCE_DIR_LVGL="$PWD/.cache/vendor/lvgl-9.5.0" \
+	-DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+	-DCMAKE_INSTALL_PREFIX=/usr
+cmake --build --preset cp0-native-dbg --parallel 1
+ctest --test-dir build/cp0-native -C Debug --output-on-failure
+sudo cmake --install build/cp0-native --config Debug --prefix /usr
+```
+
+这里的离线配置要求 `.cache/vendor/lvgl-9.5.0` 已存在，准备方法见上文。
+设备可用物理内存约 352 MiB，原生预设使用单任务和 `-O0 -g1`，保留行号 / 函数信息，减少完整调试符号带来的换页。
+需要检查局部变量时可覆盖 `CMAKE_CXX_FLAGS_DEBUG`，或使用宿主机交叉编译；不复制其他电脑的 CMakeCache。
+设备预设绑定 `/dev/input/by-path/platform-3f804000.i2c-event`，对应板载 `tca8418c` 键盘，
+避免自动扫描时把 HDMI / 红外输入设备也绑定进来。其他硬件可用 `-DAPP_KEY_INPUT_DEVICE=...` 覆盖。
+显示默认使用 `/dev/fb0`；实机为 320×170、16 位 RGB565，LVGL 根据帧缓冲格式设置输出。
+
+安装后从 M5 启动器选择 **TermRelay**，以普通用户运行；该用户需具有 `video`、`input` 组权限。
+不要与启动器同时手工启动另一个直接绘制帧缓冲的实例。默认不安装常驻服务，也不恢复或启动 Linux 桌面。
+这一步是设备调试安装，不代表 `.deb` 发布包或 AppStore 发布已验收。
+
+### 实机调试记录（2026-11-15）
+
+已在 Cardputer Zero 的 Debian 13 ARM64 上使用 GCC 14.2、CMake 3.31.6、系统 curl 8.14.1 和 LVGL 9.5.0 完成 Debug 构建及安装。
+修复了原生构建错误要求 BSP 的问题；设备预设固定板载键盘路径，并采用单任务 / 精简调试符号以减少编译换页。
+另修复设备版未设置 LVGL delay 回调而持续忙等的问题：改用线程休眠，保留桌面版 SDL 回调。
+修复前运行记录接近占满一个核心；修复后连接页 10 秒采样约为单核的 12.7%，RSS 约 17 MiB，进程无换页。
+这是 Debug 连接页的一次采样，不是在线聊天负载或续航测量。
+
+- 设备 CTest 3/3 通过，覆盖私有存储、输入映射、列表及聊天状态。
+- 服务端与设备联调测试 9/9 通过（含子测试），覆盖配对、凭据恢复、25 条会话分页、90 秒空闲心跳、心跳超时重连、历史与实时聊天、审批、问答、丢失回执及撤销清理。使用 SSH 转发的本机 HTTP / WS 测试服务与合成会话，没有启动真实 AI 或访问生产数据库。
+- 实际帧缓冲截图确认授权页与空域名错误提示正常；通过板载键盘的 evdev 接口注入文字、退格、Tab、Shift+Tab、Enter、短按 / 长按 Esc，确认输入、导航、校验和正常退出。未逐个手按物理按键，也未验收 Fn 层或中文输入法。
+- 普通用户 `weijia` 运行，凭据目录 / 文件权限为 0700 / 0600；Noto CJK 字体成功加载，中文内容排版仍需真实会话验收。
+- 通过临时用户 unit 调试，退出自动恢复 M5 启动器，没有安装常驻服务或启用 Linux 桌面。已安装 M5 的 TermRelay 入口。
+
+![Cardputer Zero 真实帧缓冲上的 TermRelay 连接页](../../docs/images/cardputerzero-authorization.png)
+
+随后已在用户公网服务完成证书校验、Web 授权和 WSS 身份确认，读取到 3 台授权设备及真实 ACP 会话元数据；
+关闭并重新启动应用后，使用本机永久凭据自动恢复在线，无需再次批准。
+只读探针确认线上服务声明 `devices.list` / `sessions.list`，没有声明 `conversation`。
+已核对 Jetson 实际运行的 `termrelay/server:0.1.68`：镜像没有掌机聊天模块，因此真实聊天历史 / 发送 / 审批 / 问答仍需更新服务端后验收。
+此次没有向真实 AI 发送消息，也没有处理真实审批或修改现有授权范围。
+更新准备检查：Server 测试 218 项中 212 通过、6 项按配置跳过，Web 生产构建通过，Release Runner 的服务端配置校验通过；尚未发布新服务端。
+本轮仅修改掌机应用和文档，未更改 Contracts / Server / Web；未重跑全仓库 `pnpm check`。
 
 ## 本次如何从模板初始化
 
