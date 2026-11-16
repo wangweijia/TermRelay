@@ -11,6 +11,7 @@ constexpr size_t kNavKeyCount = 5;
 constexpr uint32_t kSpecialKeyBase = 0x200000U;
 constexpr uint32_t kKeyPrintScreen = kSpecialKeyBase | 18U;
 constexpr uint32_t kKeyHelp = kSpecialKeyBase | 19U;
+constexpr uint32_t kKeyInputMode = kSpecialKeyBase | 20U;
 
 using KeyReleaseListener = void (*)(uint32_t key, const char* key_name, void* user_data);
 using GlobalKeyListener = bool (*)(uint32_t key,
@@ -29,6 +30,6 @@ void clear_key_release_listener(KeyReleaseListener listener, void* user_data);
 void set_global_key_listener(GlobalKeyListener listener, void* user_data);
 void clear_global_key_listener(GlobalKeyListener listener, void* user_data);
 const char* describe_key(uint32_t key);
-uint32_t map_keyboard_key(uint16_t code, bool shifted);
+uint32_t map_keyboard_key(uint16_t code, bool shifted, bool control = false);
 
 } // namespace platform

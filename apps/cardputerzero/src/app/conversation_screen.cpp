@@ -31,8 +31,17 @@ ConversationScreen::ConversationScreen(connection::Authorization& connection, st
     };
     left_ = footer(0, &left_label_); middle_ = footer(108, &middle_label_); right_ = footer(216, &right_label_);
     group_ = lv_group_create();
+    pinyin_ = std::make_unique<PinyinInput>(root_, [this] {
+        const bool compact = pinyin_->enabled() && (page_ == Page::Editor || page_ == Page::Questions);
+        lv_obj_set_height(content_, compact ? 78 : 126);
+        if (editor_) lv_obj_set_height(editor_, compact ? 68 : 112);
+        if (page_ == Page::Editor || page_ == Page::Questions) {
+            lv_label_set_text(middle_label_, pinyin_->enabled() ? "PY > EN" : "EN > PY");
+        }
+        update_editor_controls();
+    });
 }
-ConversationScreen::~ConversationScreen() { lv_group_delete(group_); lv_obj_delete(root_); }
+ConversationScreen::~ConversationScreen() { pinyin_.reset(); lv_group_delete(group_); lv_obj_delete(root_); }
 void ConversationScreen::open(const std::string& id) {
     connection_.open_conversation(id); snapshot_ = connection_.conversation();
     if (snapshot_.session_id != id) return;
@@ -44,13 +53,14 @@ void ConversationScreen::open(const std::string& id) {
 }
 void ConversationScreen::close(bool clear_drafts) {
     if (editor_) drafts_[snapshot_.session_id] = lv_textarea_get_text(editor_);
+    pinyin_->clear_inputs();
     connection_.close_conversation(); visible_ = false; editor_ = nullptr; fields_.clear(); selected_ = Json();
     if (clear_drafts) { drafts_.clear(); answer_drafts_.clear(); }
     back_handler_();
 }
 bool ConversationScreen::key(uint32_t key, bool long_pressed) {
     if (!visible_ || key != LV_KEY_ESC) return false;
-    if (!long_pressed) back(); return true;
+    if (!long_pressed) { if (pinyin_->cancel()) return true; back(); } return true;
 }
 void ConversationScreen::add_text(const std::string& value) {
     auto* label = lv_label_create(content_); lv_obj_set_width(label, 298); lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
@@ -81,7 +91,7 @@ void ConversationScreen::update_editor_controls() {
     const bool unknown = snapshot_.command_state == "unknown";
     const std::string draft = lv_textarea_get_text(editor_);
     disabled(right_, !online || !snapshot_.ready || !snapshot_.can_write || snapshot_.turn_active
-        || pending || unknown || draft.find_first_not_of(" \t\r\n") == std::string::npos);
+        || pending || unknown || pinyin_->composing() || draft.find_first_not_of(" \t\r\n") == std::string::npos);
     disabled(editor_, pending);
     lv_label_set_text(status_, !online ? "Offline (cache)" : pending ? "Sending..." : unknown ? "Result unknown"
         : !snapshot_.ready ? "Synchronizing" : !snapshot_.can_write ? "Read only" : snapshot_.turn_active ? "AI running" : "Ready to send");
@@ -89,6 +99,8 @@ void ConversationScreen::update_editor_controls() {
 }
 void ConversationScreen::render(bool latest) {
     if (editor_) drafts_[snapshot_.session_id] = lv_textarea_get_text(editor_);
+    pinyin_->clear_inputs();
+    lv_obj_set_height(content_, 126);
     editor_ = nullptr; fields_.clear(); rendered_revision_ = snapshot_.revision;
     rendered_online_ = connection_.snapshot().state == connection::State::Connected;
     auto* old_focus = lv_group_get_focused(group_);
@@ -114,11 +126,12 @@ void ConversationScreen::render(bool latest) {
         set_footer("Back", "", "");
     } else if (page_ == Page::Editor) {
         editor_ = lv_textarea_create(content_); lv_obj_set_size(editor_, 298, 112); lv_textarea_set_max_length(editor_, 4000);
-        lv_textarea_set_placeholder_text(editor_, "Message (Enter adds a line)"); lv_textarea_set_text(editor_, drafts_[snapshot_.session_id].c_str());
-        lv_group_add_obj(group_, editor_); set_footer("Back", "Status", "Send");
+        lv_textarea_set_placeholder_text(editor_, "Ctrl+Space: EN/PY\nEnter: new line"); lv_textarea_set_text(editor_, drafts_[snapshot_.session_id].c_str());
+        lv_group_add_obj(group_, editor_); set_footer("Back", pinyin_->enabled() ? "PY > EN" : "EN > PY", "Send");
         lv_obj_add_event_cb(editor_, +[](lv_event_t* event) {
             static_cast<ConversationScreen*>(lv_event_get_user_data(event))->update_editor_controls();
         }, LV_EVENT_VALUE_CHANGED, this);
+        pinyin_->attach(editor_);
         update_editor_controls();
     } else if (page_ == Page::Requests) {
         for (std::size_t i = 0; i < snapshot_.requests.size(); i++) {
@@ -173,10 +186,11 @@ void ConversationScreen::render(bool latest) {
                     lv_textarea_set_placeholder_text(input, options.empty() ? "Your answer" : "Other answer");
                     for (const auto& value : prior) if (value.is_string() && std::none_of(options.begin(), options.end(), [&](const Json& option) { return option.at("label") == value; })) lv_textarea_set_text(input, value.get_ref<const std::string&>().c_str());
                     fields_.push_back({id, "", input, true, multiple}); lv_group_add_obj(group_, input);
+                    pinyin_->attach(input);
                     lv_obj_add_event_cb(input, answer_changed, LV_EVENT_VALUE_CHANGED, this);
                 }
             }
-            set_footer("Back", "Status", "Submit");
+            set_footer("Back", pinyin_->enabled() ? "PY > EN" : "EN > PY", "Submit");
             disabled(right_, !request_current() || !snapshot_.ready || !rendered_online_ || snapshot_.command_state == "waiting" || snapshot_.command_state == "unknown");
         }
     } else {
@@ -314,7 +328,9 @@ void ConversationScreen::action(int id) {
             const auto& data = selected_.at("payload").at("data");
             submit("tool.approval.resolve", {{"approvalId", data.at("approvalId")}, {"turnId", data.at("turnId")}, {"decision", "deny"}});
         } else if (page_ == Page::Requests) connection_.conversation_read("requests");
-        else action(13);
+        else if (page_ == Page::Editor || page_ == Page::Questions) {
+            if (!pinyin_->toggle()) lv_label_set_text(status_, "PY unavailable");
+        } else action(13);
     } else if (id == -3) {
         if (page_ == Page::Transcript) { page_ = Page::Editor; if (drafts_.size() >= 8 && !drafts_.count(snapshot_.session_id)) drafts_.erase(drafts_.begin()); render(); }
         else if (page_ == Page::Editor && editor_) {

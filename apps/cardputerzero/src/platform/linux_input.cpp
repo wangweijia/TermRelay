@@ -44,6 +44,7 @@ constexpr uint32_t kLongPressMs = 700;
 struct EvdevKeypad {
     int fd{-1};
     unsigned shift_mask{0};
+    unsigned control_mask{0};
     std::array<uint32_t, KEY_MAX + 1> held_keys{};
     lv_indev_state_t state{LV_INDEV_STATE_RELEASED};
     uint32_t key{0};
@@ -299,7 +300,13 @@ void evdev_read_cb(lv_indev_t* indev, lv_indev_data_t* data) {
             else keypad->shift_mask &= ~mask;
             continue;
         }
-        const auto key = input.value ? map_keyboard_key(input.code, keypad->shift_mask != 0) : keypad->held_keys[input.code];
+        if (input.code == KEY_LEFTCTRL || input.code == KEY_RIGHTCTRL) {
+            const auto mask = input.code == KEY_LEFTCTRL ? 1u : 2u;
+            if (input.value) keypad->control_mask |= mask;
+            else keypad->control_mask &= ~mask;
+            continue;
+        }
+        const auto key = input.value ? map_keyboard_key(input.code, keypad->shift_mask != 0, keypad->control_mask != 0) : keypad->held_keys[input.code];
         keypad->held_keys[input.code] = input.value ? key : 0;
         if (!key) continue;
 
@@ -403,7 +410,8 @@ void discover_keypads(lv_display_t* display) {
 
 } // namespace
 
-uint32_t map_keyboard_key(uint16_t code, bool shifted) {
+uint32_t map_keyboard_key(uint16_t code, bool shifted, bool control) {
+    if (control && code == 57) return kKeyInputMode;
     if (code >= 2 && code <= 11) return static_cast<uint32_t>((shifted ? "!@#$%^&*()" : "1234567890")[code - 2]);
     const char* letter = nullptr;
     if (code >= 16 && code <= 25) letter = &"qwertyuiop"[code - 16];

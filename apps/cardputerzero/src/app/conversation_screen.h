@@ -1,5 +1,6 @@
 #pragma once
 #include "authorization.h"
+#include "pinyin_input.h"
 #include "lvgl.h"
 #include <functional>
 #include <map>
@@ -33,6 +34,7 @@ private:
     void submit(const std::string& type, const nlohmann::json& data, const std::string& review_token = "");
     static void clicked(lv_event_t* event);
     static void answer_changed(lv_event_t* event);
+    std::unique_ptr<PinyinInput> pinyin_;
     connection::Authorization& connection_;
     std::function<void()> back_handler_;
     lv_obj_t *root_, *heading_, *status_, *content_, *left_, *middle_, *right_, *editor_ = nullptr;

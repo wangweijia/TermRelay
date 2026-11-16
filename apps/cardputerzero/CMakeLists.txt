@@ -599,6 +599,7 @@ target_compile_definitions(${PROJECT_NAME}_core
 target_link_libraries(${PROJECT_NAME}_core
     PUBLIC
         termrelay_connection
+        ${CMAKE_DL_LIBS}
         lvgl
         logger
         ${PROJECT_NAME}_view
@@ -648,6 +649,9 @@ if(APPLE AND CURL_USE_STATIC_LIBS)
 endif()
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(pinyin_input_test tests/pinyin_input_test.cpp)
+    target_link_libraries(pinyin_input_test PRIVATE ${PROJECT_NAME}_core)
+    add_test(NAME pinyin-input COMMAND pinyin_input_test)
     add_executable(keyboard_navigation_test tests/keyboard_navigation_test.cpp)
     target_link_libraries(keyboard_navigation_test PRIVATE ${PROJECT_NAME}_view)
     add_test(NAME keyboard-navigation COMMAND keyboard_navigation_test)

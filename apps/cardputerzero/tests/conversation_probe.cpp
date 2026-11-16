@@ -80,6 +80,12 @@ int main(int argc, char** argv) {
 #ifdef TERMRELAY_HEADLESS_UI
         click("Write");
         if(!lv_obj_has_state(button("Send"),LV_STATE_DISABLED)) throw std::runtime_error("Empty draft enabled Send");
+        lv_textarea_set_text(input(),"prefix ");click("EN > PY");
+        for (uint32_t letter : std::string("nihao")) lv_obj_send_event(input(),LV_EVENT_KEY,&letter);
+        if(!lv_obj_has_state(button("Send"),LV_STATE_DISABLED))throw std::runtime_error("Unconfirmed pinyin enabled Send");
+        uint32_t space=' ';lv_obj_send_event(input(),LV_EVENT_KEY,&space);pump();
+        if(std::string(lv_textarea_get_text(input()))!="prefix 你好")throw std::runtime_error("Chinese phrase did not reach message editor");
+        click("PY > EN");
         lv_textarea_set_text(input(),"hello from native");click("Send");
         if(std::string(lv_textarea_get_text(input()))!="hello from native"||!lv_obj_has_state(button("Send"),LV_STATE_DISABLED))
             throw std::runtime_error("UI cleared the draft before confirmation or allowed duplicate submission");
